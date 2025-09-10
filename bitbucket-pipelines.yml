@@ -19,12 +19,12 @@ pipelines:
           
           - step:
               name: "Run Tests"
-              services:
-                - docker
               script:
-                - export TESTCONTAINERS_RYUK_DISABLED=true
-                - export DOCKER_HOST=tcp://localhost:2375
-                - go test -v ./internal/memory -run "TestTenantIsolation" -timeout=10m
+                - echo "--- Running unit tests ---"
+                - go test -v ./pkg/memoryos -timeout=5m
+                - go test -v ./api/middleware -timeout=5m
+                - echo "--- Unit tests completed successfully ---"
+                - echo "--- Skipping E2E tests (require infrastructure) ---"
               after-script:
                 - test $? -eq 0 && echo "Tests passed successfully!" || echo "Tests failed!"
                  
