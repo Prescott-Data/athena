@@ -1,0 +1,46 @@
+[
+  {
+    "collMod": "segments",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["segmentId", "userId", "chainId", "pageIds", "status", "createdAt", "updatedAt", "scope"],
+        "properties": {
+          "_id": { "bsonType": "objectId" },
+          "segmentId": { "bsonType": "string" },
+          "userId": { "bsonType": "string" },
+          "chainId": { "bsonType": "string" },
+          "pageIds": { "bsonType": "array", "items": { "bsonType": "objectId" } },
+          "topicSummary": { "bsonType": "string" },
+          "status": { "bsonType": "string", "enum": ["in_mtm", "archived"] },
+          "scope": { "bsonType": "string", "enum": ["individual", "team", "org", "global"] },
+          "createdAt": { "bsonType": "date" },
+          "updatedAt": { "bsonType": "date" }
+        }
+      }
+    }
+  },
+  {
+    "collMod": "dialogue_pages",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["userId", "chainId", "userMessage", "agentResponse", "status", "createdAt", "updatedAt"],
+        "properties": {
+          "_id": { "bsonType": "objectId" },
+          "userId": { "bsonType": "string" },
+          "chainId": { "bsonType": "string" },
+          "turnIndex": { "bsonType": "int" },
+          "userMessage": { "bsonType": "string" },
+          "agentResponse": { "bsonType": "string" },
+          "status": { "bsonType": "string", "enum": ["in_stm", "in_mtm", "archived"] },
+          "scope": { "bsonType": "string", "enum": ["individual", "team", "org", "global"] },
+          "metadata": { "bsonType": "object" },
+          "createdAt": { "bsonType": "date" },
+          "updatedAt": { "bsonType": "date" }
+        }
+      }
+    }
+  }
+]
+

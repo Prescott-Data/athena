@@ -1,0 +1,57 @@
+[
+  {
+    "create": "dialogue_pages"
+  },
+  {
+    "collMod": "dialogue_pages",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["userId", "chainId", "userMessage", "agentResponse", "status", "createdAt", "updatedAt"],
+        "properties": {
+          "_id": {
+            "bsonType": "objectId"
+          },
+          "userId": {
+            "bsonType": "string",
+            "description": "ID of the user who initiated the conversation"
+          },
+          "chainId": {
+            "bsonType": "string",
+            "description": "Unique identifier for the dialogue chain/topic"
+          },
+          "turnIndex": {
+            "bsonType": "int",
+            "minimum": 0,
+            "description": "Sequential index of this turn within the chain"
+          },
+          "userMessage": {
+            "bsonType": "string",
+            "description": "The user's message/question"
+          },
+          "agentResponse": {
+            "bsonType": "string", 
+            "description": "The agent's response"
+          },
+          "status": {
+            "bsonType": "string",
+            "enum": ["in_stm", "archived"],
+            "description": "Current status of the dialogue page"
+          },
+          "metadata": {
+            "bsonType": "object",
+            "description": "Additional metadata about the conversation turn"
+          },
+          "createdAt": {
+            "bsonType": "date",
+            "description": "When this dialogue page was created"
+          },
+          "updatedAt": {
+            "bsonType": "date", 
+            "description": "When this dialogue page was last updated"
+          }
+        }
+      }
+    }
+  }
+]

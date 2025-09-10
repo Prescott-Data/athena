@@ -1,0 +1,122 @@
+[
+  {
+    "drop": "conversations"
+  },
+  {
+    "drop": "messages"
+  },
+  {
+    "drop": "workspaces"
+  },
+  {
+    "drop": "channels"
+  },
+  {
+    "drop": "insights"
+  },
+  {
+    "drop": "recommendations"
+  },
+  {
+    "drop": "collaborators"
+  },
+  {
+    "drop": "documents"
+  },
+  {
+    "drop": "alerts"
+  },
+  {
+    "collMod": "briefs",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["title", "created_at", "data"],
+        "properties": {
+          "_id": {
+            "bsonType": "objectId"
+          },
+          "title": {
+            "bsonType": "string",
+            "description": "Title of the brief"
+          },
+          "created_at": {
+            "bsonType": "date",
+            "description": "Creation timestamp of the brief"
+          },
+          "data": {
+            "bsonType": "array",
+            "description": "Array of data items containing insights",
+            "items": {
+              "bsonType": "object",
+              "required": [
+                "summary_insight",
+                "insight",
+                "recommendation",
+                "more_details"
+              ],
+              "properties": {
+                "summary_insight": {
+                  "bsonType": "string",
+                  "description": "Brief summary of the insight"
+                },
+                "insight": {
+                  "bsonType": "string",
+                  "description": "Detailed insight information"
+                },
+                "recommendation": {
+                  "bsonType": "string",
+                  "description": "Recommendation based on the insight"
+                },
+                "more_details": {
+                  "bsonType": "string",
+                  "description": "Additional details about the insight"
+                },
+                "visualization": {
+                  "bsonType": "object",
+                  "description": "Visualization data with chart information",
+                  "required": ["title", "description", "properties"],
+                  "properties": {
+                    "title": {
+                      "bsonType": "string",
+                      "description": "Title of the visualization"
+                    },
+                    "description": {
+                      "bsonType": "string",
+                      "description": "Description of the visualization"
+                    },
+                    "properties": {
+                      "bsonType": "object",
+                      "description": "Chart properties",
+                      "required": ["chartType", "labels", "data"],
+                      "properties": {
+                        "chartType": {
+                          "bsonType": "string",
+                          "description": "Type of chart (e.g., Pie Chart, Histogram)"
+                        },
+                        "labels": {
+                          "bsonType": "array",
+                          "description": "Chart labels",
+                          "items": {
+                            "bsonType": "string"
+                          }
+                        },
+                        "data": {
+                          "bsonType": "array",
+                          "description": "Chart data values",
+                          "items": {
+                            "bsonType": "int"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+]

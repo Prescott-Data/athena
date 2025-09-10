@@ -1,0 +1,14 @@
+[
+    {
+      "drop": "chat_messages"
+    },
+    {
+      "drop": "feedback"
+    },
+    {
+      "drop": "collaborators"
+    },
+    {
+      "drop": "briefs"
+    }
+  ]

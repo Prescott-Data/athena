@@ -1,0 +1,180 @@
+[
+  {
+    "collMod": "briefs",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["title", "data", "metrics", "created_at"],
+        "properties": {
+          "_id": {
+            "bsonType": "objectId"
+          },
+          "title": {
+            "bsonType": "string",
+            "description": "Title of the brief"
+          },
+          "data": {
+            "bsonType": "array",
+            "description": "Array of data items containing insights",
+            "items": {
+              "bsonType": "object",
+              "required": ["summary_insight", "insight", "recommendations", "potential_impact", "recommendations_confidence", "more_details", "visualization"],
+              "properties": {
+                "summary_insight": {
+                  "bsonType": "string",
+                  "description": "Summary of the insight"
+                },
+                "insight": {
+                  "bsonType": "string",
+                  "description": "Detailed insight"
+                },
+                "recommendations": {
+                  "bsonType": "array",
+                  "items": {
+                    "bsonType": "object",
+                    "required": ["text"],
+                    "properties": {
+                      "text": {
+                        "bsonType": "string"
+                      }
+                    }
+                  }
+                },
+                "potential_impact": {
+                  "bsonType": "string",
+                  "description": "Potential impact of the insight"
+                },
+                "recommendations_confidence": {
+                  "bsonType": "double",
+                  "description": "Confidence level for recommendations"
+                },
+                "more_details": {
+                  "bsonType": "string",
+                  "description": "Additional details"
+                },
+                "visualization": {
+                  "bsonType": "object",
+                  "properties": {
+                    "title": {
+                      "bsonType": "string"
+                    },
+                    "description": {
+                      "bsonType": "string"
+                    },
+                    "properties": {
+                      "bsonType": "object",
+                      "properties": {
+                        "chartType": {
+                          "bsonType": "string"
+                        },
+                        "labels": {
+                          "bsonType": "array",
+                          "items": {
+                            "bsonType": "string"
+                          }
+                        },
+                        "data": {
+                          "bsonType": "array",
+                          "items": {
+                            "bsonType": "int"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "metrics": {
+            "bsonType": "array",
+            "description": "Array of metrics"
+          },
+          "pinned": {
+            "bsonType": "bool",
+            "description": "Whether the brief is pinned"
+          },
+          "created_at": {
+            "bsonType": "date",
+            "description": "When the brief was created"
+          },
+          "collaborators": {
+            "bsonType": "array",
+            "description": "Array of collaborators"
+          },
+          "feedback": {
+            "bsonType": "array",
+            "description": "Array of feedback"
+          },
+          "chat_messages": {
+            "bsonType": "array",
+            "description": "Array of chat messages"
+          }
+        }
+      }
+    }
+  },
+  {
+    "drop": "spotlights"
+  },
+  {
+    "collMod": "workspaces",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["name", "description", "members", "created_by", "created_at", "updated_at"],
+        "properties": {
+          "_id": {
+            "bsonType": "objectId"
+          },
+          "name": {
+            "bsonType": "string",
+            "description": "Name of the workspace"
+          },
+          "description": {
+            "bsonType": "string",
+            "description": "Description of the workspace"
+          },
+          "spotlighted": {
+            "bsonType": "bool",
+            "description": "Whether the workspace is spotlighted"
+          },
+          "members": {
+            "bsonType": "array",
+            "description": "Array of workspace members",
+            "items": {
+              "bsonType": "object",
+              "required": ["user_id", "name", "role"],
+              "properties": {
+                "user_id": {
+                  "bsonType": "string",
+                  "description": "User ID"
+                },
+                "name": {
+                  "bsonType": "string",
+                  "description": "User name"
+                },
+                "role": {
+                  "bsonType": "string",
+                  "description": "User role"
+                }
+              }
+            }
+          },
+          "created_by": {
+            "bsonType": "string",
+            "description": "ID of the user who created the workspace"
+          },
+          "created_at": {
+            "bsonType": "date",
+            "description": "When the workspace was created"
+          },
+          "updated_at": {
+            "bsonType": "date",
+            "description": "When the workspace was last updated"
+          }
+        }
+      }
+    }
+  }
+]

@@ -1,0 +1,63 @@
+[
+  {
+    "collMod": "briefs",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["title", "created_at", "data"],
+        "properties": {
+          "_id": {
+            "bsonType": "objectId"
+          },
+          "title": {
+            "bsonType": "string",
+            "description": "Title of the brief"
+          },
+          "created_at": {
+            "bsonType": "date",
+            "description": "Creation timestamp of the brief"
+          },
+          "feedback": {
+            "bsonType": "array",
+            "description": "Array of feedback for the brief",
+            "items": {
+              "bsonType": "object",
+              "required": [
+                "user_id",
+                "comment",
+                "rating",
+                "timestamp",
+                "brief_id"
+              ],
+              "properties": {
+                "_id": {
+                  "bsonType": "objectId"
+                },
+                "user_id": {
+                  "bsonType": "string",
+                  "description": "User who provided feedback"
+                },
+                "comment": {
+                  "bsonType": "string",
+                  "description": "Feedback comment"
+                },
+                "rating": {
+                  "bsonType": "int",
+                  "description": "Rating value"
+                },
+                "timestamp": {
+                  "bsonType": "date",
+                  "description": "When feedback was created"
+                },
+                "brief_id": {
+                  "bsonType": "string",
+                  "description": "ID of the brief"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+]

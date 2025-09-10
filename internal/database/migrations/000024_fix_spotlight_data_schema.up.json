@@ -1,0 +1,185 @@
+[
+  {
+    "collMod": "briefs",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["title", "data", "metrics", "created_at"],
+        "properties": {
+          "_id": {
+            "bsonType": "objectId"
+          },
+          "title": {
+            "bsonType": "string",
+            "description": "Title of the brief"
+          },
+          "data": {
+            "bsonType": "array",
+            "description": "Array of data items containing insights",
+            "items": {
+              "bsonType": "object",
+              "required": ["summary_insight", "insight", "recommendations", "potential_impact", "recommendations_confidence", "more_details", "visualization"],
+              "properties": {
+                "summary_insight": {
+                  "bsonType": "string",
+                  "description": "Summary of the insight"
+                },
+                "insight": {
+                  "bsonType": "string",
+                  "description": "Detailed insight"
+                },
+                "recommendations": {
+                  "bsonType": "array",
+                  "items": {
+                    "bsonType": "object",
+                    "required": ["text"],
+                    "properties": {
+                      "text": {
+                        "bsonType": "string"
+                      }
+                    }
+                  }
+                },
+                "potential_impact": {
+                  "bsonType": "string",
+                  "description": "Potential impact of the insight"
+                },
+                "recommendations_confidence": {
+                  "bsonType": "double",
+                  "description": "Confidence level for recommendations"
+                },
+                "more_details": {
+                  "bsonType": "string",
+                  "description": "Additional details"
+                },
+                "visualization": {
+                  "bsonType": "object",
+                  "properties": {
+                    "title": {
+                      "bsonType": "string"
+                    },
+                    "description": {
+                      "bsonType": "string"
+                    },
+                    "properties": {
+                      "bsonType": "object",
+                      "properties": {
+                        "chartType": {
+                          "bsonType": "string"
+                        },
+                        "labels": {
+                          "bsonType": "array",
+                          "items": {
+                            "bsonType": "string"
+                          }
+                        },
+                        "data": {
+                          "bsonType": "array",
+                          "items": {
+                            "bsonType": "int"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "highlighted": {
+                  "bsonType": "bool",
+                  "description": "Whether this data item should be highlighted"
+                }
+              }
+            }
+          },
+          "metrics": {
+            "bsonType": "array",
+            "description": "Array of metrics"
+          },
+          "pinned": {
+            "bsonType": "bool",
+            "description": "Whether the brief is pinned"
+          },
+          "channel_spotlight": {
+            "bsonType": "array",
+            "description": "Array of spotlight items for channels overview",
+            "items": {
+              "bsonType": "object",
+              "required": ["title", "description", "data"],
+              "properties": {
+                "title": {
+                  "bsonType": "string",
+                  "description": "Title of the spotlight item"
+                },
+                "description": {
+                  "bsonType": "string",
+                  "description": "Description of the spotlight item"
+                },
+                "data": {
+                  "bsonType": "array",
+                  "description": "Array of dynamic key-value objects",
+                  "items": {
+                    "bsonType": "object",
+                    "description": "Dynamic object with arbitrary key-value pairs"
+                  }
+                }
+              }
+            }
+          },
+          "created_at": {
+            "bsonType": "date",
+            "description": "When the brief was created"
+          },
+          "collaborators": {
+            "bsonType": "array",
+            "description": "Array of collaborators"
+          },
+          "feedback": {
+            "bsonType": "array",
+            "description": "Array of feedback"
+          },
+          "chat_messages": {
+            "bsonType": "array",
+            "description": "Array of chat messages"
+          }
+        }
+      }
+    }
+  },
+  {
+    "collMod": "spotlights",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["brief_id", "title", "description", "data", "created_at"],
+        "properties": {
+          "_id": {
+            "bsonType": "objectId"
+          },
+          "brief_id": {
+            "bsonType": "objectId",
+            "description": "ID of the brief this spotlight came from"
+          },
+          "title": {
+            "bsonType": "string",
+            "description": "Title of the spotlight"
+          },
+          "description": {
+            "bsonType": "string",
+            "description": "Description of the spotlight"
+          },
+          "data": {
+            "bsonType": "array",
+            "description": "Array of dynamic key-value objects",
+            "items": {
+              "bsonType": "object",
+              "description": "Dynamic object with arbitrary key-value pairs"
+            }
+          },
+          "created_at": {
+            "bsonType": "date",
+            "description": "When the spotlight was created"
+          }
+        }
+      }
+    }
+  }
+]

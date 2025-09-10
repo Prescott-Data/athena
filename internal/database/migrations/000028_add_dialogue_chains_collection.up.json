@@ -1,0 +1,53 @@
+[
+  {
+    "create": "dialogue_chains"
+  },
+  {
+    "collMod": "dialogue_chains",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["chainId", "userId", "topic", "startedAt", "lastTurnAt", "turnCount", "status"],
+        "properties": {
+          "_id": {
+            "bsonType": "objectId"
+          },
+          "chainId": {
+            "bsonType": "string",
+            "description": "Unique identifier for this dialogue chain"
+          },
+          "userId": {
+            "bsonType": "string",
+            "description": "ID of the user who owns this dialogue chain"
+          },
+          "topic": {
+            "bsonType": "string",
+            "description": "Topic or theme of this dialogue chain"
+          },
+          "summary": {
+            "bsonType": "string",
+            "description": "Brief summary of the dialogue chain"
+          },
+          "startedAt": {
+            "bsonType": "date",
+            "description": "When this dialogue chain was started"
+          },
+          "lastTurnAt": {
+            "bsonType": "date",
+            "description": "When the last turn was added to this chain"
+          },
+          "turnCount": {
+            "bsonType": "int",
+            "minimum": 1,
+            "description": "Number of turns in this dialogue chain"
+          },
+          "status": {
+            "bsonType": "string",
+            "enum": ["active", "archived"],
+            "description": "Current status of the dialogue chain"
+          }
+        }
+      }
+    }
+  }
+]

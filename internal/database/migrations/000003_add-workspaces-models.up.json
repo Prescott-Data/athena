@@ -1,0 +1,520 @@
+[
+  {
+    "create": "workspaces"
+  },
+  {
+    "createIndexes": "workspaces",
+    "indexes": [
+      {
+        "key": { "name": 1 },
+        "name": "workspace_name_index"
+      },
+      {
+        "key": { "created_by": 1 },
+        "name": "workspace_created_by_index"
+      },
+      {
+        "key": { "created_at": -1 },
+        "name": "workspace_created_at_index"
+      }
+    ]
+  },
+  {
+    "collMod": "workspaces",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["name", "created_by", "created_at"],
+        "properties": {
+          "_id": {
+            "bsonType": "objectId"
+          },
+          "name": {
+            "bsonType": "string",
+            "description": "Name of the workspace"
+          },
+          "description": {
+            "bsonType": "string",
+            "description": "Description of the workspace"
+          },
+          "channels": {
+            "bsonType": "array",
+            "description": "Array of channel IDs",
+            "items": {
+              "bsonType": "objectId"
+            }
+          },
+          "members": {
+            "bsonType": "array",
+            "description": "Array of member user IDs",
+            "items": {
+              "bsonType": "string"
+            }
+          },
+          "created_by": {
+            "bsonType": "string",
+            "description": "User ID of workspace creator"
+          },
+          "created_at": {
+            "bsonType": "date",
+            "description": "Creation timestamp"
+          },
+          "updated_at": {
+            "bsonType": "date",
+            "description": "Last update timestamp"
+          }
+        }
+      }
+    }
+  },
+  {
+    "create": "channels"
+  },
+  {
+    "createIndexes": "channels",
+    "indexes": [
+      {
+        "key": { "name": 1 },
+        "name": "channel_name_index"
+      },
+      {
+        "key": { "type": 1 },
+        "name": "channel_type_index"
+      },
+      {
+        "key": { "status": 1 },
+        "name": "channel_status_index"
+      },
+      {
+        "key": { "last_updated": -1 },
+        "name": "channel_last_updated_index"
+      }
+    ]
+  },
+  {
+    "collMod": "channels",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["name", "type", "status", "created_at"],
+        "properties": {
+          "_id": {
+            "bsonType": "objectId"
+          },
+          "name": {
+            "bsonType": "string",
+            "description": "Name of the channel"
+          },
+          "type": {
+            "bsonType": "string",
+            "description": "Type of channel (e.g., Underwriting and Risk, Claims and Payouts)"
+          },
+          "last_updated": {
+            "bsonType": "date",
+            "description": "Last update timestamp"
+          },
+          "status": {
+            "bsonType": "string",
+            "enum": ["active", "inactive"],
+            "description": "Status of the channel"
+          },
+          "created_at": {
+            "bsonType": "date",
+            "description": "Creation timestamp"
+          },
+          "updated_at": {
+            "bsonType": "date",
+            "description": "Last update timestamp"
+          }
+        }
+      }
+    }
+  },
+  {
+    "create": "insights"
+  },
+  {
+    "createIndexes": "insights",
+    "indexes": [
+      {
+        "key": { "channel_id": 1 },
+        "name": "insight_channel_id_index"
+      },
+      {
+        "key": { "priority": 1 },
+        "name": "insight_priority_index"
+      },
+      {
+        "key": { "status": 1 },
+        "name": "insight_status_index"
+      },
+      {
+        "key": { "created_at": -1 },
+        "name": "insight_created_at_index"
+      }
+    ]
+  },
+  {
+    "collMod": "insights",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["channel_id", "title", "priority", "status", "created_at"],
+        "properties": {
+          "_id": {
+            "bsonType": "objectId"
+          },
+          "channel_id": {
+            "bsonType": "objectId",
+            "description": "ID of the associated channel"
+          },
+          "title": {
+            "bsonType": "string",
+            "description": "Title of the insight"
+          },
+          "description": {
+            "bsonType": "string",
+            "description": "Description of the insight"
+          },
+          "impact": {
+            "bsonType": "string",
+            "description": "Impact description"
+          },
+          "priority": {
+            "bsonType": "string",
+            "enum": ["high", "medium", "low"],
+            "description": "Priority level"
+          },
+          "status": {
+            "bsonType": "string",
+            "enum": ["neutralized", "unresolved", "resolving"],
+            "description": "Current status"
+          },
+          "recommendations_count": {
+            "bsonType": "int",
+            "description": "Number of recommendations"
+          },
+          "collaborators_count": {
+            "bsonType": "int",
+            "description": "Number of collaborators"
+          },
+          "documents_count": {
+            "bsonType": "int",
+            "description": "Number of documents"
+          },
+          "created_at": {
+            "bsonType": "date",
+            "description": "Creation timestamp"
+          },
+          "updated_at": {
+            "bsonType": "date",
+            "description": "Last update timestamp"
+          }
+        }
+      }
+    }
+  },
+  {
+    "create": "recommendations"
+  },
+  {
+    "createIndexes": "recommendations",
+    "indexes": [
+      {
+        "key": { "insight_id": 1 },
+        "name": "recommendation_insight_id_index"
+      },
+      {
+        "key": { "priority": 1 },
+        "name": "recommendation_priority_index"
+      },
+      {
+        "key": { "status": 1 },
+        "name": "recommendation_status_index"
+      },
+      {
+        "key": { "created_by": 1 },
+        "name": "recommendation_created_by_index"
+      },
+      {
+        "key": { "created_at": -1 },
+        "name": "recommendation_created_at_index"
+      }
+    ]
+  },
+  {
+    "collMod": "recommendations",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": [
+          "insight_id",
+          "title",
+          "priority",
+          "status",
+          "created_by",
+          "created_at"
+        ],
+        "properties": {
+          "_id": {
+            "bsonType": "objectId"
+          },
+          "insight_id": {
+            "bsonType": "objectId",
+            "description": "ID of the associated insight"
+          },
+          "title": {
+            "bsonType": "string",
+            "description": "Title of the recommendation"
+          },
+          "description": {
+            "bsonType": "string",
+            "description": "Description of the recommendation"
+          },
+          "priority": {
+            "bsonType": "string",
+            "description": "Priority level"
+          },
+          "status": {
+            "bsonType": "string",
+            "enum": ["pending", "approved", "rejected", "implemented"],
+            "description": "Current status"
+          },
+          "created_by": {
+            "bsonType": "string",
+            "description": "User ID who created the recommendation"
+          },
+          "created_at": {
+            "bsonType": "date",
+            "description": "Creation timestamp"
+          },
+          "updated_at": {
+            "bsonType": "date",
+            "description": "Last update timestamp"
+          }
+        }
+      }
+    }
+  },
+  {
+    "create": "workspace_collaborators"
+  },
+  {
+    "createIndexes": "workspace_collaborators",
+    "indexes": [
+      {
+        "key": { "insight_id": 1 },
+        "name": "workspace_collaborator_insight_id_index"
+      },
+      {
+        "key": { "user_id": 1 },
+        "name": "workspace_collaborator_user_id_index"
+      },
+      {
+        "key": { "email": 1 },
+        "name": "workspace_collaborator_email_index"
+      },
+      {
+        "key": { "role": 1 },
+        "name": "workspace_collaborator_role_index"
+      }
+    ]
+  },
+  {
+    "collMod": "workspace_collaborators",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": [
+          "insight_id",
+          "user_id",
+          "name",
+          "email",
+          "role",
+          "joined_at"
+        ],
+        "properties": {
+          "_id": {
+            "bsonType": "objectId"
+          },
+          "insight_id": {
+            "bsonType": "objectId",
+            "description": "ID of the associated insight"
+          },
+          "user_id": {
+            "bsonType": "string",
+            "description": "User ID of the collaborator"
+          },
+          "name": {
+            "bsonType": "string",
+            "description": "Name of the collaborator"
+          },
+          "email": {
+            "bsonType": "string",
+            "description": "Email of the collaborator"
+          },
+          "role": {
+            "bsonType": "string",
+            "description": "Role of the collaborator"
+          },
+          "joined_at": {
+            "bsonType": "date",
+            "description": "When the collaborator joined"
+          }
+        }
+      }
+    }
+  },
+  {
+    "create": "workspace_documents"
+  },
+  {
+    "createIndexes": "workspace_documents",
+    "indexes": [
+      {
+        "key": { "insight_id": 1 },
+        "name": "workspace_document_insight_id_index"
+      },
+      {
+        "key": { "name": 1 },
+        "name": "workspace_document_name_index"
+      },
+      {
+        "key": { "type": 1 },
+        "name": "workspace_document_type_index"
+      },
+      {
+        "key": { "uploaded_by": 1 },
+        "name": "workspace_document_uploaded_by_index"
+      },
+      {
+        "key": { "created_at": -1 },
+        "name": "workspace_document_created_at_index"
+      }
+    ]
+  },
+  {
+    "collMod": "workspace_documents",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": [
+          "insight_id",
+          "name",
+          "type",
+          "url",
+          "uploaded_by",
+          "created_at"
+        ],
+        "properties": {
+          "_id": {
+            "bsonType": "objectId"
+          },
+          "insight_id": {
+            "bsonType": "objectId",
+            "description": "ID of the associated insight"
+          },
+          "name": {
+            "bsonType": "string",
+            "description": "Name of the document"
+          },
+          "type": {
+            "bsonType": "string",
+            "description": "Document type (e.g., pdf, doc, xlsx)"
+          },
+          "url": {
+            "bsonType": "string",
+            "description": "URL to the document"
+          },
+          "size": {
+            "bsonType": "long",
+            "description": "Size of the document in bytes"
+          },
+          "uploaded_by": {
+            "bsonType": "string",
+            "description": "User ID who uploaded the document"
+          },
+          "created_at": {
+            "bsonType": "date",
+            "description": "Upload timestamp"
+          }
+        }
+      }
+    }
+  },
+  {
+    "create": "alerts"
+  },
+  {
+    "createIndexes": "alerts",
+    "indexes": [
+      {
+        "key": { "channel_id": 1 },
+        "name": "alert_channel_id_index"
+      },
+      {
+        "key": { "severity": 1 },
+        "name": "alert_severity_index"
+      },
+      {
+        "key": { "status": 1 },
+        "name": "alert_status_index"
+      },
+      {
+        "key": { "triggered_at": -1 },
+        "name": "alert_triggered_at_index"
+      }
+    ]
+  },
+  {
+    "collMod": "alerts",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": [
+          "channel_id",
+          "title",
+          "message",
+          "severity",
+          "status",
+          "triggered_at"
+        ],
+        "properties": {
+          "_id": {
+            "bsonType": "objectId"
+          },
+          "channel_id": {
+            "bsonType": "objectId",
+            "description": "ID of the associated channel"
+          },
+          "title": {
+            "bsonType": "string",
+            "description": "Title of the alert"
+          },
+          "message": {
+            "bsonType": "string",
+            "description": "Alert message content"
+          },
+          "severity": {
+            "bsonType": "string",
+            "enum": ["critical", "warning", "info"],
+            "description": "Severity level"
+          },
+          "status": {
+            "bsonType": "string",
+            "enum": ["active", "resolved", "acknowledged"],
+            "description": "Current status"
+          },
+          "triggered_at": {
+            "bsonType": "date",
+            "description": "When the alert was triggered"
+          },
+          "resolved_at": {
+            "bsonType": "date",
+            "description": "When the alert was resolved"
+          }
+        }
+      }
+    }
+  }
+]

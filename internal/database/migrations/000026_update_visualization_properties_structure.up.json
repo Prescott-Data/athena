@@ -1,0 +1,280 @@
+[
+  {
+    "collMod": "briefs",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["title", "data", "metrics", "created_at"],
+        "properties": {
+          "_id": {
+            "bsonType": "objectId"
+          },
+          "title": {
+            "bsonType": "string",
+            "description": "Title of the brief"
+          },
+          "data": {
+            "bsonType": "array",
+            "description": "Array of data items containing insights",
+            "items": {
+              "bsonType": "object",
+              "required": ["summary_insight", "insight", "recommendations", "potential_impact", "recommendations_confidence", "more_details", "visualization"],
+              "properties": {
+                "summary_insight": {
+                  "bsonType": "string",
+                  "description": "Summary of the insight"
+                },
+                "insight": {
+                  "bsonType": "string",
+                  "description": "Detailed insight"
+                },
+                "recommendations": {
+                  "bsonType": "array",
+                  "items": {
+                    "bsonType": "object",
+                    "required": ["text"],
+                    "properties": {
+                      "text": {
+                        "bsonType": "string"
+                      }
+                    }
+                  }
+                },
+                "potential_impact": {
+                  "bsonType": "string",
+                  "description": "Potential impact of the insight"
+                },
+                "recommendations_confidence": {
+                  "bsonType": "double",
+                  "description": "Confidence level for recommendations"
+                },
+                "more_details": {
+                  "bsonType": "string",
+                  "description": "Additional details"
+                },
+                "visualization": {
+                  "bsonType": "object",
+                  "description": "Visualization object with flexible properties structure",
+                  "required": ["title", "description", "properties"],
+                  "properties": {
+                    "title": {
+                      "bsonType": "string",
+                      "description": "Title of the visualization"
+                    },
+                    "description": {
+                      "bsonType": "string",
+                      "description": "Description of the visualization"
+                    },
+                    "properties": {
+                      "description": "Flexible properties object that accepts any structure from the agent without predefined schema"
+                    }
+                  }
+                },
+                "highlighted": {
+                  "bsonType": "bool",
+                  "description": "Whether this data item should be highlighted"
+                }
+              }
+            }
+          },
+          "metrics": {
+            "bsonType": "array",
+            "description": "Array of metrics"
+          },
+          "pinned": {
+            "bsonType": "bool",
+            "description": "Whether the brief is pinned"
+          },
+          "channel_spotlight": {
+            "bsonType": "array",
+            "description": "Array of spotlight items for channels overview",
+            "items": {
+              "bsonType": "object",
+              "required": ["title", "description", "data"],
+              "properties": {
+                "title": {
+                  "bsonType": "string",
+                  "description": "Title of the spotlight item"
+                },
+                "description": {
+                  "bsonType": "string",
+                  "description": "Description of the spotlight item"
+                },
+                "data": {
+                  "bsonType": "array",
+                  "description": "Array of dynamic key-value objects",
+                  "items": {
+                    "bsonType": "object",
+                    "description": "Dynamic object with arbitrary key-value pairs"
+                  }
+                }
+              }
+            }
+          },
+          "created_at": {
+            "bsonType": "date",
+            "description": "When the brief was created"
+          },
+          "collaborators": {
+            "bsonType": "array",
+            "description": "Array of collaborators"
+          },
+          "feedback": {
+            "bsonType": "array",
+            "description": "Array of feedback"
+          },
+          "chat_messages": {
+            "bsonType": "array",
+            "description": "Array of chat messages"
+          }
+        }
+      }
+    }
+  },
+  {
+    "collMod": "insights",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["title", "description", "status", "created_at", "updated_at"],
+        "properties": {
+          "_id": {
+            "bsonType": "objectId"
+          },
+          "title": {
+            "bsonType": "string",
+            "description": "Title of the insight"
+          },
+          "description": {
+            "bsonType": "string",
+            "description": "Detailed description of the insight"
+          },
+          "status": {
+            "bsonType": "string",
+            "enum": ["unresolved", "resolving", "neutralized"],
+            "description": "Current status of the insight"
+          },
+          "created_at": {
+            "bsonType": "date",
+            "description": "When the insight was created"
+          },
+          "updated_at": {
+            "bsonType": "date",
+            "description": "When the insight was last updated"
+          },
+          "priority": {
+            "bsonType": "string",
+            "enum": ["low", "medium", "high", "critical"],
+            "description": "Priority level of the insight"
+          },
+          "impact": {
+            "bsonType": "string",
+            "description": "Impact description"
+          },
+          "potential_impact": {
+            "bsonType": "string",
+            "description": "Potential impact of the insight"
+          },
+          "documents_count": {
+            "bsonType": "int",
+            "description": "Number of documents associated with the insight"
+          },
+          "metrics": {
+            "bsonType": "object",
+            "description": "Metrics associated with the insight",
+            "properties": {
+              "title": {
+                "bsonType": "string",
+                "description": "Title of the metric"
+              },
+              "kpi_value": {
+                "bsonType": "string",
+                "description": "KPI value"
+              },
+              "insight_name": {
+                "bsonType": "string",
+                "description": "Name of the insight"
+              },
+              "insight_description": {
+                "bsonType": "string",
+                "description": "Description of the insight"
+              }
+            }
+          },
+          "visualization": {
+            "description": "Flexible visualization data that accepts any structure from the agent"
+          },
+          "recommendations": {
+            "bsonType": "array",
+            "description": "Array of recommendations for the insight",
+            "items": {
+              "bsonType": "object",
+              "required": ["text"],
+              "properties": {
+                "text": {
+                  "bsonType": "string",
+                  "description": "Recommendation text"
+                },
+                "rating": {
+                  "bsonType": "double",
+                  "description": "Rating of the recommendation"
+                },
+                "helpful_votes": {
+                  "bsonType": "int",
+                  "minimum": 0,
+                  "description": "Number of helpful votes received"
+                }
+              }
+            }
+          },
+          "recommendations_count": {
+            "bsonType": "int",
+            "minimum": 0,
+            "description": "Total number of recommendations"
+          },
+          "recommendations_confidence": {
+            "bsonType": "double",
+            "minimum": 0,
+            "maximum": 10,
+            "description": "Confidence level for recommendations"
+          },
+          "collaborators": {
+            "bsonType": "array",
+            "description": "Array of collaborators for the insight"
+          },
+          "collaborators_count": {
+            "bsonType": "int",
+            "minimum": 0,
+            "description": "Total number of collaborators"
+          },
+          "conversations": {
+            "bsonType": "array",
+            "description": "Array of conversation messages"
+          },
+          "workspace": {
+            "bsonType": "object",
+            "description": "Workspace reference",
+            "properties": {
+              "id": {
+                "bsonType": "string",
+                "description": "Workspace identifier"
+              },
+              "name": {
+                "bsonType": "string",
+                "description": "Workspace display name"
+              }
+            }
+          },
+          "highlighted": {
+            "bsonType": "bool",
+            "description": "Whether the insight is highlighted"
+          },
+          "feedback": {
+            "bsonType": "array",
+            "description": "Array of feedback entries"
+          }
+        }
+      }
+    }
+  }
+]

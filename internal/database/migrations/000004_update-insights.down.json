@@ -1,0 +1,62 @@
+[
+  {
+    "collMod": "insights",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["channel_id", "title", "priority", "status", "created_at"],
+        "properties": {
+          "_id": {
+            "bsonType": "objectId"
+          },
+          "channel_id": {
+            "bsonType": "objectId",
+            "description": "ID of the associated channel"
+          },
+          "title": {
+            "bsonType": "string",
+            "description": "Title of the insight"
+          },
+          "description": {
+            "bsonType": "string",
+            "description": "Description of the insight"
+          },
+          "impact": {
+            "bsonType": "string",
+            "description": "Impact description"
+          },
+          "priority": {
+            "bsonType": "string",
+            "enum": ["high", "medium", "low"],
+            "description": "Priority level"
+          },
+          "status": {
+            "bsonType": "string",
+            "enum": ["neutralized", "unresolved", "resolving"],
+            "description": "Current status"
+          },
+          "recommendations_count": {
+            "bsonType": "int",
+            "description": "Number of recommendations"
+          },
+          "collaborators_count": {
+            "bsonType": "int",
+            "description": "Number of collaborators"
+          },
+          "documents_count": {
+            "bsonType": "int",
+            "description": "Number of documents"
+          },
+          "created_at": {
+            "bsonType": "date",
+            "description": "Creation timestamp"
+          },
+          "updated_at": {
+            "bsonType": "date",
+            "description": "Last update timestamp"
+          }
+        }
+      }
+    }
+  }
+]

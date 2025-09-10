@@ -1,0 +1,151 @@
+[
+  {
+    "create": "briefs"
+  },
+  {
+    "createIndexes": "briefs",
+    "indexes": [
+      {
+        "key": { "title": 1 },
+        "name": "title_index"
+      },
+      {
+        "key": { "created_at": -1 },
+        "name": "created_at_index"
+      }
+    ]
+  },
+  {
+    "collMod": "briefs",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["title", "created_at"],
+        "properties": {
+          "title": { "bsonType": "string" },
+          "created_at": { "bsonType": "date" },
+          "data": {
+            "bsonType": "array",
+            "items": {
+              "bsonType": "object",
+              "properties": {
+                "summary_insight": { "bsonType": "string" },
+                "insight": { "bsonType": "string" },
+                "recommendation": { "bsonType": "string" },
+                "more_details": { "bsonType": "string" }
+              },
+              "required": ["summary_insight", "insight", "recommendation", "more_details"]
+            }
+          },
+          "metrics": {
+            "bsonType": "array",
+            "items": {
+              "bsonType": "object",
+              "properties": {
+                "title": { "bsonType": "string" },
+                "kpi_value": { "bsonType": "string" },
+                "insight_name": { "bsonType": "string" },
+                "insight_description": { "bsonType": "string" }
+              },
+              "required": ["title", "kpi_value", "insight_name", "insight_description"]
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "create": "collaborators"
+  },
+  {
+    "createIndexes": "collaborators",
+    "indexes": [
+      {
+        "key": { "user_id": 1 },
+        "name": "user_id_index"
+      },
+      {
+        "key": { "role": 1 },
+        "name": "role_index"
+      }
+    ]
+  },
+  {
+    "collMod": "collaborators",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["user_id", "name", "role"],
+        "properties": {
+          "user_id": { "bsonType": "string" },
+          "name": { "bsonType": "string" },
+          "role": { "bsonType": "string" }
+        }
+      }
+    }
+  },
+  {
+    "create": "feedback"
+  },
+  {
+    "createIndexes": "feedback",
+    "indexes": [
+      {
+        "key": { "user_id": 1 },
+        "name": "feedback_user_id_index"
+      },
+      {
+        "key": { "timestamp": -1 },
+        "name": "feedback_timestamp_index"
+      }
+    ]
+  },
+  {
+    "collMod": "feedback",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["user_id", "comment", "timestamp"],
+        "properties": {
+          "user_id": { "bsonType": "string" },
+          "comment": { "bsonType": "string" },
+          "timestamp": { "bsonType": "date" }
+        }
+      }
+    }
+  },
+  {
+    "create": "chat_messages"
+  },
+  {
+    "createIndexes": "chat_messages",
+    "indexes": [
+      {
+        "key": { "user_id": 1 },
+        "name": "chat_user_id_index"
+      },
+      {
+        "key": { "timestamp": -1 },
+        "name": "chat_timestamp_index"
+      },
+      {
+        "key": { "user_id": 1, "timestamp": -1 },
+        "name": "chat_user_time_index"
+      }
+    ]
+  },
+  {
+    "collMod": "chat_messages",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["user_id", "message", "timestamp"],
+        "properties": {
+          "user_id": { "bsonType": "string" },
+          "message": { "bsonType": "string" },
+          "timestamp": { "bsonType": "date" }
+        }
+      }
+    }
+  }
+]

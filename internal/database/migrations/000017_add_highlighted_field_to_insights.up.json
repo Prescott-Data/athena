@@ -1,0 +1,255 @@
+[
+  {
+    "collMod": "insights",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["title", "description", "status", "created_at", "updated_at"],
+        "properties": {
+          "_id": {
+            "bsonType": "objectId"
+          },
+          "title": {
+            "bsonType": "string",
+            "description": "Title of the insight"
+          },
+          "description": {
+            "bsonType": "string",
+            "description": "Detailed description of the insight"
+          },
+          "status": {
+            "bsonType": "string",
+            "enum": ["unresolved", "resolving", "neutralized"],
+            "description": "Current status of the insight"
+          },
+          "highlighted": {
+            "bsonType": "bool",
+            "description": "Whether the insight is highlighted for display in channels overview"
+          },
+          "created_at": {
+            "bsonType": "date",
+            "description": "When the insight was created"
+          },
+          "updated_at": {
+            "bsonType": "date",
+            "description": "When the insight was last updated"
+          },
+          "priority": {
+            "bsonType": "string",
+            "enum": ["low", "medium", "high", "critical"],
+            "description": "Priority level of the insight"
+          },
+          "impact": {
+            "bsonType": "string",
+            "description": "Impact description"
+          },
+          "potential_impact": {
+            "bsonType": "string",
+            "description": "Potential impact of the insight"
+          },
+          "documents_count": {
+            "bsonType": "int",
+            "description": "Number of documents associated with the insight"
+          },
+          "metrics": {
+            "bsonType": "object",
+            "description": "Metrics associated with the insight",
+            "properties": {
+              "title": {
+                "bsonType": "string",
+                "description": "Title of the metric"
+              },
+              "kpi_value": {
+                "bsonType": "string",
+                "description": "KPI value"
+              },
+              "insight_name": {
+                "bsonType": "string",
+                "description": "Name of the insight"
+              },
+              "insight_description": {
+                "bsonType": "string",
+                "description": "Description of the insight"
+              }
+            }
+          },
+          "visualization": {
+            "bsonType": "object",
+            "description": "Visualization data for the insight",
+            "properties": {
+              "title": {
+                "bsonType": "string",
+                "description": "Title of the visualization"
+              },
+              "description": {
+                "bsonType": "string",
+                "description": "Description of the visualization"
+              },
+              "properties": {
+                "bsonType": "object",
+                "description": "Visualization properties",
+                "properties": {
+                  "chartType": {
+                    "bsonType": "string",
+                    "description": "Type of chart (bar, line, pie, etc.)"
+                  },
+                  "labels": {
+                    "bsonType": "array",
+                    "items": {
+                      "bsonType": "string"
+                    },
+                    "description": "Chart labels"
+                  },
+                  "data": {
+                    "bsonType": "array",
+                    "items": {
+                      "bsonType": "int"
+                    },
+                    "description": "Chart data points"
+                  }
+                }
+              }
+            }
+          },
+          "recommendations": {
+            "bsonType": "array",
+            "description": "Array of recommendations for the insight",
+            "items": {
+              "bsonType": "object",
+              "required": ["text"],
+              "properties": {
+                "text": {
+                  "bsonType": "string",
+                  "description": "Recommendation text"
+                },
+                "rating": {
+                  "bsonType": "double",
+                  "description": "Rating of the recommendation"
+                },
+                "helpful_votes": {
+                  "bsonType": "int",
+                  "minimum": 0,
+                  "description": "Number of helpful votes received"
+                }
+              }
+            }
+          },
+          "recommendations_count": {
+            "bsonType": "int",
+            "minimum": 0,
+            "description": "Total number of recommendations"
+          },
+          "recommendations_confidence": {
+            "bsonType": "double",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Confidence level for recommendations"
+          },
+          "collaborators": {
+            "bsonType": "array",
+            "description": "Array of collaborators for the insight",
+            "items": {
+              "bsonType": "object",
+              "required": ["id", "name", "role"],
+              "properties": {
+                "id": {
+                  "bsonType": "string",
+                  "description": "Unique user identifier"
+                },
+                "name": {
+                  "bsonType": "string",
+                  "description": "User's full name"
+                },
+                "role": {
+                  "bsonType": "string",
+                  "description": "User's job title or role"
+                },
+                "avatar_url": {
+                  "bsonType": "string",
+                  "description": "URL to user's avatar image"
+                },
+                "latest_comment": {
+                  "bsonType": "string",
+                  "description": "Most recent comment from this user"
+                },
+                "attachments": {
+                  "bsonType": "array",
+                  "items": {
+                    "bsonType": "string"
+                  },
+                  "description": "List of documents shared by this collaborator"
+                }
+              }
+            }
+          },
+          "collaborators_count": {
+            "bsonType": "int",
+            "minimum": 0,
+            "description": "Total number of collaborators"
+          },
+          "conversations": {
+            "bsonType": "array",
+            "description": "Array of conversation messages",
+            "items": {
+              "bsonType": "object",
+              "required": ["id", "user", "message", "timestamp"],
+              "properties": {
+                "id": {
+                  "bsonType": "string",
+                  "description": "Unique message identifier"
+                },
+                "user": {
+                  "bsonType": "object",
+                  "required": ["id", "name"],
+                  "properties": {
+                    "id": {
+                      "bsonType": "string"
+                    },
+                    "name": {
+                      "bsonType": "string"
+                    },
+                    "avatar_url": {
+                      "bsonType": "string"
+                    },
+                    "role": {
+                      "bsonType": "string"
+                    }
+                  }
+                },
+                "message": {
+                  "bsonType": "string",
+                  "description": "Message content"
+                },
+                "timestamp": {
+                  "bsonType": "date",
+                  "description": "When the message was sent"
+                },
+                "attachments": {
+                  "bsonType": "array",
+                  "items": {
+                    "bsonType": "string"
+                  },
+                  "description": "List of attached documents"
+                }
+              }
+            }
+          },
+          "workspace": {
+            "bsonType": "object",
+            "description": "Workspace reference",
+            "properties": {
+              "id": {
+                "bsonType": "string",
+                "description": "Workspace identifier"
+              },
+              "name": {
+                "bsonType": "string",
+                "description": "Workspace display name"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+]

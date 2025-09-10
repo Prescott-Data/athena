@@ -1,0 +1,51 @@
+[
+  {
+    "create": "feedback"
+  },
+  {
+    "createIndexes": "feedback",
+    "indexes": [
+      {
+        "key": { "brief_id": 1 },
+        "name": "feedback_brief_id_index"
+      },
+      {
+        "key": { "user.user_id": 1 },
+        "name": "feedback_user_id_index"
+      },
+      {
+        "key": { "created_at": -1 },
+        "name": "feedback_created_at_index"
+      },
+      {
+        "key": { "brief_id": 1, "created_at": -1 },
+        "name": "feedback_brief_time_index"
+      }
+    ]
+  },
+  {
+    "collMod": "feedback",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["brief_id", "created_at", "updated_at", "user", "comment"],
+        "properties": {
+          "_id": { "bsonType": "objectId" },
+          "brief_id": { "bsonType": "string" },
+          "created_at": { "bsonType": "date" },
+          "updated_at": { "bsonType": "date" },
+          "user": {
+            "bsonType": "object",
+            "required": ["user_id", "name", "role"],
+            "properties": {
+              "user_id": { "bsonType": "string" },
+              "name": { "bsonType": "string" },
+              "role": { "bsonType": "string" }
+            }
+          },
+          "comment": { "bsonType": "string" }
+        }
+      }
+    }
+  }
+]

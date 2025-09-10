@@ -1,0 +1,243 @@
+[
+  {
+    "collMod": "insights",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["title", "description", "status", "created_at", "updated_at"],
+        "properties": {
+          "_id": {
+            "bsonType": "objectId"
+          },
+          "title": {
+            "bsonType": "string",
+            "description": "Title of the insight"
+          },
+          "description": {
+            "bsonType": "string",
+            "description": "Description of the insight"
+          },
+          "channel": {
+            "bsonType": "object",
+            "description": "Channel reference object",
+            "properties": {
+              "id": {
+                "bsonType": "string",
+                "description": "Channel ID as string"
+              },
+              "name": {
+                "bsonType": "string",
+                "description": "Channel name"
+              }
+            }
+          },
+          "status": {
+            "bsonType": "string",
+            "enum": ["unresolved", "resolving", "neutralized"],
+            "description": "Current status"
+          },
+          "created_at": {
+            "bsonType": "date",
+            "description": "Creation timestamp"
+          },
+          "updated_at": {
+            "bsonType": "date",
+            "description": "Last update timestamp"
+          },
+          "metrics": {
+            "bsonType": "object",
+            "description": "Flexible chart data structure",
+            "properties": {
+              "chart_type": {
+                "bsonType": "string",
+                "enum": ["line", "bar", "pie", "scatter", "area", "histogram", "heatmap", "gauge", "funnel", "treemap"],
+                "description": "Type of chart visualization"
+              },
+              "title": {
+                "bsonType": "string",
+                "description": "Chart title"
+              },
+              "datasets": {
+                "bsonType": "array",
+                "description": "Array of datasets for multi-series charts",
+                "items": {
+                  "bsonType": "object",
+                  "required": ["name", "data"],
+                  "properties": {
+                    "name": {
+                      "bsonType": "string",
+                      "description": "Dataset label/name"
+                    },
+                    "data": {
+                      "bsonType": "array",
+                      "description": "Data points for this dataset"
+                    },
+                    "color": {
+                      "bsonType": "string",
+                      "description": "Dataset color"
+                    },
+                    "type": {
+                      "bsonType": "string",
+                      "description": "Override chart type for this dataset"
+                    }
+                  }
+                }
+              },
+              "axes": {
+                "bsonType": "object",
+                "description": "Axis configuration"
+              },
+              "aggregation": {
+                "bsonType": "object",
+                "description": "Data aggregation settings"
+              },
+              "filters": {
+                "bsonType": "object",
+                "description": "Applied filters"
+              }
+            },
+            "required": ["chart_type", "datasets"]
+          },
+          "recommendations": {
+            "bsonType": "array",
+            "description": "Array of recommendations",
+            "items": {
+              "bsonType": "object",
+              "required": ["text"],
+              "properties": {
+                "text": {
+                  "bsonType": "string",
+                  "description": "Recommendation description"
+                },
+                "rating": {
+                  "bsonType": "double",
+                  "description": "Rating of the recommendation"
+                },
+                "helpful_votes": {
+                  "bsonType": "int",
+                  "minimum": 0,
+                  "description": "Number of helpful votes received"
+                }
+              }
+            }
+          },
+          "recommendations_count": {
+            "bsonType": "int",
+            "minimum": 0,
+            "description": "Total number of recommendations"
+          },
+          "collaborators": {
+            "bsonType": "array",
+            "description": "Array of collaborators",
+            "items": {
+              "bsonType": "object",
+              "required": ["id", "name", "role"],
+              "properties": {
+                "id": {
+                  "bsonType": "string",
+                  "description": "Unique user identifier"
+                },
+                "name": {
+                  "bsonType": "string",
+                  "description": "User's full name"
+                },
+                "role": {
+                  "bsonType": "string",
+                  "description": "User's job title or role"
+                },
+                "avatar_url": {
+                  "bsonType": "string",
+                  "description": "URL to user's avatar image"
+                },
+                "latest_comment": {
+                  "bsonType": "string",
+                  "description": "Most recent comment from this user"
+                },
+                "attachments": {
+                  "bsonType": "array",
+                  "description": "List of documents shared by this collaborator",
+                  "items": {
+                    "bsonType": "string"
+                  }
+                }
+              }
+            }
+          },
+          "collaborators_count": {
+            "bsonType": "int",
+            "minimum": 0,
+            "description": "Total number of collaborators"
+          },
+          "conversations": {
+            "bsonType": "array",
+            "description": "Array of conversation messages",
+            "items": {
+              "bsonType": "object",
+              "required": ["id", "user", "message", "timestamp"],
+              "properties": {
+                "id": {
+                  "bsonType": "string",
+                  "description": "Unique message identifier"
+                },
+                "user": {
+                  "bsonType": "object",
+                  "required": ["id", "name"],
+                  "properties": {
+                    "id": {
+                      "bsonType": "string"
+                    },
+                    "name": {
+                      "bsonType": "string"
+                    },
+                    "avatar_url": {
+                      "bsonType": "string"
+                    },
+                    "role": {
+                      "bsonType": "string"
+                    }
+                  }
+                },
+                "message": {
+                  "bsonType": "string",
+                  "description": "Message content"
+                },
+                "timestamp": {
+                  "bsonType": "date",
+                  "description": "When the message was sent"
+                },
+                "attachments": {
+                  "bsonType": "array",
+                  "description": "List of attached documents",
+                  "items": {
+                    "bsonType": "string"
+                  }
+                }
+              }
+            }
+          },
+          "potential_impact": {
+            "bsonType": "string",
+            "description": "Potential impact of the insight on the organization"
+          },
+          "channel_id": {
+            "bsonType": "objectId",
+            "description": "Legacy: ID of the associated channel"
+          },
+          "impact": {
+            "bsonType": "string",
+            "description": "Legacy: Impact description"
+          },
+          "priority": {
+            "bsonType": "string",
+            "enum": ["high", "medium", "low"],
+            "description": "Legacy: Priority level"
+          },
+          "documents_count": {
+            "bsonType": "int",
+            "description": "Legacy: Number of documents"
+          }
+        }
+      }
+    }
+  }
+]

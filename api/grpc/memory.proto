@@ -1,0 +1,250 @@
+syntax = "proto3";
+
+package memory.v1;
+
+option go_package = "github.com/dromos-org/memory-os/api/grpc/gen";
+
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+
+// Memory Operating System Service
+service MemoryService {
+  // Session Management
+  rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/sessions"
+      body: "*"
+    };
+  }
+  
+  rpc GetSession(GetSessionRequest) returns (GetSessionResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/sessions/{session_id}"
+    };
+  }
+  
+  rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse) {
+    option (google.api.http) = {
+      delete: "/api/v1/sessions/{session_id}"
+    };
+  }
+
+  // Memory Operations
+  rpc StoreInteraction(StoreInteractionRequest) returns (StoreInteractionResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/sessions/{session_id}/interactions"
+      body: "*"
+    };
+  }
+  
+  rpc GetContext(GetContextRequest) returns (GetContextResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/sessions/{session_id}/context"
+    };
+  }
+  
+  rpc SearchMemory(SearchMemoryRequest) returns (SearchMemoryResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/sessions/{session_id}/context/search"
+      body: "*"
+    };
+  }
+
+  // Analysis & Intelligence
+  rpc AnalyzeTopics(AnalyzeTopicsRequest) returns (AnalyzeTopicsResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/sessions/{session_id}/analysis/topics"
+    };
+  }
+  
+  rpc GetHeatMetrics(GetHeatMetricsRequest) returns (GetHeatMetricsResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/sessions/{session_id}/analysis/heat"
+    };
+  }
+  
+  rpc GetSegments(GetSegmentsRequest) returns (GetSegmentsResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/sessions/{session_id}/segments"
+    };
+  }
+
+  // Health & Operations
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/health"
+    };
+  }
+}
+
+// Request/Response Messages
+
+message CreateSessionRequest {
+  string user_id = 1;
+  map<string, string> metadata = 2;
+}
+
+message CreateSessionResponse {
+  string session_id = 1;
+  google.protobuf.Timestamp created_at = 2;
+}
+
+message GetSessionRequest {
+  string session_id = 1;
+}
+
+message GetSessionResponse {
+  Session session = 1;
+}
+
+message DeleteSessionRequest {
+  string session_id = 1;
+}
+
+message DeleteSessionResponse {
+  bool success = 1;
+}
+
+message StoreInteractionRequest {
+  string session_id = 1;
+  string user_message = 2;
+  string agent_response = 3;
+  map<string, string> metadata = 4;
+  google.protobuf.Timestamp timestamp = 5;
+}
+
+message StoreInteractionResponse {
+  bool success = 1;
+  string interaction_id = 2;
+}
+
+message GetContextRequest {
+  string session_id = 1;
+  int32 limit = 2;
+  bool include_segments = 3;
+}
+
+message GetContextResponse {
+  repeated ConversationTurn recent_turns = 1;
+  repeated DialoguePage relevant_pages = 2;
+  repeated Segment segments = 3;
+  UserPersona user_persona = 4;
+}
+
+message SearchMemoryRequest {
+  string session_id = 1;
+  string query = 2;
+  int32 limit = 3;
+  double similarity_threshold = 4;
+}
+
+message SearchMemoryResponse {
+  repeated SearchResult results = 1;
+}
+
+message AnalyzeTopicsRequest {
+  string session_id = 1;
+}
+
+message AnalyzeTopicsResponse {
+  repeated TopicSummary topics = 1;
+}
+
+message GetHeatMetricsRequest {
+  string session_id = 1;
+}
+
+message GetHeatMetricsResponse {
+  HeatMetrics heat_metrics = 1;
+}
+
+message GetSegmentsRequest {
+  string session_id = 1;
+  int32 limit = 2;
+}
+
+message GetSegmentsResponse {
+  repeated Segment segments = 1;
+}
+
+message HealthCheckRequest {
+}
+
+message HealthCheckResponse {
+  string status = 1;
+  map<string, string> dependencies = 2;
+  google.protobuf.Timestamp timestamp = 3;
+}
+
+// Data Models
+
+message Session {
+  string session_id = 1;
+  string user_id = 2;
+  google.protobuf.Timestamp created_at = 3;
+  google.protobuf.Timestamp updated_at = 4;
+  map<string, string> metadata = 5;
+}
+
+message ConversationTurn {
+  string user_message = 1;
+  string agent_response = 2;
+  google.protobuf.Timestamp timestamp = 3;
+}
+
+message DialoguePage {
+  string id = 1;
+  string session_id = 2;
+  string user_message = 3;
+  string agent_response = 4;
+  google.protobuf.Timestamp timestamp = 5;
+  repeated double embedding = 6;
+  map<string, string> metadata = 7;
+}
+
+message Segment {
+  string id = 1;
+  string session_id = 2;
+  string content = 3;
+  repeated string topics = 4;
+  HeatFactors heat_factors = 5;
+  double quality_score = 6;
+  google.protobuf.Timestamp created_at = 7;
+}
+
+message HeatFactors {
+  double access_frequency = 1;
+  double interaction_depth = 2;
+  double recency_score = 3;
+  double user_engagement = 4;
+  double topic_importance = 5;
+}
+
+message UserPersona {
+  string user_id = 1;
+  map<string, double> personality_traits = 2;
+  repeated string interests = 3;
+  map<string, string> preferences = 4;
+}
+
+message TopicSummary {
+  string topic = 1;
+  double confidence = 2;
+  int32 frequency = 3;
+  google.protobuf.Timestamp last_mentioned = 4;
+}
+
+message HeatMetrics {
+  double overall_heat = 1;
+  HeatFactors breakdown = 2;
+  int32 total_interactions = 3;
+  google.protobuf.Timestamp last_activity = 4;
+}
+
+message SearchResult {
+  string content = 1;
+  double similarity_score = 2;
+  string source_type = 3; // "dialogue_page", "segment", etc.
+  string source_id = 4;
+  google.protobuf.Timestamp timestamp = 5;
+}

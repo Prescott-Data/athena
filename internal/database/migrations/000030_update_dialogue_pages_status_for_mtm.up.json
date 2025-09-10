@@ -1,0 +1,24 @@
+[
+  {
+    "collMod": "dialogue_pages",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["userId", "chainId", "userMessage", "agentResponse", "status", "createdAt", "updatedAt"],
+        "properties": {
+          "_id": { "bsonType": "objectId" },
+          "userId": { "bsonType": "string" },
+          "chainId": { "bsonType": "string" },
+          "turnIndex": { "bsonType": "int", "minimum": 0 },
+          "userMessage": { "bsonType": "string" },
+          "agentResponse": { "bsonType": "string" },
+          "status": { "bsonType": "string", "enum": ["in_stm", "in_mtm", "archived"] },
+          "metadata": { "bsonType": "object" },
+          "createdAt": { "bsonType": "date" },
+          "updatedAt": { "bsonType": "date" }
+        }
+      }
+    }
+  }
+]
+

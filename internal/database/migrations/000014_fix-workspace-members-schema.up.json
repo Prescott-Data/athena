@@ -1,0 +1,58 @@
+[
+  {
+    "collMod": "workspaces",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["name", "created_by", "created_at"],
+        "properties": {
+          "_id": {
+            "bsonType": "objectId"
+          },
+          "name": {
+            "bsonType": "string",
+            "description": "Name of the workspace"
+          },
+          "description": {
+            "bsonType": "string",
+            "description": "Description of the workspace"
+          },
+          "members": {
+            "bsonType": "array",
+            "description": "Array of member objects",
+            "items": {
+              "bsonType": "object",
+              "required": ["user_id", "name", "role"],
+              "properties": {
+                "user_id": {
+                  "bsonType": "string",
+                  "description": "User ID of the member"
+                },
+                "name": {
+                  "bsonType": "string",
+                  "description": "Name of the member"
+                },
+                "role": {
+                  "bsonType": "string",
+                  "description": "Role of the member"
+                }
+              }
+            }
+          },
+          "created_by": {
+            "bsonType": "string",
+            "description": "User ID of workspace creator"
+          },
+          "created_at": {
+            "bsonType": "date",
+            "description": "Creation timestamp"
+          },
+          "updated_at": {
+            "bsonType": "date",
+            "description": "Last update timestamp"
+          }
+        }
+      }
+    }
+  }
+]

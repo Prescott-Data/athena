@@ -1,0 +1,23 @@
+[
+  {
+    "drop": "alerts"
+  },
+  {
+    "drop": "workspace_documents"
+  },
+  {
+    "drop": "workspace_collaborators"
+  },
+  {
+    "drop": "recommendations"
+  },
+  {
+    "drop": "insights"
+  },
+  {
+    "drop": "channels"
+  },
+  {
+    "drop": "workspaces"
+  }
+]

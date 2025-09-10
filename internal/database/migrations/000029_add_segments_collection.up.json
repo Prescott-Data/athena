@@ -1,0 +1,28 @@
+[
+  { "create": "segments" },
+  {
+    "collMod": "segments",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["segmentId", "userId", "chainId", "pageIds", "status", "createdAt", "updatedAt"],
+        "properties": {
+          "_id": { "bsonType": "objectId" },
+          "segmentId": { "bsonType": "string", "description": "Unique identifier for the segment" },
+          "userId": { "bsonType": "string" },
+          "chainId": { "bsonType": "string" },
+          "pageIds": {
+            "bsonType": "array",
+            "items": { "bsonType": "objectId" },
+            "description": "Dialogue page ObjectIDs grouped in this segment"
+          },
+          "topicSummary": { "bsonType": "string" },
+          "status": { "bsonType": "string", "enum": ["in_mtm", "archived"] },
+          "createdAt": { "bsonType": "date" },
+          "updatedAt": { "bsonType": "date" }
+        }
+      }
+    }
+  }
+]
+

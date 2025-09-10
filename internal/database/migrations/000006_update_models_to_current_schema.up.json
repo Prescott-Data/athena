@@ -1,0 +1,197 @@
+[
+  {
+    "collMod": "insights",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["title", "description", "status", "created_at", "updated_at"],
+        "properties": {
+          "_id": {
+            "bsonType": "objectId"
+          },
+          "title": {
+            "bsonType": "string",
+            "description": "Title of the insight"
+          },
+          "description": {
+            "bsonType": "string",
+            "description": "Description of the insight"
+          },
+          "channel": {
+            "bsonType": "object",
+            "properties": {
+              "id": {
+                "bsonType": "string"
+              },
+              "name": {
+                "bsonType": "string"
+              }
+            }
+          },
+          "status": {
+            "bsonType": "string",
+            "description": "Status of the insight"
+          },
+          "created_at": {
+            "bsonType": "date",
+            "description": "When the insight was created"
+          },
+          "updated_at": {
+            "bsonType": "date",
+            "description": "When the insight was last updated"
+          },
+          "metrics": {
+            "bsonType": "object",
+            "properties": {
+              "chart_type": {
+                "bsonType": "string",
+                "description": "Type of chart (e.g., bar, line, pie)"
+              },
+              "title": {
+                "bsonType": "string",
+                "description": "Title of the chart"
+              },
+              "datasets": {
+                "bsonType": "array",
+                "description": "Array of datasets for the chart",
+                "items": {
+                  "bsonType": "object",
+                  "properties": {
+                    "name": {
+                      "bsonType": "string",
+                      "description": "Name of the dataset"
+                    },
+                    "data": {
+                      "bsonType": "array",
+                      "description": "Array of data points",
+                      "items": {
+                        "bsonType": "object",
+                        "properties": {
+                          "x": {
+                            "description": "X-axis value (can be string or number)"
+                          },
+                          "y": {
+                            "bsonType": "number",
+                            "description": "Y-axis value"
+                          }
+                        }
+                      }
+                    },
+                    "color": {
+                      "bsonType": "string",
+                      "description": "Color for the dataset"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "recommendations": {
+            "bsonType": "array",
+            "items": {
+              "bsonType": "object",
+              "properties": {
+                "text": {
+                  "bsonType": "string"
+                },
+                "rating": {
+                  "bsonType": "double"
+                },
+                "helpful_votes": {
+                  "bsonType": "int"
+                }
+              }
+            }
+          },
+          "recommendations_count": {
+            "bsonType": "int"
+          },
+          "collaborators": {
+            "bsonType": "array",
+            "items": {
+              "bsonType": "object",
+              "properties": {
+                "id": {
+                  "bsonType": "string"
+                },
+                "name": {
+                  "bsonType": "string"
+                },
+                "role": {
+                  "bsonType": "string"
+                },
+                "avatar_url": {
+                  "bsonType": "string"
+                },
+                "latest_comment": {
+                  "bsonType": "string"
+                },
+                "attachments": {
+                  "bsonType": "array",
+                  "items": {
+                    "bsonType": "string"
+                  }
+                }
+              }
+            }
+          },
+          "collaborators_count": {
+            "bsonType": "int"
+          },
+          "conversations": {
+            "bsonType": "array",
+            "items": {
+              "bsonType": "object",
+              "properties": {
+                "id": {
+                  "bsonType": "string"
+                },
+                "user": {
+                  "bsonType": "object",
+                  "properties": {
+                    "id": {
+                      "bsonType": "string"
+                    },
+                    "name": {
+                      "bsonType": "string"
+                    },
+                    "avatar_url": {
+                      "bsonType": "string"
+                    },
+                    "role": {
+                      "bsonType": "string"
+                    }
+                  }
+                },
+                "message": {
+                  "bsonType": "string"
+                },
+                "timestamp": {
+                  "bsonType": "date"
+                },
+                "attachments": {
+                  "bsonType": "array",
+                  "items": {
+                    "bsonType": "string"
+                  }
+                }
+              }
+            }
+          },
+          "potential_impact": {
+            "bsonType": "string"
+          },
+          "impact": {
+            "bsonType": "string"
+          },
+          "priority": {
+            "bsonType": "string"
+          },
+          "documents_count": {
+            "bsonType": "int"
+          }
+        }
+      }
+    }
+  }
+]

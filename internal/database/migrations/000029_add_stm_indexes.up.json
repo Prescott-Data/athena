@@ -1,0 +1,48 @@
+[
+  {
+    "createIndexes": "dialogue_pages",
+    "indexes": [
+      {
+        "key": { "userId": 1, "createdAt": -1 },
+        "name": "userId_createdAt_idx",
+        "background": true
+      },
+      {
+        "key": { "chainId": 1, "createdAt": 1 },
+        "name": "chainId_createdAt_idx", 
+        "background": true
+      },
+      {
+        "key": { "status": 1, "createdAt": -1 },
+        "name": "status_createdAt_idx",
+        "background": true
+      },
+      {
+        "key": { "userId": 1, "status": 1, "createdAt": -1 },
+        "name": "userId_status_createdAt_idx",
+        "background": true
+      }
+    ]
+  },
+  {
+    "createIndexes": "dialogue_chains", 
+    "indexes": [
+      {
+        "key": { "userId": 1, "lastTurnAt": -1 },
+        "name": "userId_lastTurnAt_idx",
+        "background": true
+      },
+      {
+        "key": { "chainId": 1 },
+        "name": "chainId_idx",
+        "unique": true,
+        "background": true
+      },
+      {
+        "key": { "status": 1, "lastTurnAt": -1 },
+        "name": "status_lastTurnAt_idx",
+        "background": true
+      }
+    ]
+  }
+]

@@ -1,0 +1,217 @@
+[
+  {
+    "collMod": "briefs",
+    "validator": {
+      "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["title", "created_at", "data"],
+        "properties": {
+          "_id": {
+            "bsonType": "objectId"
+          },
+          "title": {
+            "bsonType": "string",
+            "description": "Title of the brief"
+          },
+          "created_at": {
+            "bsonType": "date",
+            "description": "Creation timestamp of the brief"
+          },
+          "collaborators": {
+            "bsonType": "array",
+            "description": "Array of collaborators for the brief",
+            "items": {
+              "bsonType": "object",
+              "required": [
+                "user_id",
+                "name",
+                "email",
+                "role",
+                "added_at",
+                "brief_id"
+              ],
+              "properties": {
+                "user_id": {
+                  "bsonType": "string",
+                  "description": "Unique identifier for the user"
+                },
+                "name": {
+                  "bsonType": "string",
+                  "description": "Name of the collaborator"
+                },
+                "email": {
+                  "bsonType": "string",
+                  "description": "Email of the collaborator"
+                },
+                "role": {
+                  "bsonType": "string",
+                  "description": "Role of the collaborator"
+                },
+                "added_at": {
+                  "bsonType": "date",
+                  "description": "When the collaborator was added"
+                },
+                "brief_id": {
+                  "bsonType": "string",
+                  "description": "ID of the brief"
+                }
+              }
+            }
+          },
+          "feedback": {
+            "bsonType": "array",
+            "description": "Array of feedback for the brief",
+            "items": {
+              "bsonType": "object",
+              "required": [
+                "user_id",
+                "comment",
+                "rating",
+                "timestamp",
+                "brief_id"
+              ],
+              "properties": {
+                "_id": {
+                  "bsonType": "objectId"
+                },
+                "user_id": {
+                  "bsonType": "string",
+                  "description": "User who provided feedback"
+                },
+                "comment": {
+                  "bsonType": "string",
+                  "description": "Feedback comment"
+                },
+                "rating": {
+                  "bsonType": "int",
+                  "description": "Rating value"
+                },
+                "timestamp": {
+                  "bsonType": "date",
+                  "description": "When feedback was created"
+                },
+                "brief_id": {
+                  "bsonType": "string",
+                  "description": "ID of the brief"
+                }
+              }
+            }
+          },
+          "chat_messages": {
+            "bsonType": "array",
+            "description": "Array of chat messages for the brief",
+            "items": {
+              "bsonType": "object",
+              "required": ["author", "message", "timestamp", "brief_id"],
+              "properties": {
+                "_id": {
+                  "bsonType": "objectId"
+                },
+                "author": {
+                  "bsonType": "string",
+                  "description": "Author of the chat message"
+                },
+                "message": {
+                  "bsonType": "string",
+                  "description": "Chat message content"
+                },
+                "timestamp": {
+                  "bsonType": "date",
+                  "description": "When message was sent"
+                },
+                "brief_id": {
+                  "bsonType": "string",
+                  "description": "ID of the brief"
+                }
+              }
+            }
+          },
+          "data": {
+            "bsonType": "array",
+            "description": "Array of data items containing insights",
+            "items": {
+              "bsonType": "object",
+              "required": [
+                "summary_insight",
+                "insight",
+                "recommendation",
+                "more_details"
+              ],
+              "properties": {
+                "id": {
+                  "bsonType": "string",
+                  "description": "Optional unique identifier for the data item"
+                },
+                "summary_insight": {
+                  "bsonType": "string",
+                  "description": "Brief summary of the insight"
+                },
+                "insight": {
+                  "bsonType": "string",
+                  "description": "Detailed insight information"
+                },
+                "recommendation": {
+                  "bsonType": "string",
+                  "description": "Recommendation based on the insight"
+                },
+                "more_details": {
+                  "bsonType": "string",
+                  "description": "Additional details about the insight"
+                },
+                "visualization": {
+                  "bsonType": "object",
+                  "description": "Visualization data with chart information",
+                  "required": ["title", "description", "properties"],
+                  "properties": {
+                    "title": {
+                      "bsonType": "string",
+                      "description": "Title of the visualization"
+                    },
+                    "description": {
+                      "bsonType": "string",
+                      "description": "Description of the visualization"
+                    },
+                    "properties": {
+                      "bsonType": "object",
+                      "description": "Chart properties",
+                      "required": ["chartType", "labels", "data"],
+                      "properties": {
+                        "chartType": {
+                          "bsonType": "string",
+                          "description": "Type of chart (e.g., Pie Chart, Histogram)"
+                        },
+                        "labels": {
+                          "bsonType": "array",
+                          "description": "Chart labels",
+                          "items": {
+                            "bsonType": "string"
+                          }
+                        },
+                        "data": {
+                          "bsonType": "array",
+                          "description": "Chart data values",
+                          "items": {
+                            "bsonType": "int"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "createIndexes": "briefs",
+    "indexes": [
+      {
+        "key": { "data.id": 1 },
+        "name": "data_id_index"
+      }
+    ]
+  }
+]

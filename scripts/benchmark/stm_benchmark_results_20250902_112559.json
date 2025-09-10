@@ -1,0 +1,66 @@
+{
+  "system_name": "Memory-OS STM (Simplified)",
+  "start_time": "2025-09-02T11:25:58.873481553+03:00",
+  "end_time": "2025-09-02T11:25:59.434109946+03:00",
+  "total_duration": 560628393,
+  "cache_operations": {
+    "total_operations": 0,
+    "successful_ops": 0,
+    "failed_ops": 0,
+    "average_latency": 0,
+    "min_latency": 0,
+    "max_latency": 0,
+    "throughput_ops_per_second": 0
+  },
+  "dialogue_chain_decisions": {
+    "total_operations": 0,
+    "successful_ops": 0,
+    "failed_ops": 0,
+    "average_latency": 0,
+    "min_latency": 0,
+    "max_latency": 0,
+    "throughput_ops_per_second": 0
+  },
+  "quality_validations": {
+    "total_operations": 0,
+    "successful_ops": 0,
+    "failed_ops": 0,
+    "average_latency": 0,
+    "min_latency": 0,
+    "max_latency": 0,
+    "throughput_ops_per_second": 0
+  },
+  "average_latency": {
+    "cache_retrieve": 1006866,
+    "cache_stats": 1079845,
+    "cache_store": 5925677,
+    "dialogue_chain_decision": 10207652,
+    "quality_validation": 5508661
+  },
+  "throughput_ops_per_second": {
+    "cache_retrieve": 535.1138182542959,
+    "cache_stats": 535.1138182542959,
+    "cache_store": 535.1138182542959,
+    "dialogue_chain_decision": 178.37127275143197,
+    "quality_validation": 178.37127275143197
+  },
+  "error_rates": {
+    "cache_retrieve": 0,
+    "cache_stats": 0,
+    "cache_store": 0,
+    "dialogue_chain_decision": 0,
+    "quality_validation": 0
+  },
+  "peak_memory_usage_mb": 0,
+  "average_memory_usage_mb": 0,
+  "cache_hit_rate": 100,
+  "cache_miss_rate": 0,
+  "quality_score_distribution": {
+    "0.0-0.1": 18,
+    "0.1-0.2": 12,
+    "0.3-0.4": 18,
+    "0.4-0.5": 24,
+    "0.5-0.6": 15,
+    "0.6-0.7": 13
+  }
+}

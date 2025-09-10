@@ -1,0 +1,14 @@
+[
+  {
+    "aggregate": "collaborators",
+    "pipeline": [
+      {
+        "$out": "users"
+      }
+    ],
+    "cursor": {}
+  },
+  {
+    "drop": "collaborators"
+  }
+]

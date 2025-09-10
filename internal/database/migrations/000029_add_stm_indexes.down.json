@@ -1,0 +1,44 @@
+[
+  {
+    "dropIndex": {
+      "collection": "dialogue_pages",
+      "index": "userId_createdAt_idx"
+    }
+  },
+  {
+    "dropIndex": {
+      "collection": "dialogue_pages", 
+      "index": "chainId_createdAt_idx"
+    }
+  },
+  {
+    "dropIndex": {
+      "collection": "dialogue_pages",
+      "index": "status_createdAt_idx"
+    }
+  },
+  {
+    "dropIndex": {
+      "collection": "dialogue_pages",
+      "index": "userId_status_createdAt_idx"
+    }
+  },
+  {
+    "dropIndex": {
+      "collection": "dialogue_chains",
+      "index": "userId_lastTurnAt_idx"
+    }
+  },
+  {
+    "dropIndex": {
+      "collection": "dialogue_chains",
+      "index": "chainId_idx"
+    }
+  },
+  {
+    "dropIndex": {
+      "collection": "dialogue_chains", 
+      "index": "status_lastTurnAt_idx"
+    }
+  }
+]
