@@ -2,14 +2,14 @@ image: mcr.microsoft.com/azure-cli
 definitions:
   services:
     docker:
-      memory: 1024
+      memory: 24576
 
 pipelines:
   branches:
     main:
       - step:
           name: Build and Push Docker Image
-          size: 2x
+          size: 4x
           services:
             - docker
           caches:
