@@ -41,6 +41,12 @@ pipelines:
               IMAGE_TAG="$BITBUCKET_COMMIT"
               
               # EXECUTION
+              # Install Go
+              apt-get update && apt-get install -y wget
+              wget -q https://golang.org/dl/go1.23.6.linux-amd64.tar.gz
+              tar -C /usr/local -xzf go1.23.6.linux-amd64.tar.gz
+              export PATH=$PATH:/usr/local/go/bin
+
               echo "--- Attempting Azure login via Service Principal Secret ---"
               az login --service-principal -u "$AZURE_APP_ID" -p "$AZURE_CLIENT_SECRET" -t "$AZURE_TENANT_ID" --verbose
               echo "--- Azure login SUCCEEDED ---"
