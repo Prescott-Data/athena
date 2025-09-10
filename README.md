@@ -317,6 +317,43 @@ go test -v ./internal/memory -run "TestTenantIsolation|TestAuthValidation"
 
 If Redis vars are empty, sensible defaults are applied to avoid test crashes.
 
+## 🧹 Development & Linting
+
+### Quick linting
+```bash
+# Format, vet, and tidy
+go fmt ./...
+go vet ./...
+go mod tidy
+```
+
+### Using helper script
+```bash
+# Run all checks (fmt, vet, tidy, golangci-lint if available, and tests)
+./scripts/lint.sh all
+
+# Or run specific steps
+./scripts/lint.sh fmt
+./scripts/lint.sh vet
+./scripts/lint.sh tidy
+./scripts/lint.sh lint   # requires golangci-lint
+```
+
+### Makefile targets
+```bash
+make lint       # runs all basic linting
+make build      # builds memory-server
+make test       # runs tests
+make docker-build
+```
+
+### Optional: golangci-lint
+```bash
+curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
+  | sh -s -- -b $(go env GOPATH)/bin v1.61.0
+golangci-lint run
+```
+
 ### Building
 ```bash
 go build -o memory-server cmd/memory-server/main.go
