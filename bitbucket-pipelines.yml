@@ -2,7 +2,7 @@ image: mcr.microsoft.com/azure-cli
 definitions:
   services:
     docker:
-      memory: 0
+      memory: 128
 
 pipelines:
   branches:
