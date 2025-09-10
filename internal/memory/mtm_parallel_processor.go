@@ -13,9 +13,9 @@ import (
 
 // ParallelProcessor handles concurrent LLM operations for better performance
 type ParallelProcessor struct {
-	maxWorkers   int
-	semaphore    chan struct{}
-	stmStore     *STMStore
+	maxWorkers int
+	semaphore  chan struct{}
+	stmStore   *STMStore
 }
 
 // ProcessingTask represents a generic LLM processing task
@@ -35,9 +35,9 @@ type ProcessingResult struct {
 
 // SegmentAnalysisTask represents analysis tasks for segments
 type SegmentAnalysisTask struct {
-	Segment     *models.Segment
-	Pages       []models.DialoguePage
-	TaskType    string // "summary", "continuity", "quality"
+	Segment  *models.Segment
+	Pages    []models.DialoguePage
+	TaskType string // "summary", "continuity", "quality"
 }
 
 // SegmentAnalysisResult holds results from segment analysis
@@ -56,7 +56,7 @@ func NewParallelProcessor(maxWorkers int, stmStore *STMStore) *ParallelProcessor
 	if maxWorkers <= 0 {
 		maxWorkers = parseIntEnv("PARALLEL_PROCESSOR_MAX_WORKERS", 3)
 	}
-	
+
 	return &ParallelProcessor{
 		maxWorkers: maxWorkers,
 		semaphore:  make(chan struct{}, maxWorkers),
@@ -69,25 +69,25 @@ func (pp *ParallelProcessor) ProcessTasks(ctx context.Context, tasks []*Processi
 	if len(tasks) == 0 {
 		return []*ProcessingResult{}, nil
 	}
-	
+
 	start := time.Now()
 	results := make([]*ProcessingResult, len(tasks))
 	var wg sync.WaitGroup
-	
+
 	// Process tasks with controlled concurrency
 	for i, task := range tasks {
 		wg.Add(1)
 		go func(index int, t *ProcessingTask) {
 			defer wg.Done()
-			
+
 			// Acquire semaphore
 			pp.semaphore <- struct{}{}
 			defer func() { <-pp.semaphore }()
-			
+
 			taskStart := time.Now()
 			result, err := t.Execute()
 			duration := time.Since(taskStart)
-			
+
 			results[index] = &ProcessingResult{
 				TaskID:   t.ID,
 				Result:   result,
@@ -96,14 +96,14 @@ func (pp *ParallelProcessor) ProcessTasks(ctx context.Context, tasks []*Processi
 			}
 		}(i, task)
 	}
-	
+
 	// Wait for all tasks to complete
 	wg.Wait()
-	
+
 	totalDuration := time.Since(start)
 	log.Printf("INFO: Parallel processing completed - Tasks: %d, Duration: %v, Avg per task: %v",
 		len(tasks), totalDuration, totalDuration/time.Duration(len(tasks)))
-	
+
 	return results, nil
 }
 
@@ -112,31 +112,31 @@ func (pp *ParallelProcessor) ProcessSegmentAnalysis(ctx context.Context, tasks [
 	if len(tasks) == 0 {
 		return []*SegmentAnalysisResult{}, nil
 	}
-	
+
 	start := time.Now()
 	results := make([]*SegmentAnalysisResult, len(tasks))
 	var wg sync.WaitGroup
-	
+
 	for i, task := range tasks {
 		wg.Add(1)
 		go func(index int, t *SegmentAnalysisTask) {
 			defer wg.Done()
-			
+
 			// Acquire semaphore for controlled concurrency
 			pp.semaphore <- struct{}{}
 			defer func() { <-pp.semaphore }()
-			
+
 			result := pp.analyzeSegment(ctx, t)
 			results[index] = result
 		}(i, task)
 	}
-	
+
 	wg.Wait()
-	
+
 	totalDuration := time.Since(start)
 	log.Printf("INFO: Parallel segment analysis completed - Segments: %d, Duration: %v",
 		len(tasks), totalDuration)
-	
+
 	return results, nil
 }
 
@@ -146,7 +146,7 @@ func (pp *ParallelProcessor) analyzeSegment(ctx context.Context, task *SegmentAn
 	result := &SegmentAnalysisResult{
 		SegmentID: task.Segment.SegmentID,
 	}
-	
+
 	switch task.TaskType {
 	case "summary":
 		summary, err := pp.generateSummary(ctx, task.Pages)
@@ -155,7 +155,7 @@ func (pp *ParallelProcessor) analyzeSegment(ctx context.Context, task *SegmentAn
 		} else {
 			result.Summary = summary
 		}
-		
+
 	case "quality":
 		score, err := pp.assessQuality(ctx, task.Segment, task.Pages)
 		if err != nil {
@@ -163,7 +163,7 @@ func (pp *ParallelProcessor) analyzeSegment(ctx context.Context, task *SegmentAn
 		} else {
 			result.QualityScore = score
 		}
-		
+
 	case "keywords":
 		keywords, err := pp.extractKeywords(ctx, task.Segment)
 		if err != nil {
@@ -171,22 +171,22 @@ func (pp *ParallelProcessor) analyzeSegment(ctx context.Context, task *SegmentAn
 		} else {
 			result.Keywords = keywords
 		}
-		
+
 	case "full":
 		// Perform all analyses
 		if summary, err := pp.generateSummary(ctx, task.Pages); err == nil {
 			result.Summary = summary
 		}
-		
+
 		if score, err := pp.assessQuality(ctx, task.Segment, task.Pages); err == nil {
 			result.QualityScore = score
 		}
-		
+
 		if keywords, err := pp.extractKeywords(ctx, task.Segment); err == nil {
 			result.Keywords = keywords
 		}
 	}
-	
+
 	result.Duration = time.Since(start)
 	return result
 }
@@ -196,7 +196,7 @@ func (pp *ParallelProcessor) generateSummary(ctx context.Context, pages []models
 	if pp.stmStore == nil {
 		return "", fmt.Errorf("STM store not available")
 	}
-	
+
 	return pp.stmStore.CreateSegmentSummary(ctx, pages)
 }
 
@@ -204,7 +204,7 @@ func (pp *ParallelProcessor) generateSummary(ctx context.Context, pages []models
 func (pp *ParallelProcessor) assessQuality(ctx context.Context, segment *models.Segment, pages []models.DialoguePage) (float64, error) {
 	// Quality assessment based on multiple factors
 	var qualityScore float64 = 0.5 // Default moderate quality
-	
+
 	// Factor 1: Information completeness
 	if len(pages) > 0 {
 		avgMessageLength := 0
@@ -212,7 +212,7 @@ func (pp *ParallelProcessor) assessQuality(ctx context.Context, segment *models.
 			avgMessageLength += len(page.UserMessage) + len(page.AgentResponse)
 		}
 		avgMessageLength /= len(pages)
-		
+
 		// Longer messages generally indicate more detailed conversations
 		if avgMessageLength > 200 {
 			qualityScore += 0.2
@@ -220,7 +220,7 @@ func (pp *ParallelProcessor) assessQuality(ctx context.Context, segment *models.
 			qualityScore -= 0.1
 		}
 	}
-	
+
 	// Factor 2: Topic coherence (based on summary quality)
 	if segment.TopicSummary != "" {
 		summaryLength := len(segment.TopicSummary)
@@ -230,7 +230,7 @@ func (pp *ParallelProcessor) assessQuality(ctx context.Context, segment *models.
 			qualityScore -= 0.2 // Too short, likely not meaningful
 		}
 	}
-	
+
 	// Factor 3: Interaction depth
 	interactionDepth := len(pages)
 	if interactionDepth >= 3 {
@@ -238,7 +238,7 @@ func (pp *ParallelProcessor) assessQuality(ctx context.Context, segment *models.
 	} else if interactionDepth == 1 {
 		qualityScore -= 0.1 // Single exchanges might be less valuable
 	}
-	
+
 	// Factor 4: Time span (conversations over longer periods might be more substantial)
 	if len(pages) > 1 {
 		timeSpan := pages[len(pages)-1].CreatedAt.Sub(pages[0].CreatedAt)
@@ -246,14 +246,14 @@ func (pp *ParallelProcessor) assessQuality(ctx context.Context, segment *models.
 			qualityScore += 0.1 // Good conversation duration
 		}
 	}
-	
+
 	// Normalize to [0, 1] range
 	if qualityScore > 1.0 {
 		qualityScore = 1.0
 	} else if qualityScore < 0.0 {
 		qualityScore = 0.0
 	}
-	
+
 	return qualityScore, nil
 }
 
@@ -262,10 +262,10 @@ func (pp *ParallelProcessor) extractKeywords(ctx context.Context, segment *model
 	if segment.TopicSummary == "" {
 		return []string{}, nil
 	}
-	
+
 	// Simple keyword extraction (in production, you might use NLP libraries)
 	summary := strings.ToLower(segment.TopicSummary)
-	
+
 	// Common technical and conversation keywords
 	importantKeywords := []string{
 		"error", "problem", "issue", "bug", "fix", "solution",
@@ -275,14 +275,14 @@ func (pp *ParallelProcessor) extractKeywords(ctx context.Context, segment *model
 		"tutorial", "guide", "example", "documentation",
 		"performance", "optimization", "security", "backup",
 	}
-	
+
 	var foundKeywords []string
 	for _, keyword := range importantKeywords {
 		if strings.Contains(summary, keyword) {
 			foundKeywords = append(foundKeywords, keyword)
 		}
 	}
-	
+
 	return foundKeywords, nil
 }
 
@@ -291,22 +291,22 @@ func (pp *ParallelProcessor) ProcessUserProfileAnalysis(ctx context.Context, seg
 	if len(segments) == 0 {
 		return &ProfileAnalysisResult{}, nil
 	}
-	
+
 	start := time.Now()
 	var wg sync.WaitGroup
-	
+
 	// Results channels
 	profileChan := make(chan string, 1)
 	knowledgeChan := make(chan []string, 1)
 	errorChan := make(chan error, 2)
-	
+
 	// Parallel profile analysis
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		pp.semaphore <- struct{}{}
 		defer func() { <-pp.semaphore }()
-		
+
 		profile, err := pp.analyzeUserProfile(ctx, segments)
 		if err != nil {
 			errorChan <- err
@@ -314,14 +314,14 @@ func (pp *ParallelProcessor) ProcessUserProfileAnalysis(ctx context.Context, seg
 		}
 		profileChan <- profile
 	}()
-	
-	// Parallel knowledge extraction  
+
+	// Parallel knowledge extraction
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		pp.semaphore <- struct{}{}
 		defer func() { <-pp.semaphore }()
-		
+
 		knowledge, err := pp.extractUserKnowledge(ctx, segments)
 		if err != nil {
 			errorChan <- err
@@ -329,39 +329,39 @@ func (pp *ParallelProcessor) ProcessUserProfileAnalysis(ctx context.Context, seg
 		}
 		knowledgeChan <- knowledge
 	}()
-	
+
 	wg.Wait()
 	close(profileChan)
 	close(knowledgeChan)
 	close(errorChan)
-	
+
 	// Check for errors
 	for err := range errorChan {
 		if err != nil {
 			return nil, err
 		}
 	}
-	
+
 	// Collect results
 	var profile string
 	var knowledge []string
-	
+
 	if p := <-profileChan; p != "" {
 		profile = p
 	}
-	
+
 	if k := <-knowledgeChan; len(k) > 0 {
 		knowledge = k
 	}
-	
+
 	duration := time.Since(start)
 	log.Printf("INFO: Parallel profile analysis completed - Segments: %d, Duration: %v", len(segments), duration)
-	
+
 	return &ProfileAnalysisResult{
-		UserProfile:     profile,
+		UserProfile:        profile,
 		ExtractedKnowledge: knowledge,
-		AnalyzedSegments: len(segments),
-		Duration:        duration,
+		AnalyzedSegments:   len(segments),
+		Duration:           duration,
 	}, nil
 }
 
@@ -370,7 +370,7 @@ type ProfileAnalysisResult struct {
 	UserProfile        string
 	ExtractedKnowledge []string
 	AnalyzedSegments   int
-	Duration          time.Duration
+	Duration           time.Duration
 }
 
 // analyzeUserProfile analyzes user characteristics from segments
@@ -378,10 +378,10 @@ func (pp *ParallelProcessor) analyzeUserProfile(ctx context.Context, segments []
 	// Simplified profile analysis - in production this would use LLM
 	var interests []string
 	var skills []string
-	
+
 	for _, segment := range segments {
 		summary := strings.ToLower(segment.TopicSummary)
-		
+
 		// Detect interests
 		if strings.Contains(summary, "python") || strings.Contains(summary, "programming") {
 			interests = append(interests, "programming")
@@ -392,7 +392,7 @@ func (pp *ParallelProcessor) analyzeUserProfile(ctx context.Context, segments []
 		if strings.Contains(summary, "database") || strings.Contains(summary, "sql") {
 			interests = append(interests, "databases")
 		}
-		
+
 		// Detect skill level
 		if strings.Contains(summary, "advanced") || strings.Contains(summary, "expert") {
 			skills = append(skills, "advanced")
@@ -400,21 +400,21 @@ func (pp *ParallelProcessor) analyzeUserProfile(ctx context.Context, segments []
 			skills = append(skills, "beginner")
 		}
 	}
-	
+
 	// Remove duplicates
 	interests = uniqueStrings(interests)
 	skills = uniqueStrings(skills)
-	
+
 	profile := fmt.Sprintf("User shows interest in: %v. Skill level appears to be: %v. Based on %d conversation segments.",
 		interests, skills, len(segments))
-	
+
 	return profile, nil
 }
 
 // extractUserKnowledge extracts factual knowledge from segments
 func (pp *ParallelProcessor) extractUserKnowledge(ctx context.Context, segments []*models.Segment) ([]string, error) {
 	var knowledge []string
-	
+
 	for _, segment := range segments {
 		// Extract factual statements from summaries
 		if strings.Contains(segment.TopicSummary, "uses") {
@@ -427,7 +427,7 @@ func (pp *ParallelProcessor) extractUserKnowledge(ctx context.Context, segments 
 			knowledge = append(knowledge, fmt.Sprintf("User works with: %s", segment.TopicSummary))
 		}
 	}
-	
+
 	return uniqueStrings(knowledge), nil
 }
 
@@ -435,13 +435,13 @@ func (pp *ParallelProcessor) extractUserKnowledge(ctx context.Context, segments 
 func uniqueStrings(strings []string) []string {
 	keys := make(map[string]bool)
 	var unique []string
-	
+
 	for _, str := range strings {
 		if !keys[str] {
 			keys[str] = true
 			unique = append(unique, str)
 		}
 	}
-	
+
 	return unique
 }

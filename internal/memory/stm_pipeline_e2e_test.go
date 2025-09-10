@@ -75,7 +75,7 @@ func TestSTMPipeline_EndToEnd(t *testing.T) {
 		assert.Equal(1536, embedding.Dimensions, "Should have 1536 dimensions")
 
 		// Step 4: Test dialogue chain analysis (should create new chain for first turn)
-		chainID, err := components.stmStore.DetermineDialogueChain(ctx, userID, userMessage1, agentResponse1)
+		chainID, err := components.stmStore.DetermineDialogueChain(ctx, "test_tenant", userID, "test_agent", userMessage1, agentResponse1)
 		assert.NoError(err, "Dialogue chain analysis should succeed")
 		assert.NotEmpty(chainID, "Chain ID should be generated")
 
@@ -128,7 +128,7 @@ func TestSTMPipeline_EndToEnd(t *testing.T) {
 		assert.Len(turns, 4, "Should have 4 turns in cache (2 dialogue pairs)")
 
 		// Step 3: Test dialogue chain analysis (should continue existing chain)
-		chainID, err := components.stmStore.DetermineDialogueChain(ctx, userID, userMessage2, agentResponse2)
+		chainID, err := components.stmStore.DetermineDialogueChain(ctx, "test_tenant", userID, "test_agent", userMessage2, agentResponse2)
 		assert.NoError(err, "Dialogue chain analysis should succeed")
 		assert.NotEmpty(chainID, "Should reuse existing chain ID")
 
@@ -183,7 +183,7 @@ func TestSTMPipeline_EndToEnd(t *testing.T) {
 		assert.Len(turns, 6, "Should have 6 turns in cache (3 dialogue pairs)")
 
 		// Step 3: Test dialogue chain analysis (should start NEW chain due to topic change)
-		chainID, err := components.stmStore.DetermineDialogueChain(ctx, userID, userMessage3, agentResponse3)
+		chainID, err := components.stmStore.DetermineDialogueChain(ctx, "test_tenant", userID, "test_agent", userMessage3, agentResponse3)
 		assert.NoError(err, "Dialogue chain analysis should succeed")
 		// Note: This should start a new chain due to low cosine similarity, but let's be flexible
 		// as the exact threshold behavior might vary

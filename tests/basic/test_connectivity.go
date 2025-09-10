@@ -1,4 +1,4 @@
-package main
+package testbasic
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"github.com/dromos-org/memory-os/internal/database"
 )
 
-func main() {
+func testConnectivity() {
 	fmt.Println("🧠 Memory OS Azure Infrastructure Connectivity Test")
 	fmt.Println("=================================================")
 
@@ -39,11 +39,10 @@ func main() {
 
 	// Test MongoDB connection
 	fmt.Print("🍃 Testing MongoDB connection... ")
-	mongoClient, err := database.ConnectMongoDB(&database.ConnectionConfig{
-		URI:         cfg.Database.MongoDB.URI,
-		Database:    cfg.Database.MongoDB.Database,
-		MaxPoolSize: 10,
-		Timeout:     30 * time.Second,
+	mongoClient, db, err := database.ConnectMongoDB(database.ConnectionConfig{
+		URI:            cfg.Database.MongoDB.URI,
+		DatabaseName:   cfg.Database.MongoDB.Database,
+		ConnectTimeout: 30 * time.Second,
 	})
 	if err != nil {
 		fmt.Printf("❌ FAILED: %v\n", err)
@@ -52,13 +51,18 @@ func main() {
 
 		// Test basic operations
 		ctx := context.Background()
-		exists, err := database.CollectionExists(ctx, mongoClient, "sessions")
+		collections, err := db.ListCollectionNames(ctx, nil)
 		if err != nil {
 			fmt.Printf("   ⚠️  Warning: Could not check collections: %v\n", err)
-		} else if exists {
-			fmt.Printf("   📊 Memory OS collections found\n")
+		} else if len(collections) > 0 {
+			fmt.Printf("   📊 Found %d collections in database\n", len(collections))
 		} else {
-			fmt.Printf("   📊 Collections need to be initialized\n")
+			fmt.Printf("   📊 Database is empty, collections need to be initialized\n")
+		}
+
+		// Cleanup MongoDB connection
+		if err := mongoClient.Disconnect(ctx); err != nil {
+			fmt.Printf("   ⚠️  Warning: Could not disconnect MongoDB: %v\n", err)
 		}
 	}
 

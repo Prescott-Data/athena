@@ -19,7 +19,7 @@ var (
 		Help:    "Latency for Milvus operations",
 		Buckets: prometheus.DefBuckets,
 	})
-	
+
 	// Cosine gate metrics
 	MetricCosineSimilarity = prometheus.NewHistogram(prometheus.HistogramOpts{
 		Name:    "cosine_similarity_distribution",
@@ -43,8 +43,8 @@ var (
 
 func init() {
 	prometheus.MustRegister(
-		MetricSTMCacheOps, 
-		MetricEmbeddingLatency, 
+		MetricSTMCacheOps,
+		MetricEmbeddingLatency,
 		MetricMilvusLatency,
 		MetricCosineSimilarity,
 		MetricCosineGateDecisions,

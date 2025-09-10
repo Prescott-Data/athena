@@ -6,15 +6,15 @@ import (
 
 // Import aliases for convenience
 type (
-	UserPersona                 = models.UserPersona
-	PsychologicalDimensions     = models.PsychologicalDimensions
-	AIAlignmentDimensions       = models.AIAlignmentDimensions
-	ContentInterestTags         = models.ContentInterestTags
-	DimensionScore              = models.DimensionScore
-	UserFactEntry               = models.UserFactEntry
-	AssistantKnowledgeEntry     = models.AssistantKnowledgeEntry
-	PersonalityAnalysisConfig   = models.PersonalityAnalysisConfig
-	DimensionType               = models.DimensionType
+	UserPersona               = models.UserPersona
+	PsychologicalDimensions   = models.PsychologicalDimensions
+	AIAlignmentDimensions     = models.AIAlignmentDimensions
+	ContentInterestTags       = models.ContentInterestTags
+	DimensionScore            = models.DimensionScore
+	UserFactEntry             = models.UserFactEntry
+	AssistantKnowledgeEntry   = models.AssistantKnowledgeEntry
+	PersonalityAnalysisConfig = models.PersonalityAnalysisConfig
+	DimensionType             = models.DimensionType
 )
 
 // Constants for dimension types

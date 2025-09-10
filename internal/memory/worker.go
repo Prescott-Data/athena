@@ -19,20 +19,20 @@ import (
 
 // Worker processes background memory formation tasks using goroutines
 type Worker struct {
-	taskQueue    *TaskQueue
-	stmStore     *STMStore
-	redis        cache.Interface
-	db           *mongo.Database
-	quit         chan struct{}
-	wg           sync.WaitGroup
-	workerCount  int
+	taskQueue   *TaskQueue
+	stmStore    *STMStore
+	redis       cache.Interface
+	db          *mongo.Database
+	quit        chan struct{}
+	wg          sync.WaitGroup
+	workerCount int
 }
 
 // WorkerConfig holds configuration for the memory worker
 type WorkerConfig struct {
-	WorkerCount   int
-	Redis         cache.Interface
-	Database      *mongo.Database
+	WorkerCount int
+	Redis       cache.Interface
+	Database    *mongo.Database
 }
 
 // NewWorker creates a new memory worker instance
@@ -147,7 +147,7 @@ func (mw *Worker) processNextTask(ctx context.Context, workerID int) error {
 // processMemoryFormationTask handles the 3-step memory formation pipeline
 func (mw *Worker) processMemoryFormationTask(ctx context.Context, task *models.MemoryProcessingTask) error {
 	// Step A: Dialogue Chain Analysis
-	chainID, err := mw.stmStore.DetermineDialogueChain(ctx, task.UserID, task.UserMessage, task.AgentResponse)
+	chainID, err := mw.stmStore.DetermineDialogueChain(ctx, task.TenantID, task.UserID, task.AgentID, task.UserMessage, task.AgentResponse)
 	if err != nil {
 		return fmt.Errorf("dialogue chain analysis failed: %w", err)
 	}
@@ -173,13 +173,18 @@ func (mw *Worker) processMemoryFormationTask(ctx context.Context, task *models.M
 		return fmt.Errorf("STM store write failed: %w", err)
 	}
 
-	// Store vector embedding with reference to the page
-	if err := mw.stmStore.StoreEmbedding(ctx, pageID.Hex(), embedding); err != nil {
+	// Store vector embedding with reference to the page (tenant/user/agent enforced from context)
+	// Set tenant/user/agent from task context on the embedding
+	embedding.TenantID = task.TenantID
+	embedding.UserID = task.UserID
+	embedding.AgentID = task.AgentID
+
+	if err := mw.stmStore.StoreEmbedding(ctx, task.TenantID, task.UserID, task.AgentID, pageID.Hex(), embedding); err != nil {
 		log.Printf("WARN: Failed to store embedding for page %s: %v", pageID.Hex(), err)
 		// Don't fail the entire task for embedding storage issues
 	}
 
-	log.Printf("INFO: Memory formation completed - UserID: %s, ChainID: %s, PageID: %s", 
+	log.Printf("INFO: Memory formation completed - UserID: %s, ChainID: %s, PageID: %s",
 		task.UserID, chainID, pageID.Hex())
 
 	return nil
@@ -189,7 +194,7 @@ func (mw *Worker) processMemoryFormationTask(ctx context.Context, task *models.M
 func (mw *Worker) handleShutdown() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	
+
 	select {
 	case sig := <-sigChan:
 		log.Printf("INFO: Received signal %v, shutting down workers", sig)

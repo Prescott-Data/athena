@@ -8,36 +8,42 @@ import (
 
 // DialoguePage represents a single conversational turn stored in the STM Store
 type DialoguePage struct {
-	ID          primitive.ObjectID     `json:"id" bson:"_id,omitempty"`
-	UserID      string                 `json:"userId" bson:"userId"`
-	ChainID     string                 `json:"chainId" bson:"chainId"`
-	TurnIndex   int                    `json:"turnIndex" bson:"turnIndex"`
-	UserMessage string                 `json:"userMessage" bson:"userMessage"`
-	AgentResponse string               `json:"agentResponse" bson:"agentResponse"`
-	Status      string                 `json:"status" bson:"status"` // "in_stm", "archived"
-	Metadata    map[string]interface{} `json:"metadata,omitempty" bson:"metadata,omitempty"`
-	CreatedAt   time.Time              `json:"createdAt" bson:"createdAt"`
-	UpdatedAt   time.Time              `json:"updatedAt" bson:"updatedAt"`
+	ID            primitive.ObjectID     `json:"id" bson:"_id,omitempty"`
+	TenantID      string                 `json:"tenantId" bson:"tenantId"`
+	UserID        string                 `json:"userId" bson:"userId"`
+	AgentID       string                 `json:"agentId" bson:"agentId"`
+	ChainID       string                 `json:"chainId" bson:"chainId"`
+	TurnIndex     int                    `json:"turnIndex" bson:"turnIndex"`
+	UserMessage   string                 `json:"userMessage" bson:"userMessage"`
+	AgentResponse string                 `json:"agentResponse" bson:"agentResponse"`
+	Status        string                 `json:"status" bson:"status"` // "in_stm", "archived"
+	Metadata      map[string]interface{} `json:"metadata,omitempty" bson:"metadata,omitempty"`
+	CreatedAt     time.Time              `json:"createdAt" bson:"createdAt"`
+	UpdatedAt     time.Time              `json:"updatedAt" bson:"updatedAt"`
 }
 
 // DialogueChain represents metadata about a conversational topic chain
 type DialogueChain struct {
-	ID          primitive.ObjectID `json:"id" bson:"_id,omitempty"`
-	ChainID     string             `json:"chainId" bson:"chainId"`
-	UserID      string             `json:"userId" bson:"userId"`
-	Topic       string             `json:"topic" bson:"topic"`
-	Summary     string             `json:"summary" bson:"summary"`
-	StartedAt   time.Time          `json:"startedAt" bson:"startedAt"`
-	LastTurnAt  time.Time          `json:"lastTurnAt" bson:"lastTurnAt"`
-	TurnCount   int                `json:"turnCount" bson:"turnCount"`
-	Status      string             `json:"status" bson:"status"` // "active", "archived"
+	ID         primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	TenantID   string             `json:"tenantId" bson:"tenantId"`
+	UserID     string             `json:"userId" bson:"userId"`
+	AgentID    string             `json:"agentId" bson:"agentId"`
+	ChainID    string             `json:"chainId" bson:"chainId"`
+	Topic      string             `json:"topic" bson:"topic"`
+	Summary    string             `json:"summary" bson:"summary"`
+	StartedAt  time.Time          `json:"startedAt" bson:"startedAt"`
+	LastTurnAt time.Time          `json:"lastTurnAt" bson:"lastTurnAt"`
+	TurnCount  int                `json:"turnCount" bson:"turnCount"`
+	Status     string             `json:"status" bson:"status"` // "active", "archived"
 }
 
 // MemoryProcessingTask represents a task for background processing
 type MemoryProcessingTask struct {
 	ID            string                 `json:"id"`
-	Type          string                 `json:"type"` // "memory_formation"
+	TenantID      string                 `json:"tenantId"`
 	UserID        string                 `json:"userId"`
+	AgentID       string                 `json:"agentId"`
+	Type          string                 `json:"type"` // "memory_formation"
 	UserMessage   string                 `json:"userMessage"`
 	AgentResponse string                 `json:"agentResponse"`
 	Timestamp     time.Time              `json:"timestamp"`
@@ -65,6 +71,9 @@ type TopicContinuityResponse struct {
 
 // EmbeddingData represents vector embedding information
 type EmbeddingData struct {
+	TenantID   string    `json:"tenantId"`
+	UserID     string    `json:"userId"`
+	AgentID    string    `json:"agentId"`
 	PageID     string    `json:"pageId"`
 	Vector     []float64 `json:"vector"`
 	Dimensions int       `json:"dimensions"`
