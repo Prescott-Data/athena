@@ -1,0 +1,44 @@
+# Git
+.git
+.gitignore
+
+# Documentation
+README.md
+*.md
+docs/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Test files
+*_test.go
+test_*.go
+coverage.out
+
+# Development files
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+
+# Temporary files
+tmp/
+temp/
+
+# Docker files (avoid recursive copy)
+Dockerfile
+.dockerignore

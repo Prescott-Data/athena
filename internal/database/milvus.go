@@ -41,7 +41,7 @@ func ConnectMilvus(config *MilvusConfig) (client.Client, error) {
 func InitializeMilvusCollections(ctx context.Context, c client.Client) error {
 	// This function would create the necessary collections for vector embeddings
 	// For now, we'll keep it simple and just verify the connection works
-	
+
 	// Check if we can list collections (basic operation test)
 	_, err := c.ListCollections(ctx)
 	if err != nil {

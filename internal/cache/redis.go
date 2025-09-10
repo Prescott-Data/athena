@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/redis/go-redis/v9"
+	redis "github.com/redis/go-redis/v9"
 	// Load environment variables from .env file
 	_ "github.com/joho/godotenv/autoload"
 )
