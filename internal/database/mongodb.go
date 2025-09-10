@@ -38,6 +38,15 @@ func InitMongoDB() {
 	MongoClient = client
 	DB = db
 
+	// Create tenant-aware indexes
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := CreateTenantIndexes(ctx, db); err != nil {
+		log.Printf("WARN: Failed to create tenant indexes: %v", err)
+		// Don't fail initialization for index creation issues
+	}
+
 	log.Println("✅ MongoDB connection established")
 }
 
@@ -113,6 +122,122 @@ func GetDatabase() *mongo.Database {
 // GetClient returns the current MongoDB client instance
 func GetClient() *mongo.Client {
 	return MongoClient
+}
+
+// CreateTenantIndexes creates compound indexes for tenant/user/agent queries
+func CreateTenantIndexes(ctx context.Context, db *mongo.Database) error {
+	// Dialogue Pages collection indexes
+	pagesCollection := db.Collection("dialogue_pages")
+	pageIndexes := []mongo.IndexModel{
+		{
+			Keys: map[string]interface{}{
+				"tenantId":  1,
+				"userId":    1,
+				"agentId":   1,
+				"chainId":   1,
+				"turnIndex": -1,
+			},
+		},
+		{
+			Keys: map[string]interface{}{
+				"tenantId":  1,
+				"userId":    1,
+				"agentId":   1,
+				"createdAt": -1,
+			},
+		},
+		{
+			Keys: map[string]interface{}{
+				"tenantId": 1,
+				"userId":   1,
+				"agentId":  1,
+				"status":   1,
+			},
+		},
+	}
+
+	// Segments collection indexes
+	segmentsCollection := db.Collection("segments")
+	segmentIndexes := []mongo.IndexModel{
+		{
+			Keys: map[string]interface{}{
+				"tenantId":  1,
+				"userId":    1,
+				"agentId":   1,
+				"segmentId": 1,
+			},
+		},
+		{
+			Keys: map[string]interface{}{
+				"tenantId":  1,
+				"userId":    1,
+				"agentId":   1,
+				"createdAt": -1,
+			},
+		},
+		{
+			Keys: map[string]interface{}{
+				"tenantId": 1,
+				"userId":   1,
+				"agentId":  1,
+				"status":   1,
+			},
+		},
+		{
+			Keys: map[string]interface{}{
+				"tenantId":  1,
+				"userId":    1,
+				"agentId":   1,
+				"heatScore": -1,
+			},
+		},
+	}
+
+	// Dialogue Chains collection indexes
+	chainsCollection := db.Collection("dialogue_chains")
+	chainIndexes := []mongo.IndexModel{
+		{
+			Keys: map[string]interface{}{
+				"tenantId": 1,
+				"userId":   1,
+				"agentId":  1,
+				"chainId":  1,
+			},
+		},
+		{
+			Keys: map[string]interface{}{
+				"tenantId":  1,
+				"userId":    1,
+				"agentId":   1,
+				"status":    1,
+				"startedAt": -1,
+			},
+		},
+	}
+
+	// Create indexes for dialogue pages
+	for _, index := range pageIndexes {
+		if _, err := pagesCollection.Indexes().CreateOne(ctx, index); err != nil {
+			log.Printf("WARN: Failed to create dialogue pages index: %v", err)
+		}
+	}
+
+	// Create indexes for segments
+	for _, index := range segmentIndexes {
+		if _, err := segmentsCollection.Indexes().CreateOne(ctx, index); err != nil {
+			log.Printf("WARN: Failed to create segments index: %v", err)
+		}
+	}
+
+	// Create indexes for dialogue chains
+	for _, index := range chainIndexes {
+		if _, err := chainsCollection.Indexes().CreateOne(ctx, index); err != nil {
+			log.Printf("WARN: Failed to create dialogue chains index: %v", err)
+		}
+	}
+
+	log.Println("✅ Tenant-aware MongoDB indexes created")
+	return nil
 }
 
 // DisconnectMongoDB gracefully disconnects from MongoDB

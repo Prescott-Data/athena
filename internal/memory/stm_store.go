@@ -257,14 +257,14 @@ func (lg *LLMGuardrails) recordLLMResult(success bool) {
 }
 
 // DetermineDialogueChain performs Step A: Dialogue Chain Analysis
-func (s *STMStore) DetermineDialogueChain(ctx context.Context, userID, userMessage, agentResponse string) (string, error) {
+func (s *STMStore) DetermineDialogueChain(ctx context.Context, tenantID, userID, agentID, userMessage, agentResponse string) (string, error) {
 	start := time.Now()
 	defer func() {
 		MetricDialogueChainLatency.Observe(time.Since(start).Seconds())
 	}()
 
-	// Get the most recent dialogue page for this user
-	previousPage, err := s.getLastDialoguePage(ctx, userID)
+	// Get the most recent dialogue page for this user within tenant/agent scope
+	previousPage, err := s.getLastDialoguePage(ctx, tenantID, userID, agentID)
 	if err != nil && err != mongo.ErrNoDocuments {
 		return "", fmt.Errorf("failed to retrieve previous dialogue page: %w", err)
 	}
@@ -277,8 +277,10 @@ func (s *STMStore) DetermineDialogueChain(ctx context.Context, userID, userMessa
 
 		// Create dialogue chain metadata
 		chain := &models.DialogueChain{
-			ChainID:    chainID,
+			TenantID:   tenantID,
 			UserID:     userID,
+			AgentID:    agentID,
+			ChainID:    chainID,
 			Topic:      "New conversation", // Will be updated later
 			Summary:    fmt.Sprintf("Started with: %s", userMessage[:min(100, len(userMessage))]),
 			StartedAt:  time.Now(),
@@ -311,7 +313,7 @@ func (s *STMStore) DetermineDialogueChain(ctx context.Context, userID, userMessa
 			// Try to retrieve stored embedding for previous turn, fallback to recomputing
 			var prevEmb *models.EmbeddingData
 			if previousPage.ID != primitive.NilObjectID {
-				prevEmb, err = s.GetEmbedding(ctx, previousPage.ID.Hex())
+				prevEmb, err = s.GetEmbedding(ctx, tenantID, userID, agentID, previousPage.ID.Hex())
 				if err != nil {
 					log.Printf("INFO: Stored embedding not found for previous turn, recomputing: %v", err)
 				}
@@ -614,7 +616,23 @@ func (s *STMStore) validateAzureOpenAIConfig() error {
 
 // StoreDialoguePage performs Step C: Write to STM Store (MongoDB)
 func (s *STMStore) StoreDialoguePage(ctx context.Context, page *models.DialoguePage) (primitive.ObjectID, error) {
+	return s.StoreDialoguePageWithContext(ctx, page, "", "", "")
+}
+
+// StoreDialoguePageWithContext stores a dialogue page using tenant/user/agent from context (enforced)
+func (s *STMStore) StoreDialoguePageWithContext(ctx context.Context, page *models.DialoguePage, tenantID, userID, agentID string) (primitive.ObjectID, error) {
 	start := time.Now()
+
+	// Override tenant/user/agent values from authenticated context
+	if tenantID != "" {
+		page.TenantID = tenantID
+	}
+	if userID != "" {
+		page.UserID = userID
+	}
+	if agentID != "" {
+		page.AgentID = agentID
+	}
 
 	// Ensure timestamps are set
 	if page.CreatedAt.IsZero() {
@@ -640,11 +658,11 @@ func (s *STMStore) StoreDialoguePage(ctx context.Context, page *models.DialogueP
 	return pageID, nil
 }
 
-// GetEmbedding retrieves a stored embedding by page ID
-func (s *STMStore) GetEmbedding(ctx context.Context, pageID string) (*models.EmbeddingData, error) {
+// GetEmbedding retrieves a stored embedding by page ID with tenant scope
+func (s *STMStore) GetEmbedding(ctx context.Context, tenantID, userID, agentID, pageID string) (*models.EmbeddingData, error) {
 	// Try Milvus first if available
 	if s.milvus != nil {
-		embedding, err := s.milvus.GetEmbeddingByPageID(ctx, pageID)
+		embedding, err := s.milvus.GetEmbeddingByPageID(ctx, tenantID, userID, agentID, pageID)
 		if err == nil {
 			return embedding, nil
 		}
@@ -655,9 +673,19 @@ func (s *STMStore) GetEmbedding(ctx context.Context, pageID string) (*models.Emb
 	return s.getEmbeddingFromRedis(ctx, pageID)
 }
 
+// generateEmbeddingKey creates the Redis key for embedding storage
+func (s *STMStore) generateEmbeddingKey(pageID string) string {
+	return fmt.Sprintf("embedding:%s", pageID)
+}
+
+// generateScopedEmbeddingKey creates the Redis key for embedding storage with tenant scope
+func (s *STMStore) generateScopedEmbeddingKey(tenantID, userID, agentID, pageID string) string {
+	return fmt.Sprintf("embedding:v1:%s:%s:%s:%s", tenantID, userID, agentID, pageID)
+}
+
 // getEmbeddingFromRedis retrieves embedding from Redis fallback storage
 func (s *STMStore) getEmbeddingFromRedis(ctx context.Context, pageID string) (*models.EmbeddingData, error) {
-	embeddingKey := fmt.Sprintf("embedding:%s", pageID)
+	embeddingKey := s.generateEmbeddingKey(pageID)
 	var embeddingJSON string
 	err := s.redis.Get(embeddingKey, &embeddingJSON)
 	if err != nil {
@@ -672,8 +700,8 @@ func (s *STMStore) getEmbeddingFromRedis(ctx context.Context, pageID string) (*m
 	return &embedding, nil
 }
 
-// StoreEmbedding stores the vector embedding in Milvus
-func (s *STMStore) StoreEmbedding(ctx context.Context, pageID string, embedding *models.EmbeddingData) error {
+// StoreEmbedding stores the vector embedding in Milvus with tenant scope
+func (s *STMStore) StoreEmbedding(ctx context.Context, tenantID, userID, agentID, pageID string, embedding *models.EmbeddingData) error {
 	start := time.Now()
 
 	// Set the page reference
@@ -681,7 +709,7 @@ func (s *STMStore) StoreEmbedding(ctx context.Context, pageID string, embedding 
 
 	// Store in Milvus if available
 	if s.milvus != nil {
-		if err := s.milvus.InsertEmbedding(ctx, pageID, embedding); err != nil {
+		if err := s.milvus.InsertEmbedding(ctx, tenantID, userID, agentID, pageID, embedding); err != nil {
 			log.Printf("WARN: Failed to store embedding in Milvus: %v", err)
 			// Fall back to Redis storage
 			return s.storeEmbeddingInRedis(ctx, pageID, embedding)
@@ -701,7 +729,7 @@ func (s *STMStore) StoreEmbedding(ctx context.Context, pageID string, embedding 
 func (s *STMStore) storeEmbeddingInRedis(ctx context.Context, pageID string, embedding *models.EmbeddingData) error {
 	start := time.Now()
 
-	embeddingKey := fmt.Sprintf("embedding:%s", pageID)
+	embeddingKey := s.generateEmbeddingKey(pageID)
 	embeddingJSON, err := json.Marshal(embedding)
 	if err != nil {
 		return fmt.Errorf("failed to marshal embedding: %w", err)
@@ -721,10 +749,14 @@ func (s *STMStore) storeEmbeddingInRedis(ctx context.Context, pageID string, emb
 
 // Helper functions
 
-func (s *STMStore) getLastDialoguePage(ctx context.Context, userID string) (*models.DialoguePage, error) {
+func (s *STMStore) getLastDialoguePage(ctx context.Context, tenantID, userID, agentID string) (*models.DialoguePage, error) {
 	collection := s.db.Collection(DialoguePagesCollection)
 
-	filter := bson.M{"userId": userID}
+	filter := bson.M{
+		"tenantId": tenantID,
+		"userId":   userID,
+		"agentId":  agentID,
+	}
 	opts := options.FindOne()
 	opts.SetSort(bson.D{{Key: "createdAt", Value: -1}}) // Most recent first
 
@@ -765,8 +797,8 @@ func (s *STMStore) updateDialogueChain(ctx context.Context, chainID string) erro
 
 // STM Store Retrieval Methods
 
-// RetrieveFromSTMStore performs semantic search on stored memories
-func (s *STMStore) RetrieveFromSTMStore(ctx context.Context, userID, query string, limit int) ([]*models.DialoguePage, error) {
+// RetrieveFromSTMStore performs semantic search on stored memories with tenant scope
+func (s *STMStore) RetrieveFromSTMStore(ctx context.Context, tenantID, userID, agentID, query string, limit int) ([]*models.DialoguePage, error) {
 	start := time.Now()
 
 	// Step 1: Create query embedding
@@ -776,7 +808,7 @@ func (s *STMStore) RetrieveFromSTMStore(ctx context.Context, userID, query strin
 	}
 
 	// Step 2: Find similar vectors from Redis (placeholder for vector DB)
-	pageIDs, err := s.findSimilarEmbeddings(ctx, userID, queryEmbedding.Vector, limit)
+	pageIDs, err := s.findSimilarEmbeddings(ctx, tenantID, userID, agentID, queryEmbedding.Vector, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find similar embeddings: %w", err)
 	}
@@ -794,8 +826,8 @@ func (s *STMStore) RetrieveFromSTMStore(ctx context.Context, userID, query strin
 	return pages, nil
 }
 
-// RetrieveSegments performs segment-level search using segment embeddings with access tracking
-func (s *STMStore) RetrieveSegments(ctx context.Context, query string, limit int) ([]models.Segment, error) {
+// RetrieveSegments performs segment-level search using segment embeddings with tenant scope
+func (s *STMStore) RetrieveSegments(ctx context.Context, tenantID, userID, agentID, query string, limit int) ([]models.Segment, error) {
 	if s.milvus == nil {
 		return []models.Segment{}, nil
 	}
@@ -805,7 +837,7 @@ func (s *STMStore) RetrieveSegments(ctx context.Context, query string, limit int
 		return nil, fmt.Errorf("failed to create query embedding: %w", err)
 	}
 
-	segIDs, _, err := s.milvus.SearchSimilarSegments(ctx, emb.Vector, limit)
+	segIDs, _, err := s.milvus.SearchSimilarSegments(ctx, tenantID, userID, agentID, emb.Vector, limit)
 	if err != nil || len(segIDs) == 0 {
 		return []models.Segment{}, nil
 	}
@@ -912,8 +944,8 @@ func (s *STMStore) CreateSegmentSummary(ctx context.Context, pages []models.Dial
 	return strings.TrimSpace(llmResp.Choices[0].Text), nil
 }
 
-// StoreSegmentEmbedding creates an embedding for a segment summary and stores it
-func (s *STMStore) StoreSegmentEmbedding(ctx context.Context, segmentID string, summary string) error {
+// StoreSegmentEmbedding creates an embedding for a segment summary and stores it with tenant scope
+func (s *STMStore) StoreSegmentEmbedding(ctx context.Context, tenantID, userID, agentID, segmentID string, summary string) error {
 	if s.milvus == nil {
 		return fmt.Errorf("milvus client not configured for segment embeddings")
 	}
@@ -921,7 +953,7 @@ func (s *STMStore) StoreSegmentEmbedding(ctx context.Context, segmentID string, 
 	if err != nil {
 		return fmt.Errorf("failed to create segment embedding: %w", err)
 	}
-	return s.milvus.InsertSegmentEmbedding(ctx, segmentID, emb)
+	return s.milvus.InsertSegmentEmbedding(ctx, tenantID, userID, agentID, segmentID, emb)
 }
 
 // GetRecentConversationContext retrieves recent dialogue pages for a user
@@ -993,13 +1025,13 @@ func (s *STMStore) GetDialogueChainPages(ctx context.Context, chainID string) ([
 
 // Helper functions for retrieval
 
-func (s *STMStore) findSimilarEmbeddings(ctx context.Context, userID string, queryVector []float64, limit int) ([]string, error) {
+func (s *STMStore) findSimilarEmbeddings(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int) ([]string, error) {
 	// Use Milvus if available
 	if s.milvus != nil {
-		pageIDs, scores, err := s.milvus.SearchSimilarEmbeddings(ctx, queryVector, limit)
+		pageIDs, scores, err := s.milvus.SearchSimilarEmbeddings(ctx, tenantID, userID, agentID, queryVector, limit)
 		if err != nil {
 			log.Printf("WARN: Milvus search failed, falling back to Redis: %v", err)
-			return s.findSimilarEmbeddingsInRedis(ctx, userID, queryVector, limit)
+			return s.findSimilarEmbeddingsInRedis(ctx, tenantID, userID, agentID, queryVector, limit)
 		}
 
 		log.Printf("INFO: Found %d similar embeddings in Milvus with scores: %v", len(pageIDs), scores)
@@ -1007,10 +1039,10 @@ func (s *STMStore) findSimilarEmbeddings(ctx context.Context, userID string, que
 	}
 
 	// Fall back to Redis
-	return s.findSimilarEmbeddingsInRedis(ctx, userID, queryVector, limit)
+	return s.findSimilarEmbeddingsInRedis(ctx, tenantID, userID, agentID, queryVector, limit)
 }
 
-func (s *STMStore) findSimilarEmbeddingsInRedis(ctx context.Context, userID string, queryVector []float64, limit int) ([]string, error) {
+func (s *STMStore) findSimilarEmbeddingsInRedis(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int) ([]string, error) {
 	// This is a simplified similarity search using Redis
 	// Get all embedding keys for this user (in practice, this would be optimized)
 	pattern := "embedding:*"

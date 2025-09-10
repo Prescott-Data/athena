@@ -18,8 +18,10 @@ type HeatFactors struct {
 // Segment represents a grouped set of dialogue pages promoted from STM to MTM
 type Segment struct {
 	ID           primitive.ObjectID   `json:"id" bson:"_id,omitempty"`
-	SegmentID    string               `json:"segmentId" bson:"segmentId"`
+	TenantID     string               `json:"tenantId" bson:"tenantId"`
 	UserID       string               `json:"userId" bson:"userId"`
+	AgentID      string               `json:"agentId" bson:"agentId"`
+	SegmentID    string               `json:"segmentId" bson:"segmentId"`
 	ChainID      string               `json:"chainId" bson:"chainId"`
 	PageIDs      []primitive.ObjectID `json:"pageIds" bson:"pageIds"`
 	TopicSummary string               `json:"topicSummary,omitempty" bson:"topicSummary,omitempty"`

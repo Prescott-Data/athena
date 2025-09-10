@@ -111,7 +111,7 @@ func (a *Archivist) RunOnce(ctx context.Context, maxPagesPerSegment int) error {
 
 	// 5) Store segment embedding (best-effort)
 	if finalSegment.TopicSummary != "" {
-		if err := a.stmStore.StoreSegmentEmbedding(ctx, finalSegment.SegmentID, finalSegment.TopicSummary); err != nil {
+		if err := a.stmStore.StoreSegmentEmbedding(ctx, oldestPage.TenantID, oldestPage.UserID, oldestPage.AgentID, finalSegment.SegmentID, finalSegment.TopicSummary); err != nil {
 			log.Printf("WARN: Failed to store segment embedding for %s: %v", finalSegment.SegmentID, err)
 		} else {
 			log.Printf("INFO: Stored embedding for segment %s", finalSegment.SegmentID)

@@ -214,6 +214,11 @@ func (s *STMCache) generateSTMKey(userID string) string {
 	return fmt.Sprintf("%s:user_%s", StmCacheKeyPrefix, userID)
 }
 
+// generateSTMKeyWithScope creates the Redis key for a user's STM cache with tenant/agent scope
+func (s *STMCache) generateSTMKeyWithScope(tenantID, userID, agentID string) string {
+	return fmt.Sprintf("%s:v1:%s:%s:%s:user_%s", StmCacheKeyPrefix, tenantID, userID, agentID, userID)
+}
+
 // GetCacheStats returns statistics about the STM cache for a user
 func (s *STMCache) GetCacheStats(ctx context.Context, userID string) (map[string]interface{}, error) {
 	cacheKey := s.generateSTMKey(userID)

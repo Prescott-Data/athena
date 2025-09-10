@@ -53,9 +53,9 @@ export MEMORY_OS_MILVUS_HOST="your-milvus-host"
 ./memory-server
 ```
 
-## 🔐 Authentication
+## 🔐 Authentication & Multi-Tenancy
 
-Memory OS supports multiple authentication layers:
+Memory OS supports multiple authentication layers and enforces enterprise-grade multi-tenancy.
 
 ### API Key Authentication
 ```bash
@@ -69,6 +69,22 @@ curl -H "X-JWT-Token: your-jwt-token" \
      http://localhost:8080/api/v1/sessions/session-id/context
 ```
 
+### Multi-Tenancy Enforcement
+
+- **Hierarchy**: `tenant_id / user_id / agent_id`
+- **Source of truth**: `tenant_id` and `user_id` are enforced from authentication (JWT/API key) and injected into request context. Client-supplied values are ignored.
+- **Isolation**:
+  - MongoDB collections (`dialogue_pages`, `segments`, `dialogue_chains`) use compound indexes on `tenantId,userId,agentId`.
+  - Redis keys for STM cache and queues are scoped by `tenant_id:user_id:agent_id`.
+  - Milvus collections include `tenantId,userId,agentId` fields for vector filtering.
+  - JanusGraph nodes/edges include `tenantId` (and when applicable `userId`/`agentId`).
+
+#### Required JWT Claims
+- `tenant_id` (string)
+- `user_id` (string)
+
+If using API keys, the service resolves `tenant_id` and `user_id` from the key configuration.
+
 ### mTLS (Optional)
 For production deployments, enable mutual TLS:
 ```bash
@@ -80,7 +96,7 @@ export MEMORY_OS_CLIENT_CA_CERT_FILE="/path/to/ca.crt"
 
 ## 📡 API Usage
 
-### Create Session
+### Create Session (tenant/user enforced from auth)
 ```bash
 curl -X POST http://localhost:8080/api/v1/sessions \
      -H "X-API-Key: your-api-key" \
@@ -88,7 +104,7 @@ curl -X POST http://localhost:8080/api/v1/sessions \
      -d '{"user_id": "user123", "metadata": {"app": "docintel"}}'
 ```
 
-### Store Interaction
+### Store Interaction (IDs from context; client values ignored for security)
 ```bash
 curl -X POST http://localhost:8080/api/v1/sessions/session-id/interactions \
      -H "X-API-Key: your-api-key" \
@@ -179,16 +195,26 @@ func main() {
 | `MEMORY_OS_GRPC_PORT` | gRPC server port | `9090` |
 | `MEMORY_OS_API_KEY` | Valid API key | `default-api-key` |
 | `MEMORY_OS_JWT_SECRET` | JWT signing secret | `your-secret-key` |
-| `MEMORY_OS_MONGODB_URI` | MongoDB connection string | Required |
-| `MEMORY_OS_REDIS_HOST` | Redis host | Required |
-| `MEMORY_OS_MILVUS_HOST` | Milvus host | Required |
+| `MONGO_URI` | MongoDB connection string | Required (e.g. `mongodb://user:pass@host:27017/memory_os?authSource=memory_os`) |
+| `MONGO_DB` | MongoDB database name | `memory_os` |
+| `REDIS_HOST` | Redis host | `localhost` |
+| `REDIS_PORT` | Redis port | `6379` |
+| `REDIS_PASSWORD` | Redis password | `` |
+| `REDIS_DB` | Redis DB index | `0` (tests may use `3`) |
+| `REDIS_POOL_SIZE` | Redis pool size | `10` |
+| `REDIS_POOL_TIMEOUT` | Redis pool timeout (s) | `30` |
+| `CACHE_TTL` | STM cache TTL (s) | `3600` |
+| `AZURE_OPENAI_ENDPOINT` | Azure OpenAI endpoint | Required for embeddings |
+| `AZURE_OPENAI_API_KEY` | Azure OpenAI API key | Required for embeddings |
+| `MILVUS_HOST` | Milvus host | Optional (vector search disabled if missing) |
+| `MILVUS_PORT` | Milvus port | `19530` |
 
 ### Memory Configuration
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `MEMORY_OS_STM_CACHE_MAX_TURNS` | STM cache size | `10` |
-| `MEMORY_OS_STM_CACHE_TTL_HOURS` | STM cache TTL | `2` |
+| `STM_CACHE_MAX_TURNS` | STM cache size | `10` |
+| `STM_CACHE_TTL_HOURS` | STM cache TTL | `2` |
 | `MEMORY_OS_MTM_QUALITY_MODE` | Quality validation mode | `balanced` |
 | `MEMORY_OS_MTM_HEAT_THRESHOLD` | Heat promotion threshold | `0.8` |
 | `MEMORY_OS_LTM_ENABLED` | Enable LTM features | `true` |
@@ -240,9 +266,15 @@ services:
     environment:
       - MEMORY_OS_API_KEY=${API_KEY}
       - MEMORY_OS_JWT_SECRET=${JWT_SECRET}
-      - MEMORY_OS_MONGODB_URI=${MONGODB_URI}
-      - MEMORY_OS_REDIS_HOST=${REDIS_HOST}
-      - MEMORY_OS_MILVUS_HOST=${MILVUS_HOST}
+      - MONGO_URI=${MONGODB_URI}
+      - MONGO_DB=memory_os
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT}
+      - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY}
+      - MILVUS_HOST=${MILVUS_HOST}
+      - MILVUS_PORT=${MILVUS_PORT}
     restart: unless-stopped
 ```
 
@@ -264,12 +296,26 @@ services:
 - **Storage**: JanusGraph + MongoDB
 - **Features**: Persona modeling, relationship mapping
 
-## 🔧 Development
+## 🔧 Development & Tests
 
-### Running Tests
+### Running E2E Tests
+Ensure infrastructure is reachable (Azure or local):
+- MongoDB with authentication (example): `mongodb://memory_user:memory_password_2024@<host>:27017/memory_os?authSource=memory_os`
+- Redis (set `REDIS_PASSWORD` if enabled)
+- Milvus optional; if not set, vector search is disabled with a warning.
+
 ```bash
-go test ./...
+export MONGO_URI="mongodb://memory_user:memory_password_2024@<mongo-host>:27017/memory_os?authSource=memory_os"
+export MONGO_DB=memory_os
+export REDIS_HOST=<redis-host>
+export REDIS_PORT=6379
+export REDIS_PASSWORD=<redis-password>
+export REDIS_DB=3
+
+go test -v ./internal/memory -run "TestTenantIsolation|TestAuthValidation"
 ```
+
+If Redis vars are empty, sensible defaults are applied to avoid test crashes.
 
 ### Building
 ```bash

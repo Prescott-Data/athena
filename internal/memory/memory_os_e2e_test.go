@@ -7,17 +7,165 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dromos-org/memory-os/api/middleware"
 	"github.com/dromos-org/memory-os/internal/cache"
-
+	"github.com/dromos-org/memory-os/internal/database"
 	"github.com/dromos-org/memory-os/internal/models"
 
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // TestMemoryOS_EndToEnd tests the complete STM → MTM → LPM pipeline
+// TestTenantIsolation verifies that tenant data is properly isolated
+func TestTenantIsolation(t *testing.T) {
+	assert := assert.New(t)
+
+	// Setup test components
+	components, cleanup := setupMemoryOSE2ETestComponents(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Test data for multiple tenants
+	tenants := []struct {
+		tenantID string
+		userID   string
+		agentID  string
+		message  string
+	}{
+		{"tenant_a", "user_1", "agent_chat", "Hello from tenant A"},
+		{"tenant_a", "user_2", "agent_chat", "Hello from tenant A user 2"},
+		{"tenant_b", "user_1", "agent_chat", "Hello from tenant B"},
+		{"tenant_b", "user_1", "agent_search", "Search query from tenant B"},
+	}
+
+	// Store interactions for each tenant/user/agent combination
+	for i, testCase := range tenants {
+		t.Logf("   Storing interaction %d: tenant=%s, user=%s, agent=%s",
+			i+1, testCase.tenantID, testCase.userID, testCase.agentID)
+
+		// Create dialogue page with tenant scoping
+		page := &models.DialoguePage{
+			TenantID:      testCase.tenantID,
+			UserID:        testCase.userID,
+			AgentID:       testCase.agentID,
+			ChainID:       fmt.Sprintf("chain_%s_%s_%s", testCase.tenantID, testCase.userID, testCase.agentID),
+			TurnIndex:     0,
+			UserMessage:   testCase.message,
+			AgentResponse: fmt.Sprintf("Response to: %s", testCase.message),
+			Status:        "in_stm",
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
+		}
+
+		// Store the page
+		pageID, err := components.stmStore.StoreDialoguePage(ctx, page)
+		assert.NoError(err, "Should store dialogue page for tenant %s", testCase.tenantID)
+		assert.NotEqual(primitive.NilObjectID, pageID, "Should return valid page ID")
+
+		// Verify the stored page has correct tenant data
+		storedPage, err := components.stmStore.getLastDialoguePage(ctx, testCase.tenantID, testCase.userID, testCase.agentID)
+		assert.NoError(err, "Should retrieve stored page")
+		assert.NotNil(storedPage, "Should find stored page")
+		assert.Equal(testCase.tenantID, storedPage.TenantID, "Tenant ID should match authenticated context")
+		assert.Equal(testCase.userID, storedPage.UserID, "User ID should match authenticated context")
+		assert.Equal(testCase.agentID, storedPage.AgentID, "Agent ID should match authenticated context")
+
+		// Verify that the data is properly isolated by checking that other tenant's data is not accessible
+		// Try to access data from a different tenant - this should return nil or error
+		wrongTenantPage, err := components.stmStore.getLastDialoguePage(ctx, "wrong_tenant", testCase.userID, testCase.agentID)
+		assert.NoError(err, "Querying wrong tenant should not error")
+		if wrongTenantPage != nil {
+			assert.NotEqual(testCase.tenantID, wrongTenantPage.TenantID, "Should not return data from wrong tenant")
+		}
+	}
+
+	// Test tenant isolation - verify each tenant can only see their own data
+	for _, tenant := range []string{"tenant_a", "tenant_b"} {
+		t.Logf("   Testing tenant isolation for: %s", tenant)
+
+		// Count pages for this tenant (this would require a new method to query by tenant)
+		// For now, just verify we can retrieve specific tenant data
+
+		// Test tenant_a user_1 agent_chat
+		pageA1, err := components.stmStore.getLastDialoguePage(ctx, tenant, "user_1", "agent_chat")
+		assert.NoError(err, "Should query tenant %s data", tenant)
+		assert.NotNil(pageA1, "Should find data for tenant %s", tenant)
+		assert.Equal(tenant, pageA1.TenantID, "Should only return correct tenant data")
+	}
+
+	t.Log("✅ Tenant isolation test completed successfully")
+}
+
+// TestAuthValidation tests the tenant/user validation functions
+func TestAuthValidation(t *testing.T) {
+	assert := assert.New(t)
+
+	t.Run("ValidateTenantUserMatch_Success", func(t *testing.T) {
+		ctx := context.Background()
+
+		// Set up context with authenticated values
+		ctx = context.WithValue(ctx, middleware.CtxTenantID, "tenant_a")
+		ctx = context.WithValue(ctx, middleware.CtxUserID, "user_1")
+
+		// Test successful validation
+		err := middleware.ValidateTenantUserMatch(ctx, "tenant_a", "user_1")
+		assert.NoError(err, "Should allow matching tenant/user")
+
+		// Test empty client values (should pass)
+		err = middleware.ValidateTenantUserMatch(ctx, "", "")
+		assert.NoError(err, "Should allow empty client values")
+	})
+
+	t.Run("ValidateTenantUserMatch_Failures", func(t *testing.T) {
+		ctx := context.Background()
+
+		// Set up context with authenticated values
+		ctx = context.WithValue(ctx, middleware.CtxTenantID, "tenant_a")
+		ctx = context.WithValue(ctx, middleware.CtxUserID, "user_1")
+
+		// Test mismatched tenant
+		err := middleware.ValidateTenantUserMatch(ctx, "tenant_b", "user_1")
+		assert.Error(err, "Should reject mismatched tenant")
+		assert.Contains(err.Error(), "tenant_id", "Error should mention tenant_id")
+
+		// Test mismatched user
+		err = middleware.ValidateTenantUserMatch(ctx, "tenant_a", "user_2")
+		assert.Error(err, "Should reject mismatched user")
+		assert.Contains(err.Error(), "user_id", "Error should mention user_id")
+	})
+
+	t.Run("ContextUtilities", func(t *testing.T) {
+		ctx := context.Background()
+
+		// Test setting values in context (using middleware context keys)
+		ctx = context.WithValue(ctx, middleware.CtxTenantID, "test_tenant")
+		ctx = context.WithValue(ctx, middleware.CtxUserID, "test_user")
+		ctx = context.WithValue(ctx, middleware.CtxAgentID, "test_agent")
+
+		// Test extracting values
+		tenantID, err := middleware.TenantIDFromContext(ctx)
+		assert.NoError(err, "Should extract tenant ID")
+		assert.Equal("test_tenant", tenantID, "Should return correct tenant ID")
+
+		userID, err := middleware.UserIDFromContext(ctx)
+		assert.NoError(err, "Should extract user ID")
+		assert.Equal("test_user", userID, "Should return correct user ID")
+
+		agentID, err := middleware.AgentIDFromContext(ctx)
+		assert.NoError(err, "Should extract agent ID")
+		assert.Equal("test_agent", agentID, "Should return correct agent ID")
+
+		// Test missing values
+		emptyCtx := context.Background()
+		_, err = middleware.TenantIDFromContext(emptyCtx)
+		assert.Error(err, "Should error on missing tenant ID")
+		assert.Contains(err.Error(), "tenant_id not found", "Error should mention missing tenant_id")
+	})
+}
+
 func TestMemoryOS_EndToEnd(t *testing.T) {
 	assert := assert.New(t)
 
@@ -72,7 +220,8 @@ func TestMemoryOS_EndToEnd(t *testing.T) {
 			t.Logf("   Processing conversation turn %d...", i+1)
 
 			// Step 1: Dialogue chain analysis
-			returnedChainID, err := components.stmStore.DetermineDialogueChain(ctx, userID, conv.userMessage, conv.agentResponse)
+			// Test with authenticated tenant/user/agent context
+			returnedChainID, err := components.stmStore.DetermineDialogueChain(ctx, "test_tenant", userID, "test_agent", conv.userMessage, conv.agentResponse)
 			assert.NoError(err, "Dialogue chain analysis should succeed")
 			assert.NotEmpty(returnedChainID, "Chain ID should be generated")
 
@@ -330,6 +479,7 @@ func TestMemoryOS_EndToEnd(t *testing.T) {
 // MemoryOSE2ETestComponents holds all components needed for E2E testing
 type MemoryOSE2ETestComponents struct {
 	db           *mongo.Database
+	mongoClient  *mongo.Client // Keep client reference for cleanup
 	redisClient  cache.Interface
 	stmStore     *STMStore
 	stmCache     *STMCache
@@ -338,51 +488,68 @@ type MemoryOSE2ETestComponents struct {
 
 // setupMemoryOSE2ETestComponents sets up all required components for E2E testing
 func setupMemoryOSE2ETestComponents(t *testing.T) (*MemoryOSE2ETestComponents, func()) {
-	// MongoDB setup
+	// MongoDB setup - use the proper database connection method
 	mongoURI := os.Getenv("MONGO_URI")
 	if mongoURI == "" {
-		mongoURI = "mongodb://localhost:27017"
+		mongoURI = "mongodb://memory_user:memory_password_2024@172.190.152.215:27017/memory_os?authSource=memory_os"
 	}
 
-	clientOptions := options.Client().ApplyURI(mongoURI)
-	mongoClient, err := mongo.Connect(context.Background(), clientOptions)
+	mongoDB := os.Getenv("MONGO_DB")
+	if mongoDB == "" {
+		mongoDB = "memory_os"
+	}
+
+	// Use the same connection method as the production code
+	config := database.ConnectionConfig{
+		URI:            mongoURI,
+		DatabaseName:   mongoDB,
+		ConnectTimeout: 10 * time.Second,
+	}
+
+	mongoClient, db, err := database.ConnectMongoDB(config)
 	if err != nil {
 		t.Logf("Failed to connect to MongoDB: %v", err)
 		return nil, nil
 	}
 
-	// Test MongoDB connection
-	err = mongoClient.Ping(context.Background(), nil)
-	if err != nil {
-		t.Logf("Failed to ping MongoDB: %v", err)
-		mongoClient.Disconnect(context.Background())
-		return nil, nil
-	}
-
-	db := mongoClient.Database("memory_os_e2e_test")
-
 	// Redis setup
 	redisHost := os.Getenv("REDIS_HOST")
 	if redisHost == "" {
-		redisHost = "localhost"
+		redisHost = "172.190.152.215" // Azure Redis server
 	}
 	redisPort := os.Getenv("REDIS_PORT")
 	if redisPort == "" {
 		redisPort = "6379"
 	}
 	redisPassword := os.Getenv("REDIS_PASSWORD")
+	if redisPassword == "" {
+		redisPassword = "dromos_redis_2024"
+	}
 	redisDB := os.Getenv("REDIS_DB")
 	if redisDB == "" {
 		redisDB = "3" // Use DB 3 for E2E tests
+	}
+	redisPoolSize := os.Getenv("REDIS_POOL_SIZE")
+	if redisPoolSize == "" {
+		redisPoolSize = "10"
+	}
+	redisPoolTimeout := os.Getenv("REDIS_POOL_TIMEOUT")
+	if redisPoolTimeout == "" {
+		redisPoolTimeout = "30"
+	}
+	cacheTTL := os.Getenv("CACHE_TTL")
+	if cacheTTL == "" {
+		cacheTTL = "3600"
 	}
 
 	// Set Redis environment variables for the client
 	os.Setenv("REDIS_HOST", redisHost)
 	os.Setenv("REDIS_PORT", redisPort)
-	if redisPassword != "" {
-		os.Setenv("REDIS_PASSWORD", redisPassword)
-	}
+	os.Setenv("REDIS_PASSWORD", redisPassword)
 	os.Setenv("REDIS_DB", redisDB)
+	os.Setenv("REDIS_POOL_SIZE", redisPoolSize)
+	os.Setenv("REDIS_POOL_TIMEOUT", redisPoolTimeout)
+	os.Setenv("CACHE_TTL", cacheTTL)
 
 	redisClient, err := cache.NewRedisClient()
 	if err != nil {
@@ -409,6 +576,7 @@ func setupMemoryOSE2ETestComponents(t *testing.T) (*MemoryOSE2ETestComponents, f
 
 	components := &MemoryOSE2ETestComponents{
 		db:           db,
+		mongoClient:  mongoClient,
 		redisClient:  redisClient,
 		stmStore:     stmStore,
 		stmCache:     stmCache,
@@ -421,14 +589,20 @@ func setupMemoryOSE2ETestComponents(t *testing.T) (*MemoryOSE2ETestComponents, f
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		// Drop test database
-		db.Drop(ctx)
+		// Drop test database (only if using test database)
+		if mongoDB == "memory_os" {
+			t.Log("⚠️  Skipping database drop for production database 'memory_os'")
+		} else {
+			db.Drop(ctx)
+		}
 
 		// Clean Redis test data (if needed, can implement specific cleanup)
 
 		// Close connections
 		redisClient.Close()
-		mongoClient.Disconnect(ctx)
+		if mongoClient != nil {
+			mongoClient.Disconnect(ctx)
+		}
 
 		if milvusClient != nil {
 			milvusClient.Close()

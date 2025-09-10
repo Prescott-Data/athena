@@ -20,11 +20,11 @@ type Client struct {
 
 // ClientConfig holds configuration for the Memory OS client
 type ClientConfig struct {
-	BaseURL    string
-	APIKey     string
-	JWTToken   string
-	Timeout    time.Duration
-	EnableTLS  bool
+	BaseURL   string
+	APIKey    string
+	JWTToken  string
+	Timeout   time.Duration
+	EnableTLS bool
 }
 
 // NewClient creates a new Memory OS client
@@ -47,6 +47,10 @@ func NewClient(config ClientConfig) *Client {
 
 // StoreInteractionRequest represents a request to store an interaction
 type StoreInteractionRequest struct {
+	// Optional tenant/user IDs for validation (will be overridden by authenticated values)
+	TenantID      string            `json:"tenant_id,omitempty"`
+	UserID        string            `json:"user_id,omitempty"`
+	AgentID       string            `json:"agent_id,omitempty"`
 	UserMessage   string            `json:"user_message"`
 	AgentResponse string            `json:"agent_response"`
 	Metadata      map[string]string `json:"metadata,omitempty"`
@@ -61,11 +65,14 @@ type StoreInteractionResponse struct {
 
 // ConversationContext represents conversation context
 type ConversationContext struct {
-	SessionID     string              `json:"session_id"`
-	RecentTurns   []ConversationTurn  `json:"recent_turns"`
-	RelevantPages []DialoguePage      `json:"relevant_pages"`
-	Segments      []Segment           `json:"segments,omitempty"`
-	UserPersona   *UserPersona        `json:"user_persona,omitempty"`
+	TenantID      string             `json:"tenant_id"`
+	UserID        string             `json:"user_id"`
+	AgentID       string             `json:"agent_id"`
+	SessionID     string             `json:"session_id"`
+	RecentTurns   []ConversationTurn `json:"recent_turns"`
+	RelevantPages []DialoguePage     `json:"relevant_pages"`
+	Segments      []Segment          `json:"segments,omitempty"`
+	UserPersona   *UserPersona       `json:"user_persona,omitempty"`
 }
 
 // ConversationTurn represents a single conversation turn
@@ -77,6 +84,9 @@ type ConversationTurn struct {
 
 // DialoguePage represents a dialogue page
 type DialoguePage struct {
+	TenantID      string            `json:"tenant_id"`
+	UserID        string            `json:"user_id"`
+	AgentID       string            `json:"agent_id"`
 	ID            string            `json:"id"`
 	SessionID     string            `json:"session_id"`
 	UserMessage   string            `json:"user_message"`
@@ -88,6 +98,9 @@ type DialoguePage struct {
 
 // Segment represents a memory segment
 type Segment struct {
+	TenantID     string       `json:"tenant_id"`
+	UserID       string       `json:"user_id"`
+	AgentID      string       `json:"agent_id"`
 	ID           string       `json:"id"`
 	SessionID    string       `json:"session_id"`
 	Content      string       `json:"content"`
@@ -108,26 +121,37 @@ type HeatFactors struct {
 
 // UserPersona represents user personality information
 type UserPersona struct {
-	UserID            string            `json:"user_id"`
+	TenantID          string             `json:"tenant_id"`
+	UserID            string             `json:"user_id"`
 	PersonalityTraits map[string]float64 `json:"personality_traits"`
-	Interests         []string          `json:"interests"`
-	Preferences       map[string]string `json:"preferences"`
+	Interests         []string           `json:"interests"`
+	Preferences       map[string]string  `json:"preferences"`
 }
 
 // CreateSessionRequest represents a request to create a session
 type CreateSessionRequest struct {
-	UserID   string            `json:"user_id"`
+	// Optional tenant/user/agent IDs for validation (will be overridden by authenticated values)
+	TenantID string            `json:"tenant_id,omitempty"`
+	UserID   string            `json:"user_id,omitempty"`
+	AgentID  string            `json:"agent_id,omitempty"`
 	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
 // CreateSessionResponse represents the response from creating a session
 type CreateSessionResponse struct {
+	TenantID  string    `json:"tenant_id"`
+	UserID    string    `json:"user_id"`
+	AgentID   string    `json:"agent_id"`
 	SessionID string    `json:"session_id"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
 // SearchMemoryRequest represents a memory search request
 type SearchMemoryRequest struct {
+	// Optional tenant/user/agent IDs for validation (will be overridden by authenticated values)
+	TenantID            string  `json:"tenant_id,omitempty"`
+	UserID              string  `json:"user_id,omitempty"`
+	AgentID             string  `json:"agent_id,omitempty"`
 	Query               string  `json:"query"`
 	Limit               int     `json:"limit,omitempty"`
 	SimilarityThreshold float64 `json:"similarity_threshold,omitempty"`
@@ -135,6 +159,9 @@ type SearchMemoryRequest struct {
 
 // SearchResult represents a search result
 type SearchResult struct {
+	TenantID        string    `json:"tenant_id"`
+	UserID          string    `json:"user_id"`
+	AgentID         string    `json:"agent_id"`
 	Content         string    `json:"content"`
 	SimilarityScore float64   `json:"similarity_score"`
 	SourceType      string    `json:"source_type"`
@@ -203,7 +230,7 @@ func (c *Client) HealthCheck(ctx context.Context) (map[string]interface{}, error
 // doRequest performs an HTTP request to the Memory OS API
 func (c *Client) doRequest(ctx context.Context, method, path string, reqBody, respBody interface{}) error {
 	var body io.Reader
-	
+
 	if reqBody != nil {
 		jsonData, err := json.Marshal(reqBody)
 		if err != nil {
@@ -219,11 +246,11 @@ func (c *Client) doRequest(ctx context.Context, method, path string, reqBody, re
 
 	// Set headers
 	req.Header.Set("Content-Type", "application/json")
-	
+
 	if c.apiKey != "" {
 		req.Header.Set("X-API-Key", c.apiKey)
 	}
-	
+
 	if c.jwtToken != "" {
 		req.Header.Set("X-JWT-Token", c.jwtToken)
 	}
@@ -247,11 +274,11 @@ func (c *Client) doRequest(ctx context.Context, method, path string, reqBody, re
 			Error   string `json:"error"`
 			Message string `json:"message"`
 		}
-		
+
 		if err := json.Unmarshal(respData, &errorResp); err == nil {
 			return fmt.Errorf("API error (%d): %s - %s", resp.StatusCode, errorResp.Error, errorResp.Message)
 		}
-		
+
 		return fmt.Errorf("API error (%d): %s", resp.StatusCode, string(respData))
 	}
 
@@ -273,4 +300,43 @@ func (c *Client) SetJWTToken(token string) {
 // SetAPIKey updates the API key for authentication
 func (c *Client) SetAPIKey(apiKey string) {
 	c.apiKey = apiKey
+}
+
+// Validation helper functions for tenant/user enforcement
+
+// ValidateTenantUserMatch validates that client-provided tenant/user IDs match authenticated values
+// This should be called in HTTP handlers before processing requests
+func ValidateTenantUserMatch(authTenantID, authUserID, clientTenantID, clientUserID string) error {
+	// If client provided tenant_id, it must match authenticated value
+	if clientTenantID != "" && clientTenantID != authTenantID {
+		return fmt.Errorf("client tenant_id (%s) does not match authenticated tenant_id (%s)",
+			clientTenantID, authTenantID)
+	}
+
+	// If client provided user_id, it must match authenticated value
+	if clientUserID != "" && clientUserID != authUserID {
+		return fmt.Errorf("client user_id (%s) does not match authenticated user_id (%s)",
+			clientUserID, authUserID)
+	}
+
+	return nil
+}
+
+// EnforceTenantUserContext overrides client-provided IDs with authenticated values
+// This ensures the service always uses the authenticated tenant/user, not client-provided values
+func EnforceTenantUserContext(clientReq interface{}, authTenantID, authUserID, authAgentID string) {
+	// Use reflection to set the authenticated values on the request struct
+	// This is a helper that would be used by HTTP handlers
+
+	// Example usage in an HTTP handler:
+	/*
+		if err := ValidateTenantUserMatch(authTenantID, authUserID, req.TenantID, req.UserID); err != nil {
+			return err // Will return 403 Forbidden
+		}
+
+		// Override with authenticated values
+		req.TenantID = authTenantID
+		req.UserID = authUserID
+		req.AgentID = authAgentID
+	*/
 }

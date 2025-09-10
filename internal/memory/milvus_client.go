@@ -26,6 +26,12 @@ const (
 	SegmentIDFieldName = "segment_id"
 	// TimestampFieldName is the timestamp field name
 	TimestampFieldName = "created_at"
+	// TenantIDFieldName is the tenant ID field name
+	TenantIDFieldName = "tenant_id"
+	// UserIDFieldName is the user ID field name
+	UserIDFieldName = "user_id"
+	// AgentIDFieldName is the agent ID field name
+	AgentIDFieldName = "agent_id"
 	// VectorDimension is the vector dimension (adjust based on your embedding model)
 	VectorDimension = 1536 // Azure OpenAI text-embedding-ada-002 output dimension
 )
@@ -125,6 +131,27 @@ func (mc *MilvusClient) initializeCollection(ctx context.Context) error {
 				},
 			},
 			{
+				Name:     TenantIDFieldName,
+				DataType: entity.FieldTypeVarChar,
+				TypeParams: map[string]string{
+					entity.TypeParamMaxLength: "64",
+				},
+			},
+			{
+				Name:     UserIDFieldName,
+				DataType: entity.FieldTypeVarChar,
+				TypeParams: map[string]string{
+					entity.TypeParamMaxLength: "64",
+				},
+			},
+			{
+				Name:     AgentIDFieldName,
+				DataType: entity.FieldTypeVarChar,
+				TypeParams: map[string]string{
+					entity.TypeParamMaxLength: "64",
+				},
+			},
+			{
 				Name:     VectorFieldName,
 				DataType: entity.FieldTypeFloatVector,
 				TypeParams: map[string]string{
@@ -205,6 +232,27 @@ func (mc *MilvusClient) initializeSegmentCollection(ctx context.Context) error {
 				TypeParams: map[string]string{entity.TypeParamMaxLength: "64"},
 			},
 			{
+				Name:     TenantIDFieldName,
+				DataType: entity.FieldTypeVarChar,
+				TypeParams: map[string]string{
+					entity.TypeParamMaxLength: "64",
+				},
+			},
+			{
+				Name:     UserIDFieldName,
+				DataType: entity.FieldTypeVarChar,
+				TypeParams: map[string]string{
+					entity.TypeParamMaxLength: "64",
+				},
+			},
+			{
+				Name:     AgentIDFieldName,
+				DataType: entity.FieldTypeVarChar,
+				TypeParams: map[string]string{
+					entity.TypeParamMaxLength: "64",
+				},
+			},
+			{
 				Name:       VectorFieldName,
 				DataType:   entity.FieldTypeFloatVector,
 				TypeParams: map[string]string{entity.TypeParamDim: fmt.Sprintf("%d", VectorDimension)},
@@ -229,8 +277,8 @@ func (mc *MilvusClient) initializeSegmentCollection(ctx context.Context) error {
 	return nil
 }
 
-// InsertEmbedding stores a vector embedding in Milvus
-func (mc *MilvusClient) InsertEmbedding(ctx context.Context, pageID string, embedding *models.EmbeddingData) error {
+// InsertEmbedding stores a vector embedding in Milvus with tenant/user/agent scope
+func (mc *MilvusClient) InsertEmbedding(ctx context.Context, tenantID, userID, agentID, pageID string, embedding *models.EmbeddingData) error {
 	if len(embedding.Vector) != VectorDimension {
 		return fmt.Errorf("vector dimension mismatch: expected %d, got %d", VectorDimension, len(embedding.Vector))
 	}
@@ -241,13 +289,16 @@ func (mc *MilvusClient) InsertEmbedding(ctx context.Context, pageID string, embe
 		vectorFloat32[i] = float32(v)
 	}
 
-	// Prepare data
+	// Prepare data with tenant/user/agent scope
+	tenantIDColumn := entity.NewColumnVarChar(TenantIDFieldName, []string{tenantID})
+	userIDColumn := entity.NewColumnVarChar(UserIDFieldName, []string{userID})
+	agentIDColumn := entity.NewColumnVarChar(AgentIDFieldName, []string{agentID})
 	pageIDColumn := entity.NewColumnVarChar(PageIDFieldName, []string{pageID})
 	vectorColumn := entity.NewColumnFloatVector(VectorFieldName, VectorDimension, [][]float32{vectorFloat32})
 	timestampColumn := entity.NewColumnInt64(TimestampFieldName, []int64{embedding.CreatedAt.Unix()})
 
 	// Insert data
-	_, err := mc.client.Insert(ctx, STMCollectionName, "", pageIDColumn, vectorColumn, timestampColumn)
+	_, err := mc.client.Insert(ctx, STMCollectionName, "", tenantIDColumn, userIDColumn, agentIDColumn, pageIDColumn, vectorColumn, timestampColumn)
 	if err != nil {
 		return fmt.Errorf("failed to insert embedding: %w", err)
 	}
@@ -260,8 +311,8 @@ func (mc *MilvusClient) InsertEmbedding(ctx context.Context, pageID string, embe
 	return nil
 }
 
-// InsertSegmentEmbedding stores a segment embedding in Milvus
-func (mc *MilvusClient) InsertSegmentEmbedding(ctx context.Context, segmentID string, embedding *models.EmbeddingData) error {
+// InsertSegmentEmbedding stores a segment embedding in Milvus with tenant/user/agent scope
+func (mc *MilvusClient) InsertSegmentEmbedding(ctx context.Context, tenantID, userID, agentID, segmentID string, embedding *models.EmbeddingData) error {
 	if len(embedding.Vector) != VectorDimension {
 		return fmt.Errorf("vector dimension mismatch: expected %d, got %d", VectorDimension, len(embedding.Vector))
 	}
@@ -269,10 +320,16 @@ func (mc *MilvusClient) InsertSegmentEmbedding(ctx context.Context, segmentID st
 	for i, v := range embedding.Vector {
 		vectorFloat32[i] = float32(v)
 	}
+
+	// Prepare data with tenant/user/agent scope
+	tenantIDColumn := entity.NewColumnVarChar(TenantIDFieldName, []string{tenantID})
+	userIDColumn := entity.NewColumnVarChar(UserIDFieldName, []string{userID})
+	agentIDColumn := entity.NewColumnVarChar(AgentIDFieldName, []string{agentID})
 	segIDColumn := entity.NewColumnVarChar(SegmentIDFieldName, []string{segmentID})
 	vectorColumn := entity.NewColumnFloatVector(VectorFieldName, VectorDimension, [][]float32{vectorFloat32})
 	tsColumn := entity.NewColumnInt64(TimestampFieldName, []int64{embedding.CreatedAt.Unix()})
-	if _, err := mc.client.Insert(ctx, SegmentCollectionName, "", segIDColumn, vectorColumn, tsColumn); err != nil {
+
+	if _, err := mc.client.Insert(ctx, SegmentCollectionName, "", tenantIDColumn, userIDColumn, agentIDColumn, segIDColumn, vectorColumn, tsColumn); err != nil {
 		return fmt.Errorf("failed to insert segment embedding: %w", err)
 	}
 	if err := mc.client.Flush(ctx, SegmentCollectionName, false); err != nil {
@@ -282,14 +339,20 @@ func (mc *MilvusClient) InsertSegmentEmbedding(ctx context.Context, segmentID st
 }
 
 // GetEmbeddingByPageID retrieves a stored embedding by page ID from Milvus
-func (mc *MilvusClient) GetEmbeddingByPageID(ctx context.Context, pageID string) (*models.EmbeddingData, error) {
-	// Query by primary key (pageID)
+func (mc *MilvusClient) GetEmbeddingByPageID(ctx context.Context, tenantID, userID, agentID, pageID string) (*models.EmbeddingData, error) {
+	// Query with tenant/user/agent scope
+	expr := fmt.Sprintf(`%s == "%s" && %s == "%s" && %s == "%s" && %s == "%s"`,
+		TenantIDFieldName, tenantID,
+		UserIDFieldName, userID,
+		AgentIDFieldName, agentID,
+		PageIDFieldName, pageID)
+
 	results, err := mc.client.Query(
 		ctx,
 		STMCollectionName,
-		nil, // no partition
-		fmt.Sprintf(`%s == "%s"`, PageIDFieldName, pageID), // expression to filter by pageID
-		[]string{VectorFieldName, TimestampFieldName},      // output fields
+		nil,  // no partition
+		expr, // expression to filter by tenant/user/agent/pageID
+		[]string{VectorFieldName, TimestampFieldName}, // output fields
 	)
 
 	if err != nil {
@@ -311,7 +374,12 @@ func (mc *MilvusClient) GetEmbeddingByPageID(ctx context.Context, pageID string)
 		return nil, fmt.Errorf("unexpected vector field type")
 	}
 
-	vectorFloat32 := vectorCol.Data()[0]
+	vectorData := vectorCol.Data()
+	if len(vectorData) == 0 {
+		return nil, fmt.Errorf("no vector data found for pageID: %s", pageID)
+	}
+
+	vectorFloat32 := vectorData[0]
 
 	// Convert float32 to float64
 	vector := make([]float64, len(vectorFloat32))
@@ -339,8 +407,8 @@ func (mc *MilvusClient) GetEmbeddingByPageID(ctx context.Context, pageID string)
 	}, nil
 }
 
-// SearchSimilarEmbeddings finds similar STM vectors in Milvus
-func (mc *MilvusClient) SearchSimilarEmbeddings(ctx context.Context, queryVector []float64, limit int) ([]string, []float32, error) {
+// SearchSimilarEmbeddings finds similar STM vectors in Milvus with tenant/user/agent scope
+func (mc *MilvusClient) SearchSimilarEmbeddings(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int) ([]string, []float32, error) {
 	if len(queryVector) != VectorDimension {
 		return nil, nil, fmt.Errorf("query vector dimension mismatch: expected %d, got %d", VectorDimension, len(queryVector))
 	}
@@ -354,12 +422,18 @@ func (mc *MilvusClient) SearchSimilarEmbeddings(ctx context.Context, queryVector
 	// Search parameters
 	sp, _ := entity.NewIndexHNSWSearchParam(200)
 
+	// Filter expression for tenant/user/agent scope
+	expr := fmt.Sprintf(`%s == "%s" && %s == "%s" && %s == "%s"`,
+		TenantIDFieldName, tenantID,
+		UserIDFieldName, userID,
+		AgentIDFieldName, agentID)
+
 	// Perform search
 	results, err := mc.client.Search(
 		ctx,
 		STMCollectionName,
 		nil,                       // no partition
-		"",                        // no expression
+		expr,                      // tenant/user/agent filter
 		[]string{PageIDFieldName}, // output fields
 		[]entity.Vector{entity.FloatVector(queryFloat32)},
 		VectorFieldName,
@@ -402,8 +476,8 @@ func (mc *MilvusClient) SearchSimilarEmbeddings(ctx context.Context, queryVector
 	return pageIDs, scores, nil
 }
 
-// SearchSimilarSegments finds similar Segment vectors in Milvus
-func (mc *MilvusClient) SearchSimilarSegments(ctx context.Context, queryVector []float64, limit int) ([]string, []float32, error) {
+// SearchSimilarSegments finds similar Segment vectors in Milvus with tenant/user/agent scope
+func (mc *MilvusClient) SearchSimilarSegments(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int) ([]string, []float32, error) {
 	if len(queryVector) != VectorDimension {
 		return nil, nil, fmt.Errorf("query vector dimension mismatch: expected %d, got %d", VectorDimension, len(queryVector))
 	}
@@ -412,11 +486,18 @@ func (mc *MilvusClient) SearchSimilarSegments(ctx context.Context, queryVector [
 		q[i] = float32(v)
 	}
 	sp, _ := entity.NewIndexHNSWSearchParam(200)
+
+	// Filter expression for tenant/user/agent scope
+	expr := fmt.Sprintf(`%s == "%s" && %s == "%s" && %s == "%s"`,
+		TenantIDFieldName, tenantID,
+		UserIDFieldName, userID,
+		AgentIDFieldName, agentID)
+
 	results, err := mc.client.Search(
 		ctx,
 		SegmentCollectionName,
 		nil,
-		"",
+		expr, // tenant/user/agent filter
 		[]string{SegmentIDFieldName},
 		[]entity.Vector{entity.FloatVector(q)},
 		VectorFieldName,

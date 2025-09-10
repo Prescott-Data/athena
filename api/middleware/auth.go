@@ -10,9 +10,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dromos-org/memory-os/internal/config"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/dromos-org/memory-os/internal/config"
+)
+
+// Context keys for request context values
+type CtxKey string
+
+const (
+	CtxTenantID CtxKey = "tenant_id"
+	CtxUserID   CtxKey = "user_id"
+	CtxAgentID  CtxKey = "agent_id"
 )
 
 // AuthMiddleware handles authentication for the Memory OS
@@ -29,11 +38,13 @@ func NewAuthMiddleware(cfg *config.AuthConfig) *AuthMiddleware {
 
 // AuthContext holds authentication information
 type AuthContext struct {
-	ServiceID string            `json:"service_id"`
-	UserID    string            `json:"user_id"`
-	SessionID string            `json:"session_id,omitempty"`
+	TenantID  string                 `json:"tenant_id"`
+	UserID    string                 `json:"user_id"`
+	AgentID   string                 `json:"agent_id,omitempty"`
+	ServiceID string                 `json:"service_id"`
+	SessionID string                 `json:"session_id,omitempty"`
 	Claims    map[string]interface{} `json:"claims,omitempty"`
-	APIKey    string            `json:"api_key,omitempty"`
+	APIKey    string                 `json:"api_key,omitempty"`
 }
 
 // GinAuthMiddleware returns a Gin middleware function for authentication
@@ -51,6 +62,15 @@ func (am *AuthMiddleware) GinAuthMiddleware() gin.HandlerFunc {
 
 		// Store auth context in Gin context
 		c.Set("auth_context", authCtx)
+
+		// Store tenant/user/agent in request context for service layer
+		ctx := context.WithValue(c.Request.Context(), CtxTenantID, authCtx.TenantID)
+		ctx = context.WithValue(ctx, CtxUserID, authCtx.UserID)
+		ctx = context.WithValue(ctx, CtxAgentID, authCtx.AgentID)
+
+		// Update request with new context
+		c.Request = c.Request.WithContext(ctx)
+
 		c.Next()
 	}
 }
@@ -81,13 +101,16 @@ func (am *AuthMiddleware) authenticate(req *http.Request) (*AuthContext, error) 
 		if err != nil {
 			return nil, fmt.Errorf("API key extraction failed: %w", err)
 		}
-		
-		serviceID, err := am.verifyAPIKey(apiKey)
+
+		serviceID, tenantID, userID, err := am.verifyAPIKey(apiKey)
 		if err != nil {
 			return nil, fmt.Errorf("API key verification failed: %w", err)
 		}
-		
+
 		authCtx.ServiceID = serviceID
+		authCtx.TenantID = tenantID
+		authCtx.UserID = userID
+		authCtx.AgentID = getStringClaim(map[string]interface{}{}, "agent_id") // Default for API keys
 		authCtx.APIKey = apiKey
 	}
 
@@ -97,13 +120,26 @@ func (am *AuthMiddleware) authenticate(req *http.Request) (*AuthContext, error) 
 		if err != nil {
 			return nil, fmt.Errorf("JWT extraction failed: %w", err)
 		}
-		
+
 		claims, err := am.verifyJWT(token)
 		if err != nil {
 			return nil, fmt.Errorf("JWT verification failed: %w", err)
 		}
-		
-		authCtx.UserID = claims["user_id"].(string)
+
+		// Extract and validate required tenant_id and user_id from JWT
+		tenantID, ok := claims["tenant_id"].(string)
+		if !ok || tenantID == "" {
+			return nil, fmt.Errorf("missing or invalid tenant_id in JWT claims")
+		}
+
+		userID, ok := claims["user_id"].(string)
+		if !ok || userID == "" {
+			return nil, fmt.Errorf("missing or invalid user_id in JWT claims")
+		}
+
+		authCtx.TenantID = tenantID
+		authCtx.UserID = userID
+		authCtx.AgentID = getStringClaim(claims, "agent_id")
 		authCtx.SessionID = getStringClaim(claims, "session_id")
 		authCtx.Claims = claims
 	}
@@ -154,17 +190,18 @@ func (am *AuthMiddleware) extractAPIKey(req *http.Request) (string, error) {
 	return "", fmt.Errorf("API key not found in request headers")
 }
 
-// verifyAPIKey verifies the API key and returns the service ID
-func (am *AuthMiddleware) verifyAPIKey(apiKey string) (string, error) {
+// verifyAPIKey verifies the API key and returns service ID, tenant ID, and user ID
+func (am *AuthMiddleware) verifyAPIKey(apiKey string) (string, string, string, error) {
 	// Simple validation against configured keys
 	for _, validKey := range am.config.ValidAPIKeys {
 		if apiKey == validKey {
-			// In production, you'd map API keys to service IDs
-			return "docintel-api", nil // Default service ID
+			// In production, you'd map API keys to tenant/user/service metadata
+			// For now, return default values - in production this would lookup from database
+			return "memory-os", "default_tenant", "service_user", nil
 		}
 	}
 
-	return "", fmt.Errorf("invalid API key")
+	return "", "", "", fmt.Errorf("invalid API key")
 }
 
 // extractJWT extracts the JWT token from the request
@@ -211,6 +248,9 @@ func (am *AuthMiddleware) verifyJWT(tokenString string) (map[string]interface{},
 	}
 
 	// Validate required claims
+	if claims["tenant_id"] == nil {
+		return nil, fmt.Errorf("missing tenant_id in token")
+	}
 	if claims["user_id"] == nil {
 		return nil, fmt.Errorf("missing user_id in token")
 	}
@@ -246,6 +286,62 @@ func GetAuthContext(c *gin.Context) (*AuthContext, error) {
 	}
 
 	return ctx, nil
+}
+
+// Context utility functions for extracting tenant/user/agent from request context
+
+// TenantIDFromContext extracts the tenant ID from the request context
+func TenantIDFromContext(ctx context.Context) (string, error) {
+	tenantID, ok := ctx.Value(CtxTenantID).(string)
+	if !ok || tenantID == "" {
+		return "", fmt.Errorf("tenant_id not found in request context")
+	}
+	return tenantID, nil
+}
+
+// UserIDFromContext extracts the user ID from the request context
+func UserIDFromContext(ctx context.Context) (string, error) {
+	userID, ok := ctx.Value(CtxUserID).(string)
+	if !ok || userID == "" {
+		return "", fmt.Errorf("user_id not found in request context")
+	}
+	return userID, nil
+}
+
+// AgentIDFromContext extracts the agent ID from the request context
+func AgentIDFromContext(ctx context.Context) (string, error) {
+	agentID, ok := ctx.Value(CtxAgentID).(string)
+	if !ok {
+		return "", nil // Agent ID is optional
+	}
+	return agentID, nil
+}
+
+// ValidateTenantUserMatch validates that client-provided tenant/user IDs match authenticated values
+func ValidateTenantUserMatch(ctx context.Context, clientTenantID, clientUserID string) error {
+	authTenantID, err := TenantIDFromContext(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get authenticated tenant_id: %w", err)
+	}
+
+	authUserID, err := UserIDFromContext(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get authenticated user_id: %w", err)
+	}
+
+	// If client provided tenant_id, it must match authenticated value
+	if clientTenantID != "" && clientTenantID != authTenantID {
+		return fmt.Errorf("client tenant_id (%s) does not match authenticated tenant_id (%s)",
+			clientTenantID, authTenantID)
+	}
+
+	// If client provided user_id, it must match authenticated value
+	if clientUserID != "" && clientUserID != authUserID {
+		return fmt.Errorf("client user_id (%s) does not match authenticated user_id (%s)",
+			clientUserID, authUserID)
+	}
+
+	return nil
 }
 
 // MTLSConfig creates a TLS configuration for mutual TLS

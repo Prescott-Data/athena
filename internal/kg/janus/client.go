@@ -57,22 +57,22 @@ func (c *Client) exec(ctx context.Context, gremlin string, bindings map[string]i
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	
+
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("gremlin exec failed: %w", err)
 	}
 	defer resp.Body.Close()
-	
+
 	var response gremlinResponse
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
 		return fmt.Errorf("failed to decode gremlin response: %w", err)
 	}
-	
+
 	if response.Status.Code != 200 {
 		return fmt.Errorf("gremlin error %d: %s", response.Status.Code, response.Status.Message)
 	}
-	
+
 	return nil
 }
 
@@ -81,50 +81,54 @@ func (c *Client) Health(ctx context.Context) error {
 	return c.exec(ctx, "g.V().count()", nil)
 }
 
-// CreateUserNode creates a user node in the knowledge graph
-func (c *Client) CreateUserNode(ctx context.Context, userID string) error {
-	gremlin := "g.V().has('user_id', userID).fold().coalesce(unfold(), addV('User').property('user_id', userID).property('created_at', created_at))"
+// CreateUserNode creates a user node in the knowledge graph with tenant scope
+func (c *Client) CreateUserNode(ctx context.Context, tenantID, userID string) error {
+	gremlin := "g.V().has('tenant_id', tenantID).has('user_id', userID).fold().coalesce(unfold(), addV('User').property('tenant_id', tenantID).property('user_id', userID).property('created_at', created_at))"
 	bindings := map[string]interface{}{
+		"tenantID":   tenantID,
 		"userID":     userID,
 		"created_at": time.Now().Unix(),
 	}
 	return c.exec(ctx, gremlin, bindings)
 }
 
-// CreateAgentNode creates an agent node in the knowledge graph
-func (c *Client) CreateAgentNode(ctx context.Context, agentID string) error {
-	gremlin := "g.V().has('agent_id', agentID).fold().coalesce(unfold(), addV('Agent').property('agent_id', agentID).property('created_at', created_at))"
+// CreateAgentNode creates an agent node in the knowledge graph with tenant scope
+func (c *Client) CreateAgentNode(ctx context.Context, tenantID, agentID string) error {
+	gremlin := "g.V().has('tenant_id', tenantID).has('agent_id', agentID).fold().coalesce(unfold(), addV('Agent').property('tenant_id', tenantID).property('agent_id', agentID).property('created_at', created_at))"
 	bindings := map[string]interface{}{
+		"tenantID":   tenantID,
 		"agentID":    agentID,
 		"created_at": time.Now().Unix(),
 	}
 	return c.exec(ctx, gremlin, bindings)
 }
 
-// AddUserPersonalityTriple adds a personality triple to the knowledge graph
-func (c *Client) AddUserPersonalityTriple(ctx context.Context, userID, predicate, object string, confidence float64) error {
+// AddUserPersonalityTriple adds a personality triple to the knowledge graph with tenant scope
+func (c *Client) AddUserPersonalityTriple(ctx context.Context, tenantID, userID, predicate, object string, confidence float64) error {
 	// First ensure user node exists
-	if err := c.CreateUserNode(ctx, userID); err != nil {
+	if err := c.CreateUserNode(ctx, tenantID, userID); err != nil {
 		return fmt.Errorf("failed to create user node: %w", err)
 	}
-	
+
 	// Add the personality triple
 	gremlin := `
-		g.V().has('user_id', userID)
+		g.V().has('tenant_id', tenantID).has('user_id', userID)
 		.coalesce(
 			outE(predicate).has('object', object),
 			addE(predicate)
+				.property('tenant_id', tenantID)
 				.property('object', object)
 				.property('confidence', confidence)
 				.property('created_at', created_at)
 				.property('updated_at', updated_at)
-				.to(__.V().has('type', 'PersonalityAttribute').has('name', object).fold().coalesce(
+				.to(__.V().has('tenant_id', tenantID).has('type', 'PersonalityAttribute').has('name', object).fold().coalesce(
 					unfold(),
-					addV('PersonalityAttribute').property('name', object).property('type', 'PersonalityAttribute')
+					addV('PersonalityAttribute').property('tenant_id', tenantID).property('name', object).property('type', 'PersonalityAttribute')
 				))
 		)
 	`
 	bindings := map[string]interface{}{
+		"tenantID":   tenantID,
 		"userID":     userID,
 		"predicate":  predicate,
 		"object":     object,
@@ -135,31 +139,33 @@ func (c *Client) AddUserPersonalityTriple(ctx context.Context, userID, predicate
 	return c.exec(ctx, gremlin, bindings)
 }
 
-// AddUserFactTriple adds a user fact triple to the knowledge graph
-func (c *Client) AddUserFactTriple(ctx context.Context, userID, predicate, object, category string, confidence float64) error {
+// AddUserFactTriple adds a user fact triple to the knowledge graph with tenant scope
+func (c *Client) AddUserFactTriple(ctx context.Context, tenantID, userID, predicate, object, category string, confidence float64) error {
 	// First ensure user node exists
-	if err := c.CreateUserNode(ctx, userID); err != nil {
+	if err := c.CreateUserNode(ctx, tenantID, userID); err != nil {
 		return fmt.Errorf("failed to create user node: %w", err)
 	}
-	
+
 	// Add the fact triple
 	gremlin := `
-		g.V().has('user_id', userID)
+		g.V().has('tenant_id', tenantID).has('user_id', userID)
 		.coalesce(
 			outE(predicate).has('object', object),
 			addE(predicate)
+				.property('tenant_id', tenantID)
 				.property('object', object)
 				.property('category', category)
 				.property('confidence', confidence)
 				.property('created_at', created_at)
 				.property('updated_at', updated_at)
-				.to(__.V().has('type', 'Fact').has('name', object).fold().coalesce(
+				.to(__.V().has('tenant_id', tenantID).has('type', 'Fact').has('name', object).fold().coalesce(
 					unfold(),
-					addV('Fact').property('name', object).property('type', 'Fact').property('category', category)
+					addV('Fact').property('tenant_id', tenantID).property('name', object).property('type', 'Fact').property('category', category)
 				))
 		)
 	`
 	bindings := map[string]interface{}{
+		"tenantID":   tenantID,
 		"userID":     userID,
 		"predicate":  predicate,
 		"object":     object,
@@ -171,93 +177,97 @@ func (c *Client) AddUserFactTriple(ctx context.Context, userID, predicate, objec
 	return c.exec(ctx, gremlin, bindings)
 }
 
-// AddAgentCapabilityTriple adds an agent capability triple to the knowledge graph
-func (c *Client) AddAgentCapabilityTriple(ctx context.Context, agentID, capability, context_info string) error {
+// AddAgentCapabilityTriple adds an agent capability triple to the knowledge graph with tenant scope
+func (c *Client) AddAgentCapabilityTriple(ctx context.Context, tenantID, agentID, capability, context_info string) error {
 	// First ensure agent node exists
-	if err := c.CreateAgentNode(ctx, agentID); err != nil {
+	if err := c.CreateAgentNode(ctx, tenantID, agentID); err != nil {
 		return fmt.Errorf("failed to create agent node: %w", err)
 	}
-	
+
 	// Add the capability triple
 	gremlin := `
-		g.V().has('agent_id', agentID)
+		g.V().has('tenant_id', tenantID).has('agent_id', agentID)
 		.coalesce(
 			outE('CAN_DO').has('capability', capability),
 			addE('CAN_DO')
+				.property('tenant_id', tenantID)
 				.property('capability', capability)
 				.property('context', context_info)
 				.property('demonstrated_at', demonstrated_at)
-				.to(__.V().has('type', 'Capability').has('name', capability).fold().coalesce(
+				.to(__.V().has('tenant_id', tenantID).has('type', 'Capability').has('name', capability).fold().coalesce(
 					unfold(),
-					addV('Capability').property('name', capability).property('type', 'Capability')
+					addV('Capability').property('tenant_id', tenantID).property('name', capability).property('type', 'Capability')
 				))
 		)
 	`
 	bindings := map[string]interface{}{
-		"agentID":        agentID,
-		"capability":     capability,
-		"context_info":   context_info,
+		"tenantID":        tenantID,
+		"agentID":         agentID,
+		"capability":      capability,
+		"context_info":    context_info,
 		"demonstrated_at": time.Now().Unix(),
 	}
 	return c.exec(ctx, gremlin, bindings)
 }
 
-// GetUserFacts retrieves user facts from the knowledge graph
-func (c *Client) GetUserFacts(ctx context.Context, userID string) ([]map[string]interface{}, error) {
+// GetUserFacts retrieves user facts from the knowledge graph with tenant scope
+func (c *Client) GetUserFacts(ctx context.Context, tenantID, userID string) ([]map[string]interface{}, error) {
 	reqBody := gremlinRequest{
-		Gremlin: "g.V().has('user_id', userID).outE().project('predicate', 'object', 'confidence').by(label()).by('object').by('confidence')",
+		Gremlin: "g.V().has('tenant_id', tenantID).has('user_id', userID).outE().project('predicate', 'object', 'confidence').by(label()).by('object').by('confidence')",
 		Bindings: map[string]interface{}{
-			"userID": userID,
+			"tenantID": tenantID,
+			"userID":   userID,
 		},
 	}
-	
+
 	b, _ := json.Marshal(reqBody)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint+"/gremlin", bytes.NewReader(b))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	
+
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("gremlin query failed: %w", err)
 	}
 	defer resp.Body.Close()
-	
+
 	var response gremlinResponse
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
 		return nil, fmt.Errorf("failed to decode gremlin response: %w", err)
 	}
-	
+
 	if response.Status.Code != 200 {
 		return nil, fmt.Errorf("gremlin error %d: %s", response.Status.Code, response.Status.Message)
 	}
-	
+
 	// Convert response data to slice of maps
 	facts, ok := response.Result.Data.([]interface{})
 	if !ok {
 		return []map[string]interface{}{}, nil
 	}
-	
+
 	result := make([]map[string]interface{}, len(facts))
 	for i, fact := range facts {
 		if factMap, ok := fact.(map[string]interface{}); ok {
 			result[i] = factMap
 		}
 	}
-	
+
 	return result, nil
 }
 
-// UpdateTripleConfidence updates the confidence score of an existing triple
-func (c *Client) UpdateTripleConfidence(ctx context.Context, userID, predicate, object string, newConfidence float64) error {
+// UpdateTripleConfidence updates the confidence score of an existing triple with tenant scope
+func (c *Client) UpdateTripleConfidence(ctx context.Context, tenantID, userID, predicate, object string, newConfidence float64) error {
 	gremlin := `
-		g.V().has('user_id', userID)
+		g.V().has('tenant_id', tenantID).has('user_id', userID)
 		.outE(predicate).has('object', object)
 		.property('confidence', newConfidence)
 		.property('updated_at', updated_at)
 	`
 	bindings := map[string]interface{}{
+		"tenantID":      tenantID,
 		"userID":        userID,
 		"predicate":     predicate,
 		"object":        object,
@@ -267,14 +277,15 @@ func (c *Client) UpdateTripleConfidence(ctx context.Context, userID, predicate, 
 	return c.exec(ctx, gremlin, bindings)
 }
 
-// DeleteTriple removes a triple from the knowledge graph
-func (c *Client) DeleteTriple(ctx context.Context, userID, predicate, object string) error {
+// DeleteTriple removes a triple from the knowledge graph with tenant scope
+func (c *Client) DeleteTriple(ctx context.Context, tenantID, userID, predicate, object string) error {
 	gremlin := `
-		g.V().has('user_id', userID)
+		g.V().has('tenant_id', tenantID).has('user_id', userID)
 		.outE(predicate).has('object', object)
 		.drop()
 	`
 	bindings := map[string]interface{}{
+		"tenantID":  tenantID,
 		"userID":    userID,
 		"predicate": predicate,
 		"object":    object,
