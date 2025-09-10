@@ -2,14 +2,14 @@ image: mcr.microsoft.com/azure-cli
 definitions:
   services:
     docker:
-      memory: 16384
+      memory: 0
 
 pipelines:
   branches:
     main:
       - step:
           name: Build and Push Docker Image
-          size: 4x
+          size: 1x
           services:
             - docker
           caches:
@@ -65,6 +65,7 @@ pipelines:
 
       - step:
           name: Deploy to Azure Container App
+          size: 1x
           script:
             - |
               # SCRIPT SETUP
