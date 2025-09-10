@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/redis/go-redis/v9"
+	redis "github.com/redis/go-redis/v9"
 	// Load environment variables from .env file
 	_ "github.com/joho/godotenv/autoload"
 )
@@ -23,12 +23,30 @@ type RedisClient struct {
 // NewRedisClient creates a new Redis client instance
 func NewRedisClient() (*RedisClient, error) {
 	host := os.Getenv("REDIS_HOST")
+	if host == "" {
+		host = "localhost"
+	}
 	port := os.Getenv("REDIS_PORT")
+	if port == "" {
+		port = "6379"
+	}
 	password := os.Getenv("REDIS_PASSWORD")
 	dbStr := os.Getenv("REDIS_DB")
+	if dbStr == "" {
+		dbStr = "0"
+	}
 	poolSizeStr := os.Getenv("REDIS_POOL_SIZE")
+	if poolSizeStr == "" {
+		poolSizeStr = "10"
+	}
 	poolTimeoutStr := os.Getenv("REDIS_POOL_TIMEOUT")
+	if poolTimeoutStr == "" {
+		poolTimeoutStr = "30"
+	}
 	cacheTTLStr := os.Getenv("CACHE_TTL")
+	if cacheTTLStr == "" {
+		cacheTTLStr = "3600"
+	}
 
 	db, err := strconv.Atoi(dbStr)
 	if err != nil {

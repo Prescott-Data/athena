@@ -23,8 +23,8 @@ import (
 
 const (
 	GEMINI_API_KEY_SECRET = "dromos-gemini-api-key"
-	SERVICE_ACCOUNT = "dromos-ccm-sa@dromos-nonprod-svc-gt8n.iam.gserviceaccount.com"
-	PROJECT_ID = "dromos-nonprod-svc-gt8n" // Extracted from service account
+	SERVICE_ACCOUNT       = "dromos-ccm-sa@dromos-nonprod-svc-gt8n.iam.gserviceaccount.com"
+	PROJECT_ID            = "dromos-nonprod-svc-gt8n" // Extracted from service account
 )
 
 // GeminiResponse represents the response from Gemini API
@@ -48,8 +48,8 @@ type GeminiRequest struct {
 		} `json:"parts"`
 	} `json:"contents"`
 	GenerationConfig struct {
-		Temperature   float64 `json:"temperature"`
-		MaxOutputTokens int    `json:"maxOutputTokens"`
+		Temperature     float64 `json:"temperature"`
+		MaxOutputTokens int     `json:"maxOutputTokens"`
 	} `json:"generationConfig"`
 }
 
@@ -91,8 +91,8 @@ func TestSTMStore_LLMIntegration(t *testing.T) {
 	t.Run("TopicContinuityAnalysis", func(t *testing.T) {
 		// Create a previous dialogue page
 		previousPage := &models.DialoguePage{
-			UserMessage:    "What's the weather like today?",
-			AgentResponse:  "It's sunny and 75 degrees.",
+			UserMessage:   "What's the weather like today?",
+			AgentResponse: "It's sunny and 75 degrees.",
 		}
 
 		// Test case 1: Continuous topic (same subject)
@@ -127,9 +127,9 @@ func TestSTMStore_LLMIntegration(t *testing.T) {
 	// 6. Test full dialogue chain determination workflow
 	t.Run("DialogueChainDetermination", func(t *testing.T) {
 		userID := "test_llm_user_123"
-		
+
 		// First conversation turn - should create new chain
-		chainID1, err := stmStore.DetermineDialogueChain(ctx, userID, "What's the capital of France?", "The capital of France is Paris.")
+		chainID1, err := stmStore.DetermineDialogueChain(ctx, "test_tenant", userID, "test_agent", "What's the capital of France?", "The capital of France is Paris.")
 		assert.NoError(err)
 		assert.Contains(chainID1, userID)
 		assert.Contains(chainID1, "chain_")
@@ -168,7 +168,7 @@ func analyzeTopicContinuityWithGemini(ctx context.Context, apiKey string, previo
 Turn 1: User: %s / Assistant: %s
 Turn 2: User: %s / Assistant: %s
 
-Answer only "true" or "false".`, 
+Answer only "true" or "false".`,
 		previousPage.UserMessage, previousPage.AgentResponse, userMessage, agentResponse)
 
 	// Prepare Gemini API request
@@ -187,10 +187,10 @@ Answer only "true" or "false".`,
 			},
 		},
 		GenerationConfig: struct {
-			Temperature   float64 `json:"temperature"`
-			MaxOutputTokens int    `json:"maxOutputTokens"`
+			Temperature     float64 `json:"temperature"`
+			MaxOutputTokens int     `json:"maxOutputTokens"`
 		}{
-			Temperature:   0.1,
+			Temperature:     0.1,
 			MaxOutputTokens: 50000,
 		},
 	}
@@ -202,7 +202,7 @@ Answer only "true" or "false".`,
 
 	// Make API call to Gemini 2.5 Flash
 	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=%s", apiKey)
-	
+
 	httpCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
@@ -240,7 +240,7 @@ Answer only "true" or "false".`,
 	}
 
 	candidate := geminiResp.Candidates[0]
-	
+
 	// Check finish reason
 	if candidate.FinishReason == "MAX_TOKENS" {
 		return false, fmt.Errorf("Gemini response was truncated due to max tokens limit")
@@ -251,7 +251,7 @@ Answer only "true" or "false".`,
 	}
 
 	responseText := candidate.Content.Parts[0].Text
-	
+
 	// Parse response
 	if responseText == "true" {
 		return true, nil

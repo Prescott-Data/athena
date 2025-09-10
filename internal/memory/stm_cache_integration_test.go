@@ -9,6 +9,7 @@ import (
 
 	"github.com/dromos-org/memory-os/internal/cache"
 
+	_ "github.com/joho/godotenv/autoload"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 )
@@ -17,13 +18,25 @@ import (
 func setupRedisTestClient() (cache.Interface, error) {
 	// Set environment variables for testing if not already set
 	if os.Getenv("REDIS_HOST") == "" {
-		os.Setenv("REDIS_HOST", "localhost")
+		os.Setenv("REDIS_HOST", "172.190.152.215")
 	}
 	if os.Getenv("REDIS_PORT") == "" {
 		os.Setenv("REDIS_PORT", "6379")
 	}
+	if os.Getenv("REDIS_PASSWORD") == "" {
+		os.Setenv("REDIS_PASSWORD", "dromos_redis_2024")
+	}
 	if os.Getenv("REDIS_DB") == "" {
-		os.Setenv("REDIS_DB", "1") // Use DB 1 for testing
+		os.Setenv("REDIS_DB", "3") // Use DB 3 for testing (matches E2E test)
+	}
+	if os.Getenv("REDIS_POOL_SIZE") == "" {
+		os.Setenv("REDIS_POOL_SIZE", "10")
+	}
+	if os.Getenv("REDIS_POOL_TIMEOUT") == "" {
+		os.Setenv("REDIS_POOL_TIMEOUT", "30")
+	}
+	if os.Getenv("CACHE_TTL") == "" {
+		os.Setenv("CACHE_TTL", "3600")
 	}
 
 	// Use the existing NewRedisClient function
@@ -89,12 +102,12 @@ func TestSTMCache_Integration(t *testing.T) {
 
 	// Test 3: Verify max turns limit works
 	originalMaxTurns := StmCacheMaxTurns
-	StmCacheMaxTurns = 2 // Temporarily set to 2
+	StmCacheMaxTurns = 2                                   // Temporarily set to 2
 	defer func() { StmCacheMaxTurns = originalMaxTurns }() // Reset after test
 
 	// Clear and add 3 turns
 	_ = stmCache.ClearConversationContext(ctx, userID)
-	
+
 	for i := 1; i <= 3; i++ {
 		turn := ConversationTurn{
 			Type:      "user",
@@ -165,7 +178,7 @@ func TestSTMCache_Metrics_Integration(t *testing.T) {
 	assert.Equal(t, initialAppendOK+1, testutil.ToFloat64(MetricSTMCacheOps.WithLabelValues("append", "ok")))
 
 	// Test max turns trimming
-	StmCacheMaxTurns = 2 // Temporarily set to 2
+	StmCacheMaxTurns = 2                     // Temporarily set to 2
 	defer func() { StmCacheMaxTurns = 10 }() // Reset after test
 
 	_ = stmCache.ClearConversationContext(ctx, userID)

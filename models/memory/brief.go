@@ -145,13 +145,13 @@ type DataItemResponse struct {
 
 // BriefListResponse represents a Brief for listing API responses without suggested_channel
 type BriefListResponse struct {
-	ID            primitive.ObjectID   `json:"id,omitempty"`
-	Title         string               `json:"title"`
-	Data          []DataItemResponse   `json:"data"`
-	Metrics       []Metric             `json:"metrics"`
-	Pinned        bool                 `json:"pinned"`
-	CreatedAt     time.Time            `json:"created_at"`
-	Collaborators []Collaborator       `json:"collaborators,omitempty"`
-	Feedback      []Feedback           `json:"feedback,omitempty"`
-	ChatMessages  []ChatMessage        `json:"chat_messages,omitempty"`
+	ID            primitive.ObjectID `json:"id,omitempty"`
+	Title         string             `json:"title"`
+	Data          []DataItemResponse `json:"data"`
+	Metrics       []Metric           `json:"metrics"`
+	Pinned        bool               `json:"pinned"`
+	CreatedAt     time.Time          `json:"created_at"`
+	Collaborators []Collaborator     `json:"collaborators,omitempty"`
+	Feedback      []Feedback         `json:"feedback,omitempty"`
+	ChatMessages  []ChatMessage      `json:"chat_messages,omitempty"`
 }

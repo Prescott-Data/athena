@@ -51,24 +51,24 @@ type STMConfig struct {
 
 // MTMConfig holds Mid-Term Memory configuration
 type MTMConfig struct {
-	QualityValidationMode    string  `yaml:"quality_validation_mode"`
-	HeatPromotionThreshold   float64 `yaml:"heat_promotion_threshold"`
-	MaxSegmentsPerSession    int     `yaml:"max_segments_per_session"`
-	SegmentMergeThreshold    float64 `yaml:"segment_merge_threshold"`
+	QualityValidationMode  string  `yaml:"quality_validation_mode"`
+	HeatPromotionThreshold float64 `yaml:"heat_promotion_threshold"`
+	MaxSegmentsPerSession  int     `yaml:"max_segments_per_session"`
+	SegmentMergeThreshold  float64 `yaml:"segment_merge_threshold"`
 }
 
 // LTMConfig holds Long-Term Memory configuration
 type LTMConfig struct {
-	Enabled                 bool    `yaml:"enabled"`
-	PersonaUpdateThreshold  float64 `yaml:"persona_update_threshold"`
-	KnowledgeGraphEnabled   bool    `yaml:"knowledge_graph_enabled"`
+	Enabled                bool    `yaml:"enabled"`
+	PersonaUpdateThreshold float64 `yaml:"persona_update_threshold"`
+	KnowledgeGraphEnabled  bool    `yaml:"knowledge_graph_enabled"`
 }
 
 // DatabaseConfig holds database configuration
 type DatabaseConfig struct {
-	Redis     RedisConfig     `yaml:"redis"`
-	MongoDB   MongoDBConfig   `yaml:"mongodb"`
-	Milvus    MilvusConfig    `yaml:"milvus"`
+	Redis      RedisConfig      `yaml:"redis"`
+	MongoDB    MongoDBConfig    `yaml:"mongodb"`
+	Milvus     MilvusConfig     `yaml:"milvus"`
 	JanusGraph JanusGraphConfig `yaml:"janus_graph"`
 }
 
@@ -82,10 +82,10 @@ type RedisConfig struct {
 
 // MongoDBConfig holds MongoDB configuration
 type MongoDBConfig struct {
-	URI        string `yaml:"uri"`
-	Database   string `yaml:"database"`
-	Username   string `yaml:"username"`
-	Password   string `yaml:"password"`
+	URI      string `yaml:"uri"`
+	Database string `yaml:"database"`
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
 }
 
 // MilvusConfig holds Milvus configuration
@@ -204,22 +204,22 @@ func (c *Config) Validate() error {
 	if c.Server.Port <= 0 || c.Server.Port > 65535 {
 		return fmt.Errorf("invalid server port: %d", c.Server.Port)
 	}
-	
+
 	if c.Server.GRPCPort <= 0 || c.Server.GRPCPort > 65535 {
 		return fmt.Errorf("invalid gRPC port: %d", c.Server.GRPCPort)
 	}
-	
+
 	if c.Auth.RequireJWT && c.Auth.JWTSecret == "" {
 		return fmt.Errorf("JWT secret is required when JWT authentication is enabled")
 	}
-	
+
 	if c.Auth.RequireAPIKey && len(c.Auth.ValidAPIKeys) == 0 {
 		return fmt.Errorf("valid API keys are required when API key authentication is enabled")
 	}
-	
+
 	if c.Database.MongoDB.URI == "" {
 		return fmt.Errorf("MongoDB URI is required")
 	}
-	
+
 	return nil
 }

@@ -16,14 +16,24 @@ import (
 )
 
 const (
-	// MemoryProcessingQueue is the Redis queue key for memory processing tasks
+	// MemoryProcessingQueue is the Redis queue key for memory processing tasks (legacy)
 	MemoryProcessingQueue = "memory_processing_queue"
-	// TaskResultsPrefix is the Redis key prefix for task results
+	// TaskResultsPrefix is the Redis key prefix for task results (legacy)
 	TaskResultsPrefix = "task_results"
-	
+
 	// TaskTypeMemoryFormation is the task type for memory formation
 	TaskTypeMemoryFormation = "memory_formation"
 )
+
+// generateScopedQueueName creates a tenant-scoped queue name
+func generateScopedQueueName(tenantID, userID, agentID string) string {
+	return fmt.Sprintf("memory_processing_queue:v1:%s:%s:%s", tenantID, userID, agentID)
+}
+
+// generateScopedTaskResultKey creates a tenant-scoped task result key
+func generateScopedTaskResultKey(tenantID, userID, agentID, taskID string) string {
+	return fmt.Sprintf("task_results:v1:%s:%s:%s:%s", tenantID, userID, agentID, taskID)
+}
 
 var (
 	// TaskQueueName is the name of the Redis queue for memory tasks
@@ -138,7 +148,7 @@ func (tq *TaskQueue) MarkTaskResult(ctx context.Context, taskID string, success 
 	}
 
 	resultKey := fmt.Sprintf("%s:%s", TaskResultsPrefix, taskID)
-	
+
 	// Store result with 1 hour expiration
 	if err := tq.redis.SetEX(resultKey, string(resultJSON), time.Hour); err != nil {
 		return fmt.Errorf("failed to store task result: %w", err)

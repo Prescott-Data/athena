@@ -5,6 +5,9 @@ import "time"
 // Message represents a chat message in the system.
 type Message struct {
 	ID             string                 `json:"id" bson:"_id"`
+	TenantID       string                 `json:"tenantId" bson:"tenantId"`
+	UserID         string                 `json:"userId" bson:"userId"`
+	AgentID        string                 `json:"agentId" bson:"agentId"`
 	ConversationID string                 `json:"conversationId" bson:"conversationId"`
 	Type           string                 `json:"type" bson:"type"`
 	Content        string                 `json:"content" bson:"content"`
