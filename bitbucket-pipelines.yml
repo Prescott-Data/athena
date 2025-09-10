@@ -1,15 +1,48 @@
-image: mcr.microsoft.com/azure-cli
+image: golang:1.23
 definitions:
+  caches:
+    godeps: $GOPATH/pkg/mod
   services:
     docker:
-      memory: 128
+      memory: 2048
 
 pipelines:
   branches:
     main:
+      - parallel:
+          - step:
+              name: "Lint Code"
+              script:
+                - go fmt ./...
+                - go vet ./...
+                - go mod tidy
+          
+          - step:
+              name: "Run Tests"
+              services:
+                - docker
+              script:
+                - export TESTCONTAINERS_RYUK_DISABLED=true
+                - export DOCKER_HOST=tcp://localhost:2375
+                - go test -v ./internal/memory -run "TestTenantIsolation" -timeout=10m
+              after-script:
+                - test $? -eq 0 && echo "Tests passed successfully!" || echo "Tests failed!"
+                 
+      - step:
+          name: "Build Binary"
+          caches:
+            - godeps
+          script:
+            - go mod download
+            - go mod verify
+            - CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o memory-server cmd/memory-server/main.go
+          artifacts:
+            - memory-server
+
       - step:
           name: Build and Push Docker Image
-          size: 1x
+          image: mcr.microsoft.com/azure-cli
+          size: 2x
           services:
             - docker
           caches:
@@ -41,12 +74,6 @@ pipelines:
               IMAGE_TAG="$BITBUCKET_COMMIT"
               
               # EXECUTION
-              # Install Go
-              apt-get update && apt-get install -y wget
-              wget -q https://golang.org/dl/go1.23.6.linux-amd64.tar.gz
-              tar -C /usr/local -xzf go1.23.6.linux-amd64.tar.gz
-              export PATH=$PATH:/usr/local/go/bin
-
               echo "--- Attempting Azure login via Service Principal Secret ---"
               az login --service-principal -u "$AZURE_APP_ID" -p "$AZURE_CLIENT_SECRET" -t "$AZURE_TENANT_ID" --verbose
               echo "--- Azure login SUCCEEDED ---"
@@ -54,12 +81,6 @@ pipelines:
               echo "--- Attempting Azure Container Registry login ---"
               az acr login --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" --verbose
               echo "--- ACR login SUCCEEDED ---"
-
-              echo "--- Running Go linting ---"
-              go fmt ./...
-              go vet ./...
-              go mod tidy
-              echo "--- Go linting SUCCEEDED ---"
 
               echo "--- Starting Docker build ---"
               docker build -t "${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}" .
@@ -71,7 +92,8 @@ pipelines:
 
       - step:
           name: Deploy to Azure Container App
-          size: 1x
+          deployment: production
+          image: mcr.microsoft.com/azure-cli
           script:
             - |
               # SCRIPT SETUP
