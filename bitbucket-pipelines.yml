@@ -134,16 +134,55 @@ pipelines:
               echo "--- Sending update command to Azure Container App: ${CONTAINER_APP_NAME} ---"
               az containerapp update --name "$CONTAINER_APP_NAME" --resource-group "$RESOURCE_GROUP" --image "${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}" \
                 --set-env-vars \
+                  PORT="$PORT" \
+                  APP_ENV="$APP_ENV" \
                   MONGO_URI="$MONGO_URI" \
                   MONGO_DB="memory_os" \
                   REDIS_HOST="$REDIS_HOST" \
                   REDIS_PORT="6379" \
+                  REDIS_DB="$REDIS_DB" \
                   REDIS_PASSWORD="$REDIS_PASSWORD" \
+                  REDIS_POOL_SIZE="$REDIS_POOL_SIZE" \
+                  REDIS_POOL_TIMEOUT="$REDIS_POOL_TIMEOUT" \
+                  CACHE_TTL="$CACHE_TTL" \
                   AZURE_OPENAI_ENDPOINT="$AZURE_OPENAI_ENDPOINT" \
                   AZURE_OPENAI_API_KEY="$AZURE_OPENAI_API_KEY" \
                   MILVUS_HOST="$MILVUS_HOST" \
                   MILVUS_PORT="19530" \
-                  MEMORY_OS_API_KEY="$MEMORY_OS_API_KEY" \
-                  MEMORY_OS_JWT_SECRET="$MEMORY_OS_JWT_SECRET" \
+                  MILVUS_DATABASE="$MILVUS_DATABASE" \
+                  LLM_BASE_URL="$LLM_BASE_URL" \
+                  LLM_MODEL_NAME="$LLM_MODEL_NAME" \
+                  LLM_API_VERSION="$LLM_API_VERSION" \
+                  EMBEDDING_BASE_URL="$EMBEDDING_BASE_URL" \
+                  EMBEDDING_MODEL_NAME="$EMBEDDING_MODEL_NAME" \
+                  EMBEDDING_API_VERSION="$EMBEDDING_API_VERSION" \
+                  EMBEDDING_DIMENSIONS="$EMBEDDING_DIMENSIONS" \
+                  JANUS_ENDPOINT="$JANUS_ENDPOINT" \
+                  ENABLE_MEMORY_WORKERS="$ENABLE_MEMORY_WORKERS" \
+                  MEMORY_WORKER_COUNT="$MEMORY_WORKER_COUNT" \
+                  STM_CACHE_MAX_TURNS="$STM_CACHE_MAX_TURNS" \
+                  STM_CACHE_KEY_PREFIX="$STM_CACHE_KEY_PREFIX" \
+                  STM_CACHE_TTL="$STM_CACHE_TTL" \
+                  STM_TASK_TIMEOUT="$STM_TASK_TIMEOUT" \
+                  LLM__RATE_LIMIT_PER_MINUTE="$LLM__RATE_LIMIT_PER_MINUTE" \
+                  LLM__CIRCUIT_BREAKER_THRESHOLD="$LLM__CIRCUIT_BREAKER_THRESHOLD" \
+                  LLM__CIRCUIT_BREAKER_TIMEOUT_SECONDS="$LLM__CIRCUIT_BREAKER_TIMEOUT_SECONDS" \
+                  LLM_TIMEOUT_SECONDS="$LLM_TIMEOUT_SECONDS" \
+                  CHAIN_SIM_HIGH="$CHAIN_SIM_HIGH" \
+                  CHAIN_SIM_LOW="$CHAIN_SIM_LOW" \
+                  HEAT_ALPHA="$HEAT_ALPHA" \
+                  HEAT_BETA="$HEAT_BETA" \
+                  HEAT_GAMMA="$HEAT_GAMMA" \
+                  HEAT_DELTA="$HEAT_DELTA" \
+                  HEAT_EPSILON="$HEAT_EPSILON" \
+                  MTM_QUALITY_VALIDATION_MODE="$MTM_QUALITY_VALIDATION_MODE" \
+                  MTM_MAX_SEGMENTS_PER_USER="$MTM_MAX_SEGMENTS_PER_USER" \
+                  MTM_MIN_QUALITY_SCORE="$MTM_MERGE_THRESHOLD" \
+                  NODE_ENV="$NODE_ENV" \
+                  LOG_LEVEL="$LOG_LEVEL" \
+                  RUN_E2E_TESTS="$RUN_E2E_TESTS" \
+                  TEST_TIMEOUT_SECONDS="$TEST_TIMEOUT_SECONDS" \
+                  ALLOWED_ORIGINS="$ALLOWED_ORIGINS" \
+                  AI_AGENT_BASE_URL="$AI_AGENT_BASE_URL" \
                 --verbose
               echo "--- Azure Container App update command SUCCEEDED ---"
