@@ -758,7 +758,7 @@ func (s *STMStore) getLastDialoguePage(ctx context.Context, tenantID, userID, ag
 		"agentId":  agentID,
 	}
 	opts := options.FindOne()
-	opts.SetSort(bson.D{{Key: "createdAt", Value: -1}}) // Most recent first
+	opts.SetSort(bson.D{bson.E{Key: "createdAt", Value: -1}}) // Most recent first
 
 	var page models.DialoguePage
 	err := collection.FindOne(ctx, filter, opts).Decode(&page)
@@ -966,7 +966,7 @@ func (s *STMStore) GetRecentConversationContext(ctx context.Context, userID stri
 	}
 
 	opts := options.Find()
-	opts.SetSort(bson.D{{Key: "createdAt", Value: -1}}) // Most recent first
+	opts.SetSort(bson.D{bson.E{Key: "createdAt", Value: -1}}) // Most recent first
 	opts.SetLimit(int64(limit))
 
 	cursor, err := collection.Find(ctx, filter, opts)
@@ -998,7 +998,7 @@ func (s *STMStore) GetDialogueChainPages(ctx context.Context, chainID string) ([
 
 	filter := bson.M{"chainId": chainID}
 	opts := options.Find()
-	opts.SetSort(bson.D{{Key: "createdAt", Value: 1}}) // Chronological order
+	opts.SetSort(bson.D{bson.E{Key: "createdAt", Value: 1}}) // Chronological order
 
 	cursor, err := collection.Find(ctx, filter, opts)
 	if err != nil {

@@ -9,7 +9,7 @@ import (
 	"github.com/dromos-org/memory-os/pkg/memoryos"
 )
 
-func main() {
+func testMemoryOSBasic() {
 	fmt.Println("🧠 Testing Memory OS Basic Setup...")
 
 	// Test 1: Configuration Loading
@@ -95,4 +95,15 @@ func main() {
 	fmt.Println("   5. Create session: curl -X POST -H 'X-API-Key: your-key' http://localhost:8080/api/v1/sessions")
 
 	fmt.Println("\n🚀 Memory OS is ready for deployment!")
+}
+
+func main() {
+	// Run basic setup test
+	testMemoryOSBasic()
+
+	fmt.Println("\n==================================================")
+	fmt.Println("Running connectivity test...")
+
+	// Run connectivity test
+	testConnectivity()
 }

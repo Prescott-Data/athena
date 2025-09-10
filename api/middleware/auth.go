@@ -12,7 +12,7 @@ import (
 
 	"github.com/dromos-org/memory-os/internal/config"
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
+	jwt "github.com/golang-jwt/jwt/v5"
 )
 
 // Context keys for request context values

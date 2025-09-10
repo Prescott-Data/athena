@@ -405,7 +405,7 @@ func (sm *SessionManager) CleanupOldSegments(ctx context.Context, userID string)
 	// Find oldest segments to remove
 	excessCount := count - int64(sm.config.MaxSegmentsPerUser)
 
-	findOptions := options.Find().SetSort(bson.D{{Key: "createdAt", Value: 1}}).SetLimit(excessCount)
+	findOptions := options.Find().SetSort(bson.D{bson.E{Key: "createdAt", Value: 1}}).SetLimit(excessCount)
 	cursor, err := collection.Find(ctx, filter, findOptions)
 	if err != nil {
 		return fmt.Errorf("failed to find old segments: %w", err)

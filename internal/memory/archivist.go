@@ -40,7 +40,7 @@ func (a *Archivist) RunOnce(ctx context.Context, maxPagesPerSegment int) error {
 
 	// 1) Find the oldest in_stm page to identify a chain
 	var oldestPage models.DialoguePage
-	findOldest := options.FindOne().SetSort(bson.D{{Key: "createdAt", Value: 1}})
+	findOldest := options.FindOne().SetSort(bson.D{bson.E{Key: "createdAt", Value: 1}})
 	if err := pagesCol.FindOne(ctx, bson.M{"status": "in_stm"}, findOldest).Decode(&oldestPage); err != nil {
 		if err == mongo.ErrNoDocuments {
 			log.Println("INFO: Archivist found no in_stm pages to segment")
@@ -51,7 +51,7 @@ func (a *Archivist) RunOnce(ctx context.Context, maxPagesPerSegment int) error {
 
 	// 2) Pull up to maxPagesPerSegment pages for that chain, ordered by createdAt
 	filter := bson.M{"chainId": oldestPage.ChainID, "status": "in_stm"}
-	findOpts := options.Find().SetSort(bson.D{{Key: "createdAt", Value: 1}})
+	findOpts := options.Find().SetSort(bson.D{bson.E{Key: "createdAt", Value: 1}})
 	if maxPagesPerSegment > 0 {
 		findOpts.SetLimit(int64(maxPagesPerSegment))
 	}

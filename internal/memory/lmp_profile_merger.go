@@ -20,25 +20,25 @@ type ProfileMerger struct {
 
 // MergeResult represents the result of a profile merge operation
 type MergeResult struct {
-	UserID              string                `json:"user_id"`
-	PreviousProfile     *UserPersona          `json:"previous_profile,omitempty"`
-	UpdatedProfile      *UserPersona          `json:"updated_profile"`
-	MergedDimensions    []string              `json:"merged_dimensions"`
-	NewDimensions       []string              `json:"new_dimensions"`
-	RemovedDimensions   []string              `json:"removed_dimensions"`
-	ConfidenceChanged   bool                  `json:"confidence_changed"`
-	SignificantUpdates  []DimensionUpdate     `json:"significant_updates"`
-	MergeStrategy       string                `json:"merge_strategy"`
-	ProcessingTime      time.Duration         `json:"processing_time"`
+	UserID             string            `json:"user_id"`
+	PreviousProfile    *UserPersona      `json:"previous_profile,omitempty"`
+	UpdatedProfile     *UserPersona      `json:"updated_profile"`
+	MergedDimensions   []string          `json:"merged_dimensions"`
+	NewDimensions      []string          `json:"new_dimensions"`
+	RemovedDimensions  []string          `json:"removed_dimensions"`
+	ConfidenceChanged  bool              `json:"confidence_changed"`
+	SignificantUpdates []DimensionUpdate `json:"significant_updates"`
+	MergeStrategy      string            `json:"merge_strategy"`
+	ProcessingTime     time.Duration     `json:"processing_time"`
 }
 
 // MergeStrategy defines how profiles should be merged
 type MergeStrategy string
 
 const (
-	MergeStrategyConservative MergeStrategy = "conservative" // Require high confidence for updates
-	MergeStrategyBalanced     MergeStrategy = "balanced"     // Balance old and new observations
-	MergeStrategyAggressive   MergeStrategy = "aggressive"   // Favor recent observations
+	MergeStrategyConservative  MergeStrategy = "conservative"  // Require high confidence for updates
+	MergeStrategyBalanced      MergeStrategy = "balanced"      // Balance old and new observations
+	MergeStrategyAggressive    MergeStrategy = "aggressive"    // Favor recent observations
 	MergeStrategyReinforcement MergeStrategy = "reinforcement" // Only strengthen existing dimensions
 )
 
@@ -53,64 +53,64 @@ func NewProfileMerger(db *mongo.Database) *ProfileMerger {
 // MergeProfile merges new personality analysis results with existing profile
 func (pm *ProfileMerger) MergeProfile(ctx context.Context, userID string, analysisResult *PersonalityAnalysisResult, strategy MergeStrategy) (*MergeResult, error) {
 	start := time.Now()
-	
-	log.Printf("INFO: Merging profile for user %s with %d dimension updates using %s strategy", 
+
+	log.Printf("INFO: Merging profile for user %s with %d dimension updates using %s strategy",
 		userID, len(analysisResult.UpdatedDimensions), strategy)
-	
+
 	// Get existing profile
 	existingProfile, err := pm.getExistingProfile(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get existing profile: %w", err)
 	}
-	
+
 	// If no existing profile, create new one
 	if existingProfile == nil {
 		newProfile, err := pm.createNewProfile(userID, analysisResult)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create new profile: %w", err)
 		}
-		
+
 		// Save new profile
 		if err := pm.saveProfile(ctx, newProfile); err != nil {
 			return nil, fmt.Errorf("failed to save new profile: %w", err)
 		}
-		
+
 		result := &MergeResult{
-			UserID:          userID,
-			UpdatedProfile:  newProfile,
-			NewDimensions:   pm.extractDimensionNames(analysisResult.UpdatedDimensions),
-			MergeStrategy:   string(strategy),
-			ProcessingTime:  time.Since(start),
+			UserID:         userID,
+			UpdatedProfile: newProfile,
+			NewDimensions:  pm.extractDimensionNames(analysisResult.UpdatedDimensions),
+			MergeStrategy:  string(strategy),
+			ProcessingTime: time.Since(start),
 		}
-		
+
 		log.Printf("INFO: Created new profile for user %s with %d dimensions", userID, len(analysisResult.UpdatedDimensions))
 		return result, nil
 	}
-	
+
 	// Merge with existing profile
 	mergeResult, err := pm.mergeWithExistingProfile(ctx, existingProfile, analysisResult, strategy)
 	if err != nil {
 		return nil, fmt.Errorf("failed to merge with existing profile: %w", err)
 	}
-	
+
 	mergeResult.ProcessingTime = time.Since(start)
-	
+
 	// Save updated profile
 	if err := pm.saveProfile(ctx, mergeResult.UpdatedProfile); err != nil {
 		return nil, fmt.Errorf("failed to save updated profile: %w", err)
 	}
-	
+
 	log.Printf("INFO: Profile merge completed for user %s - New: %d, Merged: %d, Removed: %d, Duration: %v",
-		userID, len(mergeResult.NewDimensions), len(mergeResult.MergedDimensions), 
+		userID, len(mergeResult.NewDimensions), len(mergeResult.MergedDimensions),
 		len(mergeResult.RemovedDimensions), mergeResult.ProcessingTime)
-	
+
 	return mergeResult, nil
 }
 
 // getExistingProfile retrieves existing user profile from database
 func (pm *ProfileMerger) getExistingProfile(ctx context.Context, userID string) (*UserPersona, error) {
 	col := pm.db.Collection("user_personas")
-	
+
 	var profile UserPersona
 	err := col.FindOne(ctx, bson.M{"user_id": userID}).Decode(&profile)
 	if err != nil {
@@ -119,38 +119,38 @@ func (pm *ProfileMerger) getExistingProfile(ctx context.Context, userID string) 
 		}
 		return nil, err
 	}
-	
+
 	return &profile, nil
 }
 
 // createNewProfile creates a new user profile from analysis results
 func (pm *ProfileMerger) createNewProfile(userID string, analysisResult *PersonalityAnalysisResult) (*UserPersona, error) {
 	now := time.Now()
-	
+
 	profile := &UserPersona{
-		UserID:              userID,
-		PsychologicalModel:  &PsychologicalDimensions{},
-		AIAlignment:         &AIAlignmentDimensions{},
-		ContentInterests:    &ContentInterestTags{},
-		ProfileVersion:      1,
-		LastAnalysisTime:    now,
-		TotalInteractions:   1,
-		UserFacts:           analysisResult.ExtractedFacts,
-		AssistantKnowledge:  analysisResult.AssistantKnowledge,
-		CreatedAt:           now,
-		UpdatedAt:           now,
+		UserID:             userID,
+		PsychologicalModel: &PsychologicalDimensions{},
+		AIAlignment:        &AIAlignmentDimensions{},
+		ContentInterests:   &ContentInterestTags{},
+		ProfileVersion:     1,
+		LastAnalysisTime:   now,
+		TotalInteractions:  1,
+		UserFacts:          analysisResult.ExtractedFacts,
+		AssistantKnowledge: analysisResult.AssistantKnowledge,
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}
-	
+
 	// Apply dimension updates
 	for _, update := range analysisResult.UpdatedDimensions {
 		if err := pm.applyDimensionUpdate(profile, &update); err != nil {
 			log.Printf("WARN: Failed to apply dimension update %s: %v", update.DimensionName, err)
 		}
 	}
-	
+
 	// Calculate overall confidence
 	profile.ConfidenceScore = pm.calculateOverallConfidence(profile)
-	
+
 	return profile, nil
 }
 
@@ -162,18 +162,18 @@ func (pm *ProfileMerger) mergeWithExistingProfile(ctx context.Context, existingP
 	updatedProfile.LastAnalysisTime = time.Now()
 	updatedProfile.TotalInteractions++
 	updatedProfile.UpdatedAt = time.Now()
-	
+
 	result := &MergeResult{
-		UserID:            existingProfile.UserID,
-		PreviousProfile:   existingProfile,
-		UpdatedProfile:    updatedProfile,
-		MergedDimensions:  []string{},
-		NewDimensions:     []string{},
-		RemovedDimensions: []string{},
+		UserID:             existingProfile.UserID,
+		PreviousProfile:    existingProfile,
+		UpdatedProfile:     updatedProfile,
+		MergedDimensions:   []string{},
+		NewDimensions:      []string{},
+		RemovedDimensions:  []string{},
 		SignificantUpdates: []DimensionUpdate{},
-		MergeStrategy:     string(strategy),
+		MergeStrategy:      string(strategy),
 	}
-	
+
 	// Merge dimension updates
 	for _, update := range analysisResult.UpdatedDimensions {
 		mergeType, significant, err := pm.mergeDimensionUpdate(updatedProfile, &update, strategy)
@@ -181,7 +181,7 @@ func (pm *ProfileMerger) mergeWithExistingProfile(ctx context.Context, existingP
 			log.Printf("WARN: Failed to merge dimension %s: %v", update.DimensionName, err)
 			continue
 		}
-		
+
 		switch mergeType {
 		case "new":
 			result.NewDimensions = append(result.NewDimensions, update.DimensionName)
@@ -190,36 +190,36 @@ func (pm *ProfileMerger) mergeWithExistingProfile(ctx context.Context, existingP
 		case "unchanged":
 			// Dimension was not significantly changed
 		}
-		
+
 		if significant {
 			result.SignificantUpdates = append(result.SignificantUpdates, update)
 		}
 	}
-	
+
 	// Merge user facts
 	pm.mergeUserFacts(updatedProfile, analysisResult.ExtractedFacts, strategy)
-	
+
 	// Merge assistant knowledge
 	pm.mergeAssistantKnowledge(updatedProfile, analysisResult.AssistantKnowledge)
-	
+
 	// Update overall confidence
 	oldConfidence := existingProfile.ConfidenceScore
 	updatedProfile.ConfidenceScore = pm.calculateOverallConfidence(updatedProfile)
 	result.ConfidenceChanged = math.Abs(oldConfidence-updatedProfile.ConfidenceScore) > 0.05
-	
+
 	// Clean up old dimensions if strategy allows
 	if strategy == MergeStrategyAggressive {
 		removedDims := pm.cleanupLowConfidenceDimensions(updatedProfile)
 		result.RemovedDimensions = removedDims
 	}
-	
+
 	return result, nil
 }
 
 // mergeDimensionUpdate merges a single dimension update with existing profile
 func (pm *ProfileMerger) mergeDimensionUpdate(profile *UserPersona, update *DimensionUpdate, strategy MergeStrategy) (string, bool, error) {
 	existingDimension := pm.getDimensionScore(profile, update.DimensionName, update.DimensionType)
-	
+
 	// If dimension doesn't exist, add it
 	if existingDimension == nil {
 		if update.NewScore.Confidence >= pm.config.MinConfidenceThreshold {
@@ -228,10 +228,10 @@ func (pm *ProfileMerger) mergeDimensionUpdate(profile *UserPersona, update *Dime
 		}
 		return "unchanged", false, nil
 	}
-	
+
 	// Merge with existing dimension based on strategy
 	mergedScore, significant := pm.calculateMergedScore(existingDimension, update.NewScore, strategy)
-	
+
 	// Only update if change is significant
 	if significant {
 		update.OldScore = existingDimension
@@ -239,7 +239,7 @@ func (pm *ProfileMerger) mergeDimensionUpdate(profile *UserPersona, update *Dime
 		err := pm.applyDimensionUpdate(profile, update)
 		return "merged", true, err
 	}
-	
+
 	return "unchanged", false, nil
 }
 
@@ -265,7 +265,7 @@ func (pm *ProfileMerger) conservativeMerge(existing, new *DimensionScore) (*Dime
 	if new.Confidence < 0.8 {
 		return existing, false
 	}
-	
+
 	// If levels are the same, increase confidence
 	if existing.Level == new.Level {
 		merged := &DimensionScore{
@@ -277,7 +277,7 @@ func (pm *ProfileMerger) conservativeMerge(existing, new *DimensionScore) (*Dime
 		}
 		return merged, true
 	}
-	
+
 	// Only change level if new confidence is much higher
 	if new.Confidence > existing.Confidence+0.3 {
 		merged := &DimensionScore{
@@ -289,7 +289,7 @@ func (pm *ProfileMerger) conservativeMerge(existing, new *DimensionScore) (*Dime
 		}
 		return merged, true
 	}
-	
+
 	return existing, false
 }
 
@@ -299,20 +299,20 @@ func (pm *ProfileMerger) balancedMerge(existing, new *DimensionScore) (*Dimensio
 	oldWeight := float64(existing.ObservationCount) * existing.Confidence
 	newWeight := float64(new.ObservationCount) * new.Confidence
 	totalWeight := oldWeight + newWeight
-	
+
 	if totalWeight == 0 {
 		return existing, false
 	}
-	
+
 	// Calculate weighted confidence
 	weightedConfidence := (oldWeight*existing.Confidence + newWeight*new.Confidence) / totalWeight
-	
+
 	// Determine level based on weighted average
 	level := existing.Level
 	if new.Confidence > existing.Confidence+pm.config.DimensionUpdateThreshold {
 		level = new.Level
 	}
-	
+
 	merged := &DimensionScore{
 		Level:            level,
 		Confidence:       math.Min(1.0, weightedConfidence),
@@ -320,11 +320,11 @@ func (pm *ProfileMerger) balancedMerge(existing, new *DimensionScore) (*Dimensio
 		LastObserved:     time.Now(),
 		ObservationCount: existing.ObservationCount + new.ObservationCount,
 	}
-	
+
 	// Check if change is significant
 	significant := math.Abs(merged.Confidence-existing.Confidence) > pm.config.DimensionUpdateThreshold ||
 		merged.Level != existing.Level
-	
+
 	return merged, significant
 }
 
@@ -333,15 +333,15 @@ func (pm *ProfileMerger) aggressiveMerge(existing, new *DimensionScore) (*Dimens
 	// Give more weight to recent observations
 	recentWeight := 0.7
 	existingWeight := 0.3
-	
+
 	mergedConfidence := existingWeight*existing.Confidence + recentWeight*new.Confidence
-	
+
 	// Prefer new level if confidence is reasonable
 	level := new.Level
 	if new.Confidence < 0.4 {
 		level = existing.Level
 	}
-	
+
 	merged := &DimensionScore{
 		Level:            level,
 		Confidence:       math.Min(1.0, mergedConfidence),
@@ -349,7 +349,7 @@ func (pm *ProfileMerger) aggressiveMerge(existing, new *DimensionScore) (*Dimens
 		LastObserved:     time.Now(),
 		ObservationCount: existing.ObservationCount + 1,
 	}
-	
+
 	return merged, true // Always consider aggressive merges significant
 }
 
@@ -359,7 +359,7 @@ func (pm *ProfileMerger) reinforcementMerge(existing, new *DimensionScore) (*Dim
 	if existing.Level != new.Level {
 		return existing, false
 	}
-	
+
 	// Strengthen confidence for matching observations
 	merged := &DimensionScore{
 		Level:            existing.Level,
@@ -368,7 +368,7 @@ func (pm *ProfileMerger) reinforcementMerge(existing, new *DimensionScore) (*Dim
 		LastObserved:     time.Now(),
 		ObservationCount: existing.ObservationCount + 1,
 	}
-	
+
 	return merged, true
 }
 
@@ -390,7 +390,7 @@ func (pm *ProfileMerger) getPsychologicalDimension(psych *PsychologicalDimension
 	if psych == nil {
 		return nil
 	}
-	
+
 	switch name {
 	case "extraversion":
 		return psych.Extraversion
@@ -432,7 +432,7 @@ func (pm *ProfileMerger) getAIAlignmentDimension(ai *AIAlignmentDimensions, name
 	if ai == nil {
 		return nil
 	}
-	
+
 	switch name {
 	case "helpfulness":
 		return ai.Helpfulness
@@ -458,7 +458,7 @@ func (pm *ProfileMerger) getContentInterestDimension(content *ContentInterestTag
 	if content == nil {
 		return nil
 	}
-	
+
 	switch name {
 	case "science_interest":
 		return content.ScienceInterest
@@ -664,19 +664,19 @@ func (pm *ProfileMerger) mergeUserFacts(profile *UserPersona, newFacts []UserFac
 	// Remove old facts that exceed retention period
 	retentionCutoff := time.Now().AddDate(0, 0, -pm.config.FactRetentionDays)
 	var validFacts []UserFactEntry
-	
+
 	for _, fact := range profile.UserFacts {
 		if fact.ExtractedAt.After(retentionCutoff) {
 			validFacts = append(validFacts, fact)
 		}
 	}
-	
+
 	// Add new facts, checking for duplicates
 	factMap := make(map[string]*UserFactEntry)
 	for i, fact := range validFacts {
 		factMap[fact.Content] = &validFacts[i]
 	}
-	
+
 	for _, newFact := range newFacts {
 		if existingFact, exists := factMap[newFact.Content]; exists {
 			// Update confidence if new fact has higher confidence
@@ -693,7 +693,7 @@ func (pm *ProfileMerger) mergeUserFacts(profile *UserPersona, newFacts []UserFac
 			}
 		}
 	}
-	
+
 	profile.UserFacts = validFacts
 }
 
@@ -701,7 +701,7 @@ func (pm *ProfileMerger) mergeUserFacts(profile *UserPersona, newFacts []UserFac
 func (pm *ProfileMerger) mergeAssistantKnowledge(profile *UserPersona, newKnowledge []AssistantKnowledgeEntry) {
 	// Simple append for now - in production might want deduplication
 	profile.AssistantKnowledge = append(profile.AssistantKnowledge, newKnowledge...)
-	
+
 	// Keep only recent knowledge (last 100 entries)
 	if len(profile.AssistantKnowledge) > 100 {
 		profile.AssistantKnowledge = profile.AssistantKnowledge[len(profile.AssistantKnowledge)-100:]
@@ -712,7 +712,7 @@ func (pm *ProfileMerger) mergeAssistantKnowledge(profile *UserPersona, newKnowle
 func (pm *ProfileMerger) copyProfile(original *UserPersona) *UserPersona {
 	// Create a deep copy of the profile
 	copied := *original
-	
+
 	// Deep copy nested structures
 	if original.PsychologicalModel != nil {
 		copied.PsychologicalModel = &(*original.PsychologicalModel)
@@ -723,21 +723,21 @@ func (pm *ProfileMerger) copyProfile(original *UserPersona) *UserPersona {
 	if original.ContentInterests != nil {
 		copied.ContentInterests = &(*original.ContentInterests)
 	}
-	
+
 	// Copy slices
 	copied.UserFacts = make([]UserFactEntry, len(original.UserFacts))
 	copy(copied.UserFacts, original.UserFacts)
-	
+
 	copied.AssistantKnowledge = make([]AssistantKnowledgeEntry, len(original.AssistantKnowledge))
 	copy(copied.AssistantKnowledge, original.AssistantKnowledge)
-	
+
 	return &copied
 }
 
 func (pm *ProfileMerger) calculateOverallConfidence(profile *UserPersona) float64 {
 	totalConfidence := 0.0
 	dimensionCount := 0
-	
+
 	// Count all non-nil dimensions and sum their confidence
 	if profile.PsychologicalModel != nil {
 		totalConfidence += pm.sumPsychologicalConfidence(profile.PsychologicalModel, &dimensionCount)
@@ -748,55 +748,55 @@ func (pm *ProfileMerger) calculateOverallConfidence(profile *UserPersona) float6
 	if profile.ContentInterests != nil {
 		totalConfidence += pm.sumContentInterestConfidence(profile.ContentInterests, &dimensionCount)
 	}
-	
+
 	if dimensionCount == 0 {
 		return 0.0
 	}
-	
+
 	return totalConfidence / float64(dimensionCount)
 }
 
 func (pm *ProfileMerger) sumPsychologicalConfidence(psych *PsychologicalDimensions, count *int) float64 {
 	total := 0.0
-	
+
 	dimensions := []*DimensionScore{
 		psych.Extraversion, psych.Openness, psych.Agreeableness, psych.Conscientiousness, psych.Neuroticism,
 		psych.PhysiologicalNeeds, psych.SecurityNeed, psych.BelongingNeed, psych.SelfEsteemNeed,
 		psych.CognitiveNeeds, psych.AestheticNeeds, psych.SelfActualization, psych.OrderNeed,
 		psych.AutonomyNeed, psych.PowerNeed, psych.AchievementNeed,
 	}
-	
+
 	for _, dim := range dimensions {
 		if dim != nil {
 			total += dim.Confidence
 			*count++
 		}
 	}
-	
+
 	return total
 }
 
 func (pm *ProfileMerger) sumAIAlignmentConfidence(ai *AIAlignmentDimensions, count *int) float64 {
 	total := 0.0
-	
+
 	dimensions := []*DimensionScore{
 		ai.Helpfulness, ai.Honesty, ai.Safety, ai.InstructionCompliance,
 		ai.Truthfulness, ai.Coherence, ai.ComplexityPreference, ai.ConcisenessPreference,
 	}
-	
+
 	for _, dim := range dimensions {
 		if dim != nil {
 			total += dim.Confidence
 			*count++
 		}
 	}
-	
+
 	return total
 }
 
 func (pm *ProfileMerger) sumContentInterestConfidence(content *ContentInterestTags, count *int) float64 {
 	total := 0.0
-	
+
 	dimensions := []*DimensionScore{
 		content.ScienceInterest, content.EducationInterest, content.PsychologyInterest, content.FamilyConcern,
 		content.FashionInterest, content.ArtInterest, content.HealthConcern, content.FinancialInterest,
@@ -806,14 +806,14 @@ func (pm *ProfileMerger) sumContentInterestConfidence(content *ContentInterestTa
 		content.GamingInterest, content.AnimalConcern, content.EmotionalExpression, content.SenseOfHumor,
 		content.InformationDensity, content.LanguageStyle, content.PracticalityFocus,
 	}
-	
+
 	for _, dim := range dimensions {
 		if dim != nil {
 			total += dim.Confidence
 			*count++
 		}
 	}
-	
+
 	return total
 }
 
@@ -838,68 +838,68 @@ func (pm *ProfileMerger) countFactsByCategory(facts []UserFactEntry, category st
 func (pm *ProfileMerger) cleanupLowConfidenceDimensions(profile *UserPersona) []string {
 	var removed []string
 	minConfidence := 0.3 // Remove dimensions with very low confidence
-	
+
 	// Clean up psychological dimensions
 	if profile.PsychologicalModel != nil {
 		removed = append(removed, pm.cleanupPsychologicalDimensions(profile.PsychologicalModel, minConfidence)...)
 	}
-	
+
 	// Clean up AI alignment dimensions
 	if profile.AIAlignment != nil {
 		removed = append(removed, pm.cleanupAIAlignmentDimensions(profile.AIAlignment, minConfidence)...)
 	}
-	
+
 	// Clean up content interest dimensions
 	if profile.ContentInterests != nil {
 		removed = append(removed, pm.cleanupContentInterestDimensions(profile.ContentInterests, minConfidence)...)
 	}
-	
+
 	return removed
 }
 
 func (pm *ProfileMerger) cleanupPsychologicalDimensions(psych *PsychologicalDimensions, minConfidence float64) []string {
 	var removed []string
-	
+
 	if psych.Extraversion != nil && psych.Extraversion.Confidence < minConfidence {
 		psych.Extraversion = nil
 		removed = append(removed, "extraversion")
 	}
 	// Add cleanup for other psychological dimensions...
-	
+
 	return removed
 }
 
 func (pm *ProfileMerger) cleanupAIAlignmentDimensions(ai *AIAlignmentDimensions, minConfidence float64) []string {
 	var removed []string
-	
+
 	if ai.Helpfulness != nil && ai.Helpfulness.Confidence < minConfidence {
 		ai.Helpfulness = nil
 		removed = append(removed, "helpfulness")
 	}
 	// Add cleanup for other AI alignment dimensions...
-	
+
 	return removed
 }
 
 func (pm *ProfileMerger) cleanupContentInterestDimensions(content *ContentInterestTags, minConfidence float64) []string {
 	var removed []string
-	
+
 	if content.TechInterest != nil && content.TechInterest.Confidence < minConfidence {
 		content.TechInterest = nil
 		removed = append(removed, "tech_interest")
 	}
 	// Add cleanup for other content interest dimensions...
-	
+
 	return removed
 }
 
 // saveProfile saves the profile to database
 func (pm *ProfileMerger) saveProfile(ctx context.Context, profile *UserPersona) error {
 	col := pm.db.Collection("user_personas")
-	
+
 	opts := options.Replace().SetUpsert(true)
 	filter := bson.M{"user_id": profile.UserID}
-	
+
 	_, err := col.ReplaceOne(ctx, filter, profile, opts)
 	return err
 }
