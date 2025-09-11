@@ -50,6 +50,12 @@ type AuthContext struct {
 // GinAuthMiddleware returns a Gin middleware function for authentication
 func (am *AuthMiddleware) GinAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Skip authentication for health endpoint
+		if c.Request.URL.Path == "/health" {
+			c.Next()
+			return
+		}
+
 		authCtx, err := am.authenticate(c.Request)
 		if err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{
