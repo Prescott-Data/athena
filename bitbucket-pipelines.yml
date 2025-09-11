@@ -189,12 +189,10 @@ pipelines:
                   EMBEDDING_API_VERSION="$EMBEDDING_API_VERSION" \
                   EMBEDDING_DIMENSIONS="$EMBEDDING_DIMENSIONS" \
                   JANUS_ENDPOINT="$JANUS_ENDPOINT" \
- \
                   STM_CACHE_MAX_TURNS="$STM_CACHE_MAX_TURNS" \
                   STM_CACHE_KEY_PREFIX="$STM_CACHE_KEY_PREFIX" \
                   STM_CACHE_TTL="$STM_CACHE_TTL" \
                   STM_TASK_TIMEOUT="$STM_TASK_TIMEOUT" \
- \
                   LLM_TIMEOUT_SECONDS="$LLM_TIMEOUT_SECONDS" \
                   CHAIN_SIM_HIGH="$CHAIN_SIM_HIGH" \
                   CHAIN_SIM_LOW="$CHAIN_SIM_LOW" \
