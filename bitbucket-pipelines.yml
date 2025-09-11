@@ -167,7 +167,6 @@ pipelines:
               az containerapp update --name "$CONTAINER_APP_NAME" --resource-group "$RESOURCE_GROUP" --image "${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}" \
                 --set-env-vars \
                   PORT="$PORT" \
- \
                   MONGO_URI="$MONGO_URI" \
                   MONGO_DB="memory_os" \
                   REDIS_HOST="$REDIS_HOST" \
