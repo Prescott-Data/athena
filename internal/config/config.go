@@ -113,8 +113,8 @@ func LoadConfig() (*Config, error) {
 			EnableTLS:    getEnvBool("MEMORY_OS_ENABLE_TLS", false),
 		},
 		Auth: AuthConfig{
-			RequireAPIKey:    getEnvBool("MEMORY_OS_REQUIRE_API_KEY", true),
-			RequireJWT:       getEnvBool("MEMORY_OS_REQUIRE_JWT", true),
+			RequireAPIKey:    getEnvBool("MEMORY_OS_REQUIRE_API_KEY", false),
+			RequireJWT:       getEnvBool("MEMORY_OS_REQUIRE_JWT", false),
 			RequireMTLS:      getEnvBool("MEMORY_OS_REQUIRE_MTLS", false),
 			JWTSecret:        getEnv("MEMORY_OS_JWT_SECRET", "your-secret-key"),
 			ValidAPIKeys:     []string{getEnv("MEMORY_OS_API_KEY", "default-api-key")},
