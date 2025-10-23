@@ -15,6 +15,7 @@ import (
 	"bitbucket.org/dromos/memory-os/internal/database"
 	"bitbucket.org/dromos/memory-os/internal/memory"
 	"bitbucket.org/dromos/memory-os/internal/models"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
@@ -132,8 +133,88 @@ func (s *MemoryServer) DeleteSession(ctx context.Context, req *gen.DeleteSession
 }
 
 func (s *MemoryServer) StoreInteraction(ctx context.Context, req *gen.StoreInteractionRequest) (*gen.StoreInteractionResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method StoreInteraction not implemented")
+	// Extract identifiers from the request.
+	// In a real implementation, tenantId, userId, and agentId would be extracted
+	// from the authenticated context rather than the request body for security.
+	sessionID := req.SessionId
+	userMessage := req.UserMessage
+	agentResponse := req.AgentResponse
+
+	// For now, we'll derive tenant, user, and agent IDs from a placeholder in the context
+	// or a lookup based on the sessionID. Let's assume a helper function for this.
+	// This part is crucial for multi-tenancy and security.
+	tenantID, userID, agentID, err := s.getIDsFromSession(ctx, sessionID)
+	if err != nil {
+		return nil, status.Errorf(codes.NotFound, "session not found or invalid: %v", err)
+	}
+
+	// 1. Determine the Dialogue Chain
+	chainID, err := s.stmStore.DetermineDialogueChain(ctx, tenantID, userID, agentID, userMessage, agentResponse)
+	if err != nil {
+		log.Printf("ERROR: Failed to determine dialogue chain: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to process dialogue chain")
+	}
+
+	// 2. Create the Dialogue Page to be stored
+	metadata := make(map[string]interface{})
+	for k, v := range req.Metadata {
+		metadata[k] = v
+	}
+	dialoguePage := &models.DialoguePage{
+		TenantID:      tenantID,
+		UserID:        userID,
+		AgentID:       agentID,
+		ChainID:       chainID,
+		UserMessage:   userMessage,
+		AgentResponse: agentResponse,
+		Status:        "in_stm", // Mark as active in short-term memory
+		Metadata:      metadata,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	}
+
+	// 3. Store the Dialogue Page in MongoDB
+	pageID, err := s.stmStore.StoreDialoguePageWithContext(ctx, dialoguePage, tenantID, userID, agentID)
+	if err != nil {
+		log.Printf("ERROR: Failed to store dialogue page: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to save interaction")
+	}
+
+	// 4. Create and Store the Embedding (asynchronously)
+	go func() {
+		embeddingCtx := context.Background()
+		embedding, err := s.stmStore.CreateEmbedding(embeddingCtx, userMessage, agentResponse)
+		if err != nil {
+			log.Printf("ERROR: Failed to create embedding for page %s: %v", pageID.Hex(), err)
+			return
+		}
+
+		err = s.stmStore.StoreEmbedding(embeddingCtx, tenantID, userID, agentID, pageID.Hex(), embedding)
+		if err != nil {
+			log.Printf("ERROR: Failed to store embedding for page %s: %v", pageID.Hex(), err)
+		}
+	}()
+
+	log.Printf("INFO: Interaction stored successfully - SessionID: %s, PageID: %s", sessionID, pageID.Hex())
+
+	return &gen.StoreInteractionResponse{
+		Success:       true,
+		InteractionId: pageID.Hex(),
+	}, nil
 }
+
+// Helper function to retrieve tenant, user, and agent IDs from a session ID.
+// This is a placeholder and should be replaced with a proper implementation.
+func (s *MemoryServer) getIDsFromSession(ctx context.Context, sessionID string) (string, string, string, error) {
+	collection := s.mongoClient.Database(s.config.Database.MongoDB.Database).Collection("dialogue_chains")
+	var chain models.DialogueChain
+	err := collection.FindOne(ctx, bson.M{"chainId": sessionID}).Decode(&chain)
+	if err != nil {
+		return "", "", "", err
+	}
+	return chain.TenantID, chain.UserID, chain.AgentID, nil
+}
+
 
 func (s *MemoryServer) GetContext(ctx context.Context, req *gen.GetContextRequest) (*gen.GetContextResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetContext not implemented")
