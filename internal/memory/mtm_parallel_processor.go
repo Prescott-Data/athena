@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dromos-org/memory-os/internal/models"
+	"bitbucket.org/dromos/memory-os/internal/models"
 )
 
 // ParallelProcessor handles concurrent LLM operations for better performance

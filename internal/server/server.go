@@ -6,18 +6,23 @@ import (
 	"log"
 	"time"
 
-	"github.com/dromos-org/memory-os/internal/cache"
-	"github.com/dromos-org/memory-os/internal/config"
-	"github.com/dromos-org/memory-os/internal/database"
-	"github.com/dromos-org/memory-os/internal/memory"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	gen "bitbucket.org/dromos/memory-os/api/grpc/gen/api/grpc"
+	"bitbucket.org/dromos/memory-os/internal/cache"
+	"bitbucket.org/dromos/memory-os/internal/config"
+	"bitbucket.org/dromos/memory-os/internal/database"
+	"bitbucket.org/dromos/memory-os/internal/memory"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
 // MemoryServer represents the main Memory OS server
 type MemoryServer struct {
-	config      *config.Config
-	stmStore    *memory.STMStore
-	mongoClient *mongo.Client
+	gen.UnimplementedMemoryServiceServer // Embed for forward compatibility
+	config                               *config.Config
+	stmStore                             *memory.STMStore
+	mongoClient                          *mongo.Client
 	// Add other memory components as needed
 }
 
@@ -64,24 +69,50 @@ func (s *MemoryServer) Close() error {
 	return nil
 }
 
-// Health check
-func (s *MemoryServer) HealthCheck(ctx context.Context) map[string]string {
-	status := make(map[string]string)
-
-	// Check STM Store
-	if s.stmStore != nil {
-		status["stm_store"] = "healthy"
-	} else {
-		status["stm_store"] = "unhealthy"
-	}
-
-	// Add other health checks here
-	status["server"] = "healthy"
-
-	return status
-}
-
 // GetConfig returns the server configuration
 func (s *MemoryServer) GetConfig() *config.Config {
 	return s.config
+}
+
+// gRPC Method Implementations (Placeholders)
+
+func (s *MemoryServer) CreateSession(ctx context.Context, req *gen.CreateSessionRequest) (*gen.CreateSessionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateSession not implemented")
+}
+
+func (s *MemoryServer) GetSession(ctx context.Context, req *gen.GetSessionRequest) (*gen.GetSessionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetSession not implemented")
+}
+
+func (s *MemoryServer) DeleteSession(ctx context.Context, req *gen.DeleteSessionRequest) (*gen.DeleteSessionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteSession not implemented")
+}
+
+func (s *MemoryServer) StoreInteraction(ctx context.Context, req *gen.StoreInteractionRequest) (*gen.StoreInteractionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method StoreInteraction not implemented")
+}
+
+func (s *MemoryServer) GetContext(ctx context.Context, req *gen.GetContextRequest) (*gen.GetContextResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetContext not implemented")
+}
+
+func (s *MemoryServer) SearchMemory(ctx context.Context, req *gen.SearchMemoryRequest) (*gen.SearchMemoryResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SearchMemory not implemented")
+}
+
+func (s *MemoryServer) AnalyzeTopics(ctx context.Context, req *gen.AnalyzeTopicsRequest) (*gen.AnalyzeTopicsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AnalyzeTopics not implemented")
+}
+
+func (s *MemoryServer) GetHeatMetrics(ctx context.Context, req *gen.GetHeatMetricsRequest) (*gen.GetHeatMetricsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetHeatMetrics not implemented")
+}
+
+func (s *MemoryServer) GetSegments(ctx context.Context, req *gen.GetSegmentsRequest) (*gen.GetSegmentsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetSegments not implemented")
+}
+
+func (s *MemoryServer) HealthCheck(ctx context.Context, req *gen.HealthCheckRequest) (*gen.HealthCheckResponse, error) {
+	// A simple health check implementation
+	return &gen.HealthCheckResponse{Status: "healthy"}, nil
 }

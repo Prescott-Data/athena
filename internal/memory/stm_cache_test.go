@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	memmodels "github.com/dromos-org/memory-os/models/memory"
+	memmodels "bitbucket.org/dromos/memory-os/models/memory"
 )
 
 // MockCache implements the cache.Interface for testing

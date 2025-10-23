@@ -1,4 +1,4 @@
-.PHONY: help build run test clean lint lint-fmt lint-vet lint-lint lint-tidy docker-build docker-run install-tools
+.PHONY: help build run test clean lint lint-fmt lint-vet lint-lint lint-tidy docker-build docker-run install-tools generate
 
 # Default target
 help: ## Show this help message
@@ -59,6 +59,9 @@ install-tools: ## Install development tools
 	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 	go install honnef.co/go/tools/cmd/staticcheck@latest
 	go install golang.org/x/tools/cmd/goimports@latest
+
+generate: ## Generate protobuf code
+	./scripts/generate.sh
 
 # Cleanup
 clean: ## Clean build artifacts

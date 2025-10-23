@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/dromos-org/memory-os/internal/models"
+	"bitbucket.org/dromos/memory-os/internal/models"
 
 	"github.com/milvus-io/milvus-sdk-go/v2/client"
 	"github.com/milvus-io/milvus-sdk-go/v2/entity"

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dromos-org/memory-os/internal/config"
+	"bitbucket.org/dromos/memory-os/internal/config"
 	"github.com/gin-gonic/gin"
 	jwt "github.com/golang-jwt/jwt/v5"
 )

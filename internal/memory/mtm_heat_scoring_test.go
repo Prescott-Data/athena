@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dromos-org/memory-os/internal/models"
+	"bitbucket.org/dromos/memory-os/internal/models"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
