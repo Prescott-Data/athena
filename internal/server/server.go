@@ -8,6 +8,7 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	gen "bitbucket.org/dromos/memory-os/api/grpc/gen/api/grpc"
 	"bitbucket.org/dromos/memory-os/internal/cache"
@@ -217,7 +218,46 @@ func (s *MemoryServer) getIDsFromSession(ctx context.Context, sessionID string) 
 
 
 func (s *MemoryServer) GetContext(ctx context.Context, req *gen.GetContextRequest) (*gen.GetContextResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetContext not implemented")
+	sessionID := req.SessionId
+	limit := int(req.Limit)
+
+	if sessionID == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "session_id is required")
+	}
+
+	// Default limit if not provided or invalid
+	if limit <= 0 {
+		limit = 10
+	}
+
+	// Get tenancy info from the session
+	_, userID, _, err := s.getIDsFromSession(ctx, sessionID)
+	if err != nil {
+		return nil, status.Errorf(codes.NotFound, "session not found: %v", err)
+	}
+
+	// Retrieve recent dialogue pages from the STM store
+	pages, err := s.stmStore.GetRecentConversationContext(ctx, userID, limit)
+	if err != nil {
+		log.Printf("ERROR: Failed to get recent conversation context: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to retrieve context")
+	}
+
+	// Transform the database models to the gRPC response models
+	recentTurns := make([]*gen.ConversationTurn, 0, len(pages))
+	for _, page := range pages {
+		recentTurns = append(recentTurns, &gen.ConversationTurn{
+			UserMessage:   page.UserMessage,
+			AgentResponse: page.AgentResponse,
+			Timestamp:     timestamppb.New(page.CreatedAt),
+		})
+	}
+
+	log.Printf("INFO: Retrieved %d turns for session %s", len(recentTurns), sessionID)
+
+	return &gen.GetContextResponse{
+		RecentTurns: recentTurns,
+	}, nil
 }
 
 func (s *MemoryServer) SearchMemory(ctx context.Context, req *gen.SearchMemoryRequest) (*gen.SearchMemoryResponse, error) {
