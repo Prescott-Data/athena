@@ -354,15 +354,110 @@ func (s *MemoryServer) SearchMemory(ctx context.Context, req *gen.SearchMemoryRe
 }
 
 func (s *MemoryServer) AnalyzeTopics(ctx context.Context, req *gen.AnalyzeTopicsRequest) (*gen.AnalyzeTopicsResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method AnalyzeTopics not implemented")
+	sessionID := req.SessionId
+	if sessionID == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "session_id is required")
+	}
+
+	// Retrieve and analyze topics from the STM store
+	topicResult, err := s.stmStore.GetTopicsBySessionID(ctx, sessionID)
+	if err != nil {
+		log.Printf("ERROR: Failed to analyze topics for session %s: %v", sessionID, err)
+		return nil, status.Errorf(codes.Internal, "failed to analyze topics")
+	}
+
+	// Transform the results into the gRPC response format
+	responseTopics := make([]*gen.TopicSummary, 0, topicResult.TotalTopics)
+	if topicResult.MainTopic != nil {
+		responseTopics = append(responseTopics, &gen.TopicSummary{
+			Topic:      topicResult.MainTopic.Theme,
+			Confidence: topicResult.MainTopic.Confidence,
+		})
+	}
+	for _, subTopic := range topicResult.SubTopics {
+		responseTopics = append(responseTopics, &gen.TopicSummary{
+			Topic:      subTopic.Theme,
+			Confidence: subTopic.Confidence,
+		})
+	}
+
+	log.Printf("INFO: Analyzed topics for session %s, found %d topics", sessionID, len(responseTopics))
+
+	return &gen.AnalyzeTopicsResponse{Topics: responseTopics}, nil
 }
 
 func (s *MemoryServer) GetHeatMetrics(ctx context.Context, req *gen.GetHeatMetricsRequest) (*gen.GetHeatMetricsResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetHeatMetrics not implemented")
+	sessionID := req.SessionId
+	if sessionID == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "session_id is required")
+	}
+
+	// Retrieve heat metrics from the STM store
+	metrics, err := s.stmStore.GetHeatMetricsBySessionID(ctx, sessionID)
+	if err != nil {
+		log.Printf("ERROR: Failed to get heat metrics for session %s: %v", sessionID, err)
+		return nil, status.Errorf(codes.Internal, "failed to retrieve heat metrics")
+	}
+
+	// Transform the database models to the gRPC response models
+	responseMetrics := &gen.HeatMetrics{
+		OverallHeat:       metrics.OverallHeat,
+		TotalInteractions: int32(metrics.TotalInteractions),
+		LastActivity:      timestamppb.New(metrics.LastActivity),
+	}
+
+	if metrics.Breakdown != nil {
+		responseMetrics.Breakdown = &gen.HeatFactors{
+			AccessFrequency:  metrics.Breakdown.AccessFrequency,
+			InteractionDepth: metrics.Breakdown.InteractionDepth,
+			RecencyScore:     metrics.Breakdown.RecencyScore,
+			UserEngagement:   metrics.Breakdown.UserEngagement,
+			TopicImportance:  metrics.Breakdown.TopicImportance,
+		}
+	}
+
+	log.Printf("INFO: Retrieved heat metrics for session %s", sessionID)
+
+	return &gen.GetHeatMetricsResponse{HeatMetrics: responseMetrics}, nil
 }
 
 func (s *MemoryServer) GetSegments(ctx context.Context, req *gen.GetSegmentsRequest) (*gen.GetSegmentsResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetSegments not implemented")
+	sessionID := req.SessionId
+	limit := int(req.Limit)
+
+	if sessionID == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "session_id is required")
+	}
+
+	if limit <= 0 {
+		limit = 50 // Default limit
+	}
+
+	// Retrieve segments from the STM store
+	segments, err := s.stmStore.GetSegmentsBySessionID(ctx, sessionID, limit)
+	if err != nil {
+		log.Printf("ERROR: Failed to get segments for session %s: %v", sessionID, err)
+		return nil, status.Errorf(codes.Internal, "failed to retrieve segments")
+	}
+
+	// Transform the database models to the gRPC response models
+	responseSegments := make([]*gen.Segment, 0, len(segments))
+	for _, seg := range segments {
+		genSeg := &gen.Segment{
+			Id:           seg.SegmentID,
+			SessionId:    seg.ChainID,
+			Content:      seg.TopicSummary,
+			QualityScore: seg.HeatScore,
+			CreatedAt:    timestamppb.New(seg.CreatedAt),
+		}
+		// Note: Topics and HeatFactors are not yet implemented in this example.
+		// They would be populated here if available in the models.Segment struct.
+		responseSegments = append(responseSegments, genSeg)
+	}
+
+	log.Printf("INFO: Retrieved %d segments for session %s", len(responseSegments), sessionID)
+
+	return &gen.GetSegmentsResponse{Segments: responseSegments}, nil
 }
 
 func (s *MemoryServer) HealthCheck(ctx context.Context, req *gen.HealthCheckRequest) (*gen.HealthCheckResponse, error) {

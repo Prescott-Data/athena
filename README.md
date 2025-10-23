@@ -1,8 +1,10 @@
-# Memory Operating System (Memory OS)
+# Athena MemOS (Memory Operating System)
 
 ## 🧠 Overview
 
-The Memory Operating System is a standalone service that provides sophisticated memory capabilities for AI agents and applications. It implements a multi-layered memory architecture with Short-Term Memory (STM), Mid-Term Memory (MTM), and Long-Term Personal Memory (LTM) components.
+Athena MemOS is a standalone service designed to provide sophisticated, human-like memory capabilities to AI agents and applications. It addresses the challenge of limited context windows and statelessness in LLMs by implementing a multi-layered memory architecture. This allows an AI to remember, recall, and reason about past interactions, building a persistent understanding of its users and the world.
+
+The core philosophy is to mimic the way human memory works, progressing from a fleeting short-term cache to consolidated mid-term memories, and finally to a permanent long-term knowledge base. This enables AI agents to engage in more meaningful, context-aware, and personalized conversations.
 
 ## 🏗️ Architecture
 
@@ -132,6 +134,29 @@ curl -X POST http://localhost:8080/api/v1/sessions/session-id/context/search \
        "limit": 5,
        "similarity_threshold": 0.7
      }'
+```
+
+### Intelligence API
+
+#### Get Segments
+Retrieves the conversation segments for a session.
+```bash
+curl http://localhost:8080/api/v1/sessions/session-id/segments?limit=10 \
+     -H "X-API-Key: your-api-key"
+```
+
+#### Get Heat Metrics
+Retrieves the heat metrics for a session, indicating the level of engagement and importance.
+```bash
+curl http://localhost:8080/api/v1/sessions/session-id/analysis/heat \
+     -H "X-API-Key: your-api-key"
+```
+
+#### Analyze Topics
+Analyzes the conversation and returns a summary of the main topics discussed.
+```bash
+curl http://localhost:8080/api/v1/sessions/session-id/analysis/topics \
+     -H "X-API-Key: your-api-key"
 ```
 
 ## 🛠️ Go Client SDK
@@ -279,21 +304,23 @@ services:
 
 ## 🎯 Memory Types
 
-### Short-Term Memory (STM)
-- **Purpose**: Recent conversation cache
-- **Storage**: Redis + MongoDB
-- **TTL**: 2 hours (configurable)
-- **Features**: Fast access, automatic cleanup
+### Short-Term Memory (STM) - *The Working Memory*
+- **Analogy**: Like human short-term memory, STM is a fast, volatile cache of the most recent interactions.
+- **Purpose**: To provide immediate context for the ongoing conversation. It answers the question, "What were we just talking about?"
+- **Storage**: Redis is used for its speed, providing a sliding window of the last N turns of conversation.
+- **Process**: Every new interaction is written to STM. As the conversation grows, the oldest messages are pushed out, ensuring the cache remains fast and relevant to the current moment.
 
-### Mid-Term Memory (MTM)
-- **Purpose**: Important conversation segments
-- **Storage**: MongoDB + Milvus (vectors)
-- **Features**: Quality validation, heat scoring, topic analysis
+### Mid-Term Memory (MTM) - *Consolidating Experiences*
+- **Analogy**: This is like the process of sleep, where the brain consolidates the day's important events into lasting memories.
+- **Purpose**: To identify and preserve important, coherent topics from the STM. It groups related conversation turns into "segments," summarizes them, and scores them for importance.
+- **Storage**: MongoDB stores the structured segments, and Milvus stores the vector embeddings of those segments for semantic search.
+- **Process**: A background worker (the "Archivist") periodically scans the STM. It uses topic analysis and quality validation to find meaningful conversational arcs, which are then promoted to MTM as durable memories. Each segment gets a "heat score" to track its relevance over time.
 
-### Long-Term Personal Memory (LTM)
-- **Purpose**: User personality and knowledge graph
-- **Storage**: JanusGraph + MongoDB
-- **Features**: Persona modeling, relationship mapping
+### Long-Term Personal Memory (LTPM) - *The Knowledge Base*
+- **Analogy**: This is the brain's permanent storage, holding facts, learned skills, and the core of our personality and identity.
+- **Purpose**: To build a lasting, structured understanding of a user. It extracts key entities, facts, preferences, and personality traits from MTM segments.
+- **Storage**: JanusGraph (a graph database) is used to store the complex relationships between entities, forming a rich knowledge graph. Key facts and persona models are also stored in MongoDB.
+- **Process**: Another background worker (the "Promoter") analyzes high-heat segments from MTM. It extracts structured information (e.g., "User's favorite color is blue," "User is an expert in Python") and integrates it into the LTPM knowledge graph, creating a persistent user persona.
 
 ## 🔧 Development & Tests
 
@@ -358,17 +385,31 @@ golangci-lint run
 go build -o memory-server cmd/memory-server/main.go
 ```
 
-### Generating Protobuf (when needed)
+### Generating Protobuf & API Docs (when needed)
+If you modify `api/grpc/memory.proto`, you must regenerate the Go client/server code and the OpenAPI documentation.
 ```bash
-protoc --go_out=. --go-grpc_out=. --grpc-gateway_out=. api/grpc/memory.proto
+./scripts/generate.sh
 ```
 
-## 📚 Documentation
+## 📚 API Documentation
 
-- [Memory Architecture](MEMORY_ARCHITECTURE.md)
-- [Quality Validator Implementation](QUALITY_VALIDATOR_IMPLEMENTATION.md)
-- [API Documentation](docs/api/)
-- [Deployment Guide](docs/deployment/)
+This project uses OpenAPI (Swagger) for API documentation.
+
+### Generating Documentation
+The OpenAPI specification is generated automatically from the `api/grpc/memory.proto` file. To update it after making changes to the proto file, run:
+```bash
+./scripts/generate.sh
+```
+This will create/update the `docs/api/openapi.json` file.
+
+### Viewing Documentation
+You can use any OpenAPI-compatible viewer to see the interactive documentation. A popular choice is [Swagger UI](https://swagger.io/tools/swagger-ui/).
+
+1.  Go to the public [Swagger Editor](https://editor.swagger.io/).
+2.  Click `File` -> `Import File`.
+3.  Upload the generated `docs/api/openapi.json` file.
+
+This will give you a browsable, interactive UI for exploring and testing all the API endpoints.
 
 ## 🤝 Contributing
 
