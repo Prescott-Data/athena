@@ -1023,6 +1023,118 @@ func (s *STMStore) GetDialogueChainPages(ctx context.Context, chainID string) ([
 	return pages, nil
 }
 
+// GetSegmentsBySessionID retrieves all segments for a specific session (chain)
+func (s *STMStore) GetSegmentsBySessionID(ctx context.Context, sessionID string, limit int) ([]*models.Segment, error) {
+	collection := s.db.Collection("segments")
+
+	filter := bson.M{"chainId": sessionID}
+	opts := options.Find()
+	opts.SetSort(bson.D{bson.E{Key: "createdAt", Value: -1}}) // Most recent first
+	opts.SetLimit(int64(limit))
+
+	cursor, err := collection.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find segments for session %s: %w", sessionID, err)
+	}
+	defer cursor.Close(ctx)
+
+	var segments []*models.Segment
+	if err := cursor.All(ctx, &segments); err != nil {
+		return nil, fmt.Errorf("failed to decode segments: %w", err)
+	}
+
+	return segments, nil
+}
+
+// GetHeatMetricsBySessionID calculates and retrieves heat metrics for a session
+func (s *STMStore) GetHeatMetricsBySessionID(ctx context.Context, sessionID string) (*models.HeatMetrics, error) {
+	// 1. Retrieve all segments for the session
+	segments, err := s.GetSegmentsBySessionID(ctx, sessionID, 1000) // High limit to get all segments
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve segments for heat metrics: %w", err)
+	}
+
+	if len(segments) == 0 {
+		return &models.HeatMetrics{
+			OverallHeat: 0.0,
+			Breakdown:   &models.HeatFactors{},
+		}, nil
+	}
+
+	// 2. Aggregate heat scores and factors
+	var totalHeat float64
+	var totalAccessFrequency, totalInteractionDepth, totalRecencyScore, totalUserEngagement, totalTopicImportance float64
+	var lastActivity time.Time
+	var totalInteractions int
+
+	for _, segment := range segments {
+		totalHeat += segment.HeatScore
+		totalInteractions += segment.InteractionSize
+
+		if segment.HeatFactors != nil {
+			totalAccessFrequency += segment.HeatFactors.AccessFrequency
+			totalInteractionDepth += segment.HeatFactors.InteractionDepth
+			totalRecencyScore += segment.HeatFactors.RecencyScore
+			totalUserEngagement += segment.HeatFactors.UserEngagement
+			totalTopicImportance += segment.HeatFactors.TopicImportance
+		}
+
+		if segment.UpdatedAt.After(lastActivity) {
+			lastActivity = segment.UpdatedAt
+		}
+	}
+
+	// 3. Calculate average heat and factors
+	numSegments := float64(len(segments))
+	overallHeat := totalHeat / numSegments
+	avgBreakdown := &models.HeatFactors{
+		AccessFrequency:  totalAccessFrequency / numSegments,
+		InteractionDepth: totalInteractionDepth / numSegments,
+		RecencyScore:     totalRecencyScore / numSegments,
+		UserEngagement:   totalUserEngagement / numSegments,
+		TopicImportance:  totalTopicImportance / numSegments,
+	}
+
+	return &models.HeatMetrics{
+		OverallHeat:       overallHeat,
+		Breakdown:         avgBreakdown,
+		TotalInteractions: totalInteractions,
+		LastActivity:      lastActivity,
+	}, nil
+}
+
+// GetTopicsBySessionID analyzes and retrieves topics for a session
+func (s *STMStore) GetTopicsBySessionID(ctx context.Context, sessionID string) (*MultiTopicResult, error) {
+	// 1. Retrieve all dialogue pages for the session
+	pagePointers, err := s.GetDialogueChainPages(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve dialogue pages for topic analysis: %w", err)
+	}
+
+	if len(pagePointers) == 0 {
+		return &MultiTopicResult{
+			TotalTopics: 0,
+		}, nil
+	}
+
+	// Convert slice of pointers to slice of values
+	pages := make([]models.DialoguePage, len(pagePointers))
+	for i, p := range pagePointers {
+		if p != nil {
+			pages[i] = *p
+		}
+	}
+
+	// 2. Analyze topics using the TopicAnalyzer
+	topicAnalyzer := NewTopicAnalyzer(s, nil) // ParallelProcessor is not used in this path
+	topicResult, err := topicAnalyzer.AnalyzeTopics(ctx, pages)
+	if err != nil {
+		return nil, fmt.Errorf("failed to analyze topics: %w", err)
+	}
+
+	return topicResult, nil
+}
+
 // Helper functions for retrieval
 
 func (s *STMStore) findSimilarEmbeddings(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int) ([]string, error) {
