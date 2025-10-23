@@ -5,8 +5,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/dromos-org/memory-os/internal/config"
-	"github.com/dromos-org/memory-os/pkg/memoryos"
+	"bitbucket.org/dromos/memory-os/internal/config"
+	"bitbucket.org/dromos/memory-os/pkg/memoryos"
 )
 
 func main() {

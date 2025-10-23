@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dromos-org/memory-os/internal/models"
+	"bitbucket.org/dromos/memory-os/internal/models"
 )
 
 // Helper function for max of two integers (moved utility functions to avoid conflicts)

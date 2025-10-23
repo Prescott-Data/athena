@@ -8,8 +8,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/dromos-org/memory-os/internal/kg/janus"
-	"github.com/dromos-org/memory-os/internal/models"
+	"bitbucket.org/dromos/memory-os/internal/kg/janus"
+	"bitbucket.org/dromos/memory-os/internal/models"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"

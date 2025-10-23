@@ -16,9 +16,10 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/dromos-org/memory-os/api/middleware"
-	"github.com/dromos-org/memory-os/internal/config"
-	"github.com/dromos-org/memory-os/internal/server"
+	gw "bitbucket.org/dromos/memory-os/api/grpc/gen/api/grpc"
+	"bitbucket.org/dromos/memory-os/api/middleware"
+	"bitbucket.org/dromos/memory-os/internal/config"
+	"bitbucket.org/dromos/memory-os/internal/server"
 )
 
 func main() {
@@ -47,7 +48,7 @@ func main() {
 	)
 
 	// Register gRPC service
-	// pb.RegisterMemoryServiceServer(grpcServer, memoryServer)
+	gw.RegisterMemoryServiceServer(grpcServer, memoryServer)
 
 	grpcListener, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Server.GRPCPort))
 	if err != nil {
@@ -156,10 +157,7 @@ func main() {
 
 // registerGatewayEndpoints registers the gRPC gateway endpoints
 func registerGatewayEndpoints(ctx context.Context, mux *runtime.ServeMux, grpcEndpoint string, opts []grpc.DialOption) error {
-	// This will be implemented when we generate the protobuf code
-	// For now, we'll return nil
-	log.Println("gRPC gateway endpoints registration skipped (protobuf generation pending)")
-	return nil
+	return gw.RegisterMemoryServiceHandlerFromEndpoint(ctx, mux, grpcEndpoint, opts)
 }
 
 // corsMiddleware adds CORS headers

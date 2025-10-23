@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dromos-org/memory-os/api/middleware"
-	"github.com/dromos-org/memory-os/internal/cache"
-	"github.com/dromos-org/memory-os/internal/database"
-	"github.com/dromos-org/memory-os/internal/models"
+	"bitbucket.org/dromos/memory-os/api/middleware"
+	"bitbucket.org/dromos/memory-os/internal/cache"
+	"bitbucket.org/dromos/memory-os/internal/database"
+	"bitbucket.org/dromos/memory-os/internal/models"
 
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson/primitive"

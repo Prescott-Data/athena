@@ -6,8 +6,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/dromos-org/memory-os/internal/config"
-	"github.com/dromos-org/memory-os/internal/database"
+	"bitbucket.org/dromos/memory-os/internal/config"
+	"bitbucket.org/dromos/memory-os/internal/database"
 )
 
 func testConnectivity() {

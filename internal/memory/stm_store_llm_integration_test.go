@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dromos-org/memory-os/internal/cache"
-	"github.com/dromos-org/memory-os/internal/models"
+	"bitbucket.org/dromos/memory-os/internal/cache"
+	"bitbucket.org/dromos/memory-os/internal/models"
 
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"

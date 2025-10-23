@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dromos-org/memory-os/internal/cache"
-	"github.com/dromos-org/memory-os/internal/models"
+	"bitbucket.org/dromos/memory-os/internal/cache"
+	"bitbucket.org/dromos/memory-os/internal/models"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"

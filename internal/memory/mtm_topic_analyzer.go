@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dromos-org/memory-os/internal/models"
+	"bitbucket.org/dromos/memory-os/internal/models"
 )
 
 // TopicAnalyzer provides advanced topic analysis and multi-summary generation

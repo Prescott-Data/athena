@@ -1,7 +1,7 @@
 package memory
 
 import (
-	"github.com/dromos-org/memory-os/internal/models"
+	"bitbucket.org/dromos/memory-os/internal/models"
 )
 
 // Import aliases for convenience
