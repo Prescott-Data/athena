@@ -67,3 +67,4 @@ temp/
 # Build outputs
 dist/
 build/
+memory-server
