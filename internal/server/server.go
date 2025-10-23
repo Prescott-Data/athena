@@ -126,11 +126,61 @@ func (s *MemoryServer) CreateSession(ctx context.Context, req *gen.CreateSession
 }
 
 func (s *MemoryServer) GetSession(ctx context.Context, req *gen.GetSessionRequest) (*gen.GetSessionResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetSession not implemented")
+	sessionID := req.SessionId
+	if sessionID == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "session_id is required")
+	}
+
+	// Query the dialogue_chains collection for the session
+	collection := s.mongoClient.Database(s.config.Database.MongoDB.Database).Collection("dialogue_chains")
+	var chain models.DialogueChain
+	err := collection.FindOne(ctx, bson.M{"chainId": sessionID}).Decode(&chain)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, status.Errorf(codes.NotFound, "session not found")
+		}
+		log.Printf("ERROR: Failed to retrieve session %s: %v", sessionID, err)
+		return nil, status.Errorf(codes.Internal, "failed to retrieve session")
+	}
+
+	// Transform the database model to the gRPC response model
+	session := &gen.Session{
+		SessionId: chain.ChainID,
+		UserId:    chain.UserID,
+		CreatedAt: timestamppb.New(chain.StartedAt),
+		UpdatedAt: timestamppb.New(chain.LastTurnAt),
+		Metadata:  make(map[string]string), // Metadata is not stored on the chain model, returning empty for now.
+	}
+
+	return &gen.GetSessionResponse{Session: session}, nil
 }
 
 func (s *MemoryServer) DeleteSession(ctx context.Context, req *gen.DeleteSessionRequest) (*gen.DeleteSessionResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method DeleteSession not implemented")
+	sessionID := req.SessionId
+	if sessionID == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "session_id is required")
+	}
+
+	// Update the session status to "archived" instead of deleting
+	collection := s.mongoClient.Database(s.config.Database.MongoDB.Database).Collection("dialogue_chains")
+	result, err := collection.UpdateOne(
+		ctx,
+		bson.M{"chainId": sessionID},
+		bson.M{"$set": bson.M{"status": "archived"}},
+	)
+
+	if err != nil {
+		log.Printf("ERROR: Failed to update session %s to archived: %v", sessionID, err)
+		return nil, status.Errorf(codes.Internal, "failed to delete session")
+	}
+
+	if result.MatchedCount == 0 {
+		return nil, status.Errorf(codes.NotFound, "session not found")
+	}
+
+	log.Printf("INFO: Session archived - SessionID: %s", sessionID)
+
+	return &gen.DeleteSessionResponse{Success: true}, nil
 }
 
 func (s *MemoryServer) StoreInteraction(ctx context.Context, req *gen.StoreInteractionRequest) (*gen.StoreInteractionResponse, error) {
@@ -261,7 +311,46 @@ func (s *MemoryServer) GetContext(ctx context.Context, req *gen.GetContextReques
 }
 
 func (s *MemoryServer) SearchMemory(ctx context.Context, req *gen.SearchMemoryRequest) (*gen.SearchMemoryResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method SearchMemory not implemented")
+	sessionID := req.SessionId
+	query := req.Query
+	limit := int(req.Limit)
+
+	if sessionID == "" || query == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "session_id and query are required")
+	}
+
+	if limit <= 0 {
+		limit = 5 // Default limit
+	}
+
+	// Get tenancy info from the session
+	tenantID, userID, agentID, err := s.getIDsFromSession(ctx, sessionID)
+	if err != nil {
+		return nil, status.Errorf(codes.NotFound, "session not found: %v", err)
+	}
+
+	// Perform semantic search using the STM store
+	pages, err := s.stmStore.RetrieveFromSTMStore(ctx, tenantID, userID, agentID, query, limit)
+	if err != nil {
+		log.Printf("ERROR: Failed to search memory for session %s: %v", sessionID, err)
+		return nil, status.Errorf(codes.Internal, "failed to search memory")
+	}
+
+	// Transform the results into the gRPC response format
+	results := make([]*gen.SearchResult, 0, len(pages))
+	for _, page := range pages {
+		results = append(results, &gen.SearchResult{
+			Content:    fmt.Sprintf("User: %s\nAgent: %s", page.UserMessage, page.AgentResponse),
+			SourceType: "dialogue_page",
+			SourceId:   page.ID.Hex(),
+			Timestamp:  timestamppb.New(page.CreatedAt),
+			// SimilarityScore is not available in the current STMStore response, so it's omitted.
+		})
+	}
+
+	log.Printf("INFO: Memory search completed for session %s, found %d results", sessionID, len(results))
+
+	return &gen.SearchMemoryResponse{Results: results}, nil
 }
 
 func (s *MemoryServer) AnalyzeTopics(ctx context.Context, req *gen.AnalyzeTopicsRequest) (*gen.AnalyzeTopicsResponse, error) {
