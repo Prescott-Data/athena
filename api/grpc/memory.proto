@@ -80,8 +80,10 @@ service MemoryService {
 // Request/Response Messages
 
 message CreateSessionRequest {
-  string user_id = 1;
-  map<string, string> metadata = 2;
+  string tenant_id = 1;
+  string user_id = 2;
+  string agent_id = 3;
+  map<string, string> metadata = 4;
 }
 
 message CreateSessionResponse {
