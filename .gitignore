@@ -68,3 +68,8 @@ temp/
 dist/
 build/
 memory-server
+
+Paper-MemoryOS.pdf
+Paper-MemoryOS.pdf:Zone.Identifier
+
+MemoryOS
