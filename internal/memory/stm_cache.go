@@ -16,6 +16,20 @@ import (
 	_ "github.com/joho/godotenv/autoload"
 )
 
+// STMEventType defines the type of event stored in the STM.
+type STMEventType string
+
+const (
+	// STMEventTypeMessage represents a message from a user or agent.
+	STMEventTypeMessage STMEventType = "message"
+	// STMEventTypeThought represents an internal reasoning step of the agent.
+	STMEventTypeThought STMEventType = "thought"
+	// STMEventTypeAction represents a concrete action the agent is taking (e.g., tool call).
+	STMEventTypeAction STMEventType = "action"
+	// STMEventTypeObservation represents the result or output of an action.
+	STMEventTypeObservation STMEventType = "observation"
+)
+
 func init() {
 	// Parse TTL hours
 	ttlHours := 2 // default to 2 hours
@@ -49,20 +63,23 @@ func init() {
 var (
 	// StmCacheKeyPrefix is the prefix for all STM cache keys
 	StmCacheKeyPrefix = os.Getenv("STM_CACHE_KEY_PREFIX")
-	// StmCacheMaxTurns is the maximum number of conversation turns to keep in memory
+	// StmCacheMaxTurns is the maximum number of conversation events to keep in memory
 	StmCacheMaxTurns int64
 	// StmCacheTTL is the default TTL for STM cache entries
 	StmCacheTTL time.Duration
 )
 
-// ConversationTurn represents a single turn in a conversation for STM caching
-type ConversationTurn struct {
-	Type      string    `json:"type"`      // "user" or "agent"
-	Content   string    `json:"content"`   // The message content
-	Timestamp time.Time `json:"timestamp"` // When the turn occurred
+// STMEvent represents a single event in the short-term memory cache.
+// This can be a conversation turn, an agent's thought, an action, or an observation.
+type STMEvent struct {
+	Role      string       `json:"role"`      // Who the event belongs to (e.g., "user", "agent")
+	Type      STMEventType `json:"type"`      // Type of the event (e.g., "message", "thought")
+	Content   string       `json:"content"`   // The content of the event
+	Timestamp time.Time    `json:"timestamp"` // When the event occurred
 }
 
-// STMCache provides Short-Term Memory caching for conversations
+// STMCache provides Short-Term Memory caching for conversations and agent events.
+
 type STMCache struct {
 	redis cache.Interface
 }
@@ -74,61 +91,61 @@ func NewSTMCache(redisClient cache.Interface) *STMCache {
 	}
 }
 
-// GetConversationContext retrieves the last N conversation turns from Redis cache
-func (s *STMCache) GetConversationContext(ctx context.Context, userID string) ([]ConversationTurn, error) {
+// GetSTMContext retrieves the last N events from the Redis cache.
+func (s *STMCache) GetSTMContext(ctx context.Context, userID string) ([]STMEvent, error) {
 	start := time.Now()
 
 	cacheKey := s.generateSTMKey(userID)
 
-	// Use Redis LRANGE to get the last 10 turns instantly
-	rawTurns, err := s.redis.LRange(cacheKey, 0, StmCacheMaxTurns-1)
+	// Use Redis LRANGE to get the last N events instantly
+	rawEvents, err := s.redis.LRange(cacheKey, 0, StmCacheMaxTurns-1)
 	if err != nil {
 		MetricSTMCacheOps.WithLabelValues("get", "error").Inc()
 		log.Printf("WARN: Failed to retrieve STM cache for user %s: %v", userID, err)
-		return []ConversationTurn{}, nil // Return empty on cache miss, don't fail
+		return []STMEvent{}, nil // Return empty on cache miss, don't fail
 	}
 
-	turns := make([]ConversationTurn, 0, len(rawTurns))
-	for _, rawTurn := range rawTurns {
-		var turn ConversationTurn
-		if err := json.Unmarshal([]byte(rawTurn), &turn); err != nil {
-			log.Printf("WARN: Failed to unmarshal conversation turn for user %s: %v", userID, err)
+	events := make([]STMEvent, 0, len(rawEvents))
+	for _, rawEvent := range rawEvents {
+		var event STMEvent
+		if err := json.Unmarshal([]byte(rawEvent), &event); err != nil {
+			log.Printf("WARN: Failed to unmarshal STM event for user %s: %v", userID, err)
 			continue
 		}
-		turns = append(turns, turn)
+		events = append(events, event)
 	}
 
 	duration := time.Since(start)
-	log.Printf("INFO: STM cache retrieval completed - UserID: %s, Duration: %v, Turns: %d",
-		userID, duration, len(turns))
+	log.Printf("INFO: STM cache retrieval completed - UserID: %s, Duration: %v, Events: %d",
+		userID, duration, len(events))
 	MetricSTMCacheOps.WithLabelValues("get", "ok").Inc()
 
-	return turns, nil
+	return events, nil
 }
 
-// AddConversationTurn adds a new conversation turn to the STM cache
-func (s *STMCache) AddConversationTurn(ctx context.Context, userID string, turn ConversationTurn) error {
+// AddSTMEvent adds a new event to the STM cache.
+func (s *STMCache) AddSTMEvent(ctx context.Context, userID string, event STMEvent) error {
 	start := time.Now()
 
 	cacheKey := s.generateSTMKey(userID)
 
-	// Serialize the turn
-	turnJSON, err := json.Marshal(turn)
+	// Serialize the event
+	eventJSON, err := json.Marshal(event)
 	if err != nil {
 		MetricSTMCacheOps.WithLabelValues("append", "error").Inc()
-		return fmt.Errorf("failed to marshal conversation turn: %w", err)
+		return fmt.Errorf("failed to marshal STM event: %w", err)
 	}
 
-	// LPUSH the new turn to the front of the list
-	if err := s.redis.LPush(cacheKey, string(turnJSON)); err != nil {
+	// LPUSH the new event to the front of the list
+	if err := s.redis.LPush(cacheKey, string(eventJSON)); err != nil {
 		MetricSTMCacheOps.WithLabelValues("append", "error").Inc()
-		return fmt.Errorf("failed to push conversation turn: %w", err)
+		return fmt.Errorf("failed to push STM event: %w", err)
 	}
 
-	// LTRIM to maintain sliding window of max turns
+	// LTRIM to maintain sliding window of max events
 	if err := s.redis.LTrim(cacheKey, 0, StmCacheMaxTurns-1); err != nil {
 		MetricSTMCacheOps.WithLabelValues("append", "error").Inc()
-		return fmt.Errorf("failed to trim conversation turns: %w", err)
+		return fmt.Errorf("failed to trim STM events: %w", err)
 	}
 
 	// Set expiration on the key to auto-cleanup stale conversations
@@ -137,15 +154,15 @@ func (s *STMCache) AddConversationTurn(ctx context.Context, userID string, turn 
 	}
 
 	duration := time.Since(start)
-	log.Printf("INFO: STM cache turn added - UserID: %s, Duration: %v, Type: %s",
-		userID, duration, turn.Type)
+	log.Printf("INFO: STM cache event added - UserID: %s, Duration: %v, Type: %s",
+		userID, duration, event.Type)
 	MetricSTMCacheOps.WithLabelValues("append", "ok").Inc()
 
 	return nil
 }
 
-// UpdateConversationTurns updates the cache with a complete conversation context
-func (s *STMCache) UpdateConversationTurns(ctx context.Context, userID string, turns []ConversationTurn) error {
+// UpdateSTMEntries updates the cache with a complete set of STM events.
+func (s *STMCache) UpdateSTMEntries(ctx context.Context, userID string, events []STMEvent) error {
 	start := time.Now()
 
 	cacheKey := s.generateSTMKey(userID)
@@ -155,22 +172,22 @@ func (s *STMCache) UpdateConversationTurns(ctx context.Context, userID string, t
 		log.Printf("WARN: Failed to clear existing STM cache for user %s: %v", userID, err)
 	}
 
-	// Add turns in reverse order (newest first) to maintain chronological order
-	for i := len(turns) - 1; i >= 0; i-- {
-		turn := turns[i]
-		turnJSON, err := json.Marshal(turn)
+	// Add events in reverse order (newest first) to maintain chronological order
+	for i := len(events) - 1; i >= 0; i-- {
+		event := events[i]
+		eventJSON, err := json.Marshal(event)
 		if err != nil {
-			log.Printf("WARN: Failed to marshal turn for user %s: %v", userID, err)
+			log.Printf("WARN: Failed to marshal event for user %s: %v", userID, err)
 			continue
 		}
 
-		if err := s.redis.LPush(cacheKey, string(turnJSON)); err != nil {
-			log.Printf("WARN: Failed to push turn to cache for user %s: %v", userID, err)
+		if err := s.redis.LPush(cacheKey, string(eventJSON)); err != nil {
+			log.Printf("WARN: Failed to push event to cache for user %s: %v", userID, err)
 			continue
 		}
 	}
 
-	// Ensure we don't exceed max turns
+	// Ensure we don't exceed max events
 	if err := s.redis.LTrim(cacheKey, 0, StmCacheMaxTurns-1); err != nil {
 		log.Printf("WARN: Failed to trim STM cache for user %s: %v", userID, err)
 	}
@@ -181,32 +198,33 @@ func (s *STMCache) UpdateConversationTurns(ctx context.Context, userID string, t
 	}
 
 	duration := time.Since(start)
-	log.Printf("INFO: STM cache updated - UserID: %s, Duration: %v, Turns: %d",
-		userID, duration, len(turns))
+	log.Printf("INFO: STM cache updated - UserID: %s, Duration: %v, Events: %d",
+		userID, duration, len(events))
 
 	return nil
 }
 
-// ClearConversationContext clears the STM cache for a user
-func (s *STMCache) ClearConversationContext(ctx context.Context, userID string) error {
+// ClearSTMContext clears the STM cache for a user.
+func (s *STMCache) ClearSTMContext(ctx context.Context, userID string) error {
 	cacheKey := s.generateSTMKey(userID)
 	return s.redis.Delete(cacheKey)
 }
 
-// ConvertMessagesToTurns converts database messages to conversation turns
-func (s *STMCache) ConvertMessagesToTurns(messages []memmodels.Message) []ConversationTurn {
-	turns := make([]ConversationTurn, 0, len(messages))
+// ConvertMessagesToSTMEvents converts database messages to STM events.
+func (s *STMCache) ConvertMessagesToSTMEvents(messages []memmodels.Message) []STMEvent {
+	events := make([]STMEvent, 0, len(messages))
 
 	for _, msg := range messages {
-		turn := ConversationTurn{
-			Type:      msg.Type,
+		event := STMEvent{
+			Role:      msg.Type,
+			Type:      STMEventTypeMessage,
 			Content:   msg.Content,
 			Timestamp: msg.CreatedAt,
 		}
-		turns = append(turns, turn)
+		events = append(events, event)
 	}
 
-	return turns
+	return events
 }
 
 // generateSTMKey creates the Redis key for a user's STM cache

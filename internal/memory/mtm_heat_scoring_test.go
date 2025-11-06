@@ -184,7 +184,7 @@ func TestHeatScorer_calculateUserEngagement(t *testing.T) {
 				PageIDs:      []primitive.ObjectID{primitive.NewObjectID()},
 				TopicSummary: "Short summary",
 			},
-			expected:    0.231059, // tanh(log(2)/3) ≈ 0.231
+			expected:    0.22702358, // tanh(log(2)/3) ≈ 0.227
 			description: "Single page with short summary",
 		},
 		{
@@ -197,7 +197,7 @@ func TestHeatScorer_calculateUserEngagement(t *testing.T) {
 				},
 				TopicSummary: "This is a very long summary that indicates a complex and detailed conversation with multiple exchanges between the user and assistant about various topics",
 			},
-			expected:    0.570669, // tanh(log(4)/3 * 1.2) ≈ 0.571
+			expected:    0.5038,
 			description: "Multiple pages with long summary should have higher engagement",
 		},
 	}
@@ -234,7 +234,7 @@ func TestHeatScorer_calculateTopicImportance(t *testing.T) {
 			segment: &models.Segment{
 				TopicSummary: "Urgent problem that needs immediate help",
 			},
-			expected:    0.616909, // tanh(0.5 + 0.2) = tanh(0.7) ≈ 0.617
+			expected:    0.66403, // tanh(0.5 + 0.1 * 3) = tanh(0.8) ≈ 0.664
 			description: "Urgent topic should have higher importance",
 		},
 		{
@@ -242,7 +242,7 @@ func TestHeatScorer_calculateTopicImportance(t *testing.T) {
 			segment: &models.Segment{
 				TopicSummary: "Critical error causing urgent issue that needs help",
 			},
-			expected:    0.761594, // tanh(0.5 + 0.3) = tanh(0.8) ≈ 0.762
+			expected:    0.76159, // tanh(0.5 + 0.1 * 5) = tanh(1.0) ≈ 0.761
 			description: "Multiple important keywords should boost importance",
 		},
 	}

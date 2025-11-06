@@ -20,8 +20,8 @@ const (
 	testUserID    = "test_stm_user_123"
 )
 
-// ConversationTurn represents a conversation turn for STM testing
-type ConversationTurn struct {
+// STMEvent represents an event for STM testing
+type STMEvent struct {
 	Type      string    `json:"type"`
 	Content   string    `json:"content"`
 	Timestamp time.Time `json:"timestamp"`
@@ -104,8 +104,8 @@ func testSTMCache(ctx context.Context) bool {
 
 	cacheKey := fmt.Sprintf("stm_cache:user_%s", testUserID)
 
-	// Test 1: Store conversation turns
-	turns := []ConversationTurn{
+	// Test 1: Store events
+	events := []STMEvent{
 		{Type: "user", Content: "Hello, I need help with machine learning", Timestamp: time.Now().Add(-5 * time.Minute)},
 		{Type: "agent", Content: "I'd be happy to help you with machine learning! What specific area would you like to explore?", Timestamp: time.Now().Add(-4 * time.Minute)},
 		{Type: "user", Content: "I want to learn about neural networks", Timestamp: time.Now().Add(-3 * time.Minute)},
@@ -115,17 +115,17 @@ func testSTMCache(ctx context.Context) bool {
 	// Clear any existing cache
 	rdb.Del(ctx, cacheKey)
 
-	// Add turns to cache (LPUSH for newest first)
-	for i := len(turns) - 1; i >= 0; i-- {
-		turnJSON, err := json.Marshal(turns[i])
+	// Add events to cache (LPUSH for newest first)
+	for i := len(events) - 1; i >= 0; i-- {
+		eventJSON, err := json.Marshal(events[i])
 		if err != nil {
-			fmt.Printf("   ⚠️  Failed to marshal turn: %v\n", err)
+			fmt.Printf("   ⚠️  Failed to marshal event: %v\n", err)
 			return false
 		}
 
-		err = rdb.LPush(ctx, cacheKey, string(turnJSON)).Err()
+		err = rdb.LPush(ctx, cacheKey, string(eventJSON)).Err()
 		if err != nil {
-			fmt.Printf("   ⚠️  Failed to LPUSH turn: %v\n", err)
+			fmt.Printf("   ⚠️  Failed to LPUSH event: %v\n", err)
 			return false
 		}
 	}
@@ -137,45 +137,45 @@ func testSTMCache(ctx context.Context) bool {
 		return false
 	}
 
-	// Test 2: Retrieve conversation context
-	retrievedTurns, err := rdb.LRange(ctx, cacheKey, 0, 9).Result() // Get last 10 turns
+	// Test 2: Retrieve context
+	retrievedEvents, err := rdb.LRange(ctx, cacheKey, 0, 9).Result() // Get last 10 events
 	if err != nil {
-		fmt.Printf("   ⚠️  Failed to retrieve turns: %v\n", err)
+		fmt.Printf("   ⚠️  Failed to retrieve events: %v\n", err)
 		return false
 	}
 
-	if len(retrievedTurns) != len(turns) {
-		fmt.Printf("   ⚠️  Expected %d turns, got %d\n", len(turns), len(retrievedTurns))
+	if len(retrievedEvents) != len(events) {
+		fmt.Printf("   ⚠️  Expected %d events, got %d\n", len(events), len(retrievedEvents))
 		return false
 	}
 
-	// Test 3: Verify turn order and content
-	for i, turnStr := range retrievedTurns {
-		var turn ConversationTurn
-		err := json.Unmarshal([]byte(turnStr), &turn)
+	// Test 3: Verify event order and content
+	for i, eventStr := range retrievedEvents {
+		var event STMEvent
+		err := json.Unmarshal([]byte(eventStr), &event)
 		if err != nil {
-			fmt.Printf("   ⚠️  Failed to unmarshal turn %d: %v\n", i, err)
+			fmt.Printf("   ⚠️  Failed to unmarshal event %d: %v\n", i, err)
 			return false
 		}
 
-		expectedTurn := turns[i]
-		if turn.Type != expectedTurn.Type || turn.Content != expectedTurn.Content {
-			fmt.Printf("   ⚠️  Turn %d mismatch: expected %s, got %s\n", i, expectedTurn.Content, turn.Content)
+		expectedEvent := events[i]
+		if event.Type != expectedEvent.Type || event.Content != expectedEvent.Content {
+			fmt.Printf("   ⚠️  Event %d mismatch: expected %s, got %s\n", i, expectedEvent.Content, event.Content)
 			return false
 		}
 	}
 
 	// Test 4: Sliding window behavior (LTRIM)
-	// Add more turns to test max limit
+	// Add more events to test max limit
 	for j := 0; j < 8; j++ {
-		newTurn := ConversationTurn{
+		newEvent := STMEvent{
 			Type:      "user",
 			Content:   fmt.Sprintf("Additional message %d", j+1),
 			Timestamp: time.Now(),
 		}
-		turnJSON, _ := json.Marshal(newTurn)
-		rdb.LPush(ctx, cacheKey, string(turnJSON))
-		rdb.LTrim(ctx, cacheKey, 0, 9) // Keep only 10 turns max
+		eventJSON, _ := json.Marshal(newEvent)
+		rdb.LPush(ctx, cacheKey, string(eventJSON))
+		rdb.LTrim(ctx, cacheKey, 0, 9) // Keep only 10 events max
 	}
 
 	finalLength, err := rdb.LLen(ctx, cacheKey).Result()
@@ -192,7 +192,7 @@ func testSTMCache(ctx context.Context) bool {
 	// Cleanup
 	rdb.Del(ctx, cacheKey)
 
-	fmt.Printf("   📊 STM Cache operations: %d turns stored, sliding window working\n", len(turns))
+	fmt.Printf("   📊 STM Cache operations: %d events stored, sliding window working\n", len(events))
 	return true
 }
 
@@ -345,45 +345,45 @@ func testSTMIntegration(ctx context.Context) bool {
 	}
 	insertedID := result.InsertedID.(primitive.ObjectID)
 
-	// 2. Cache the turn in Redis (fast access)
-	turn := ConversationTurn{
+	// 2. Cache the event in Redis (fast access)
+	event := STMEvent{
 		Type:      "user",
 		Content:   dialoguePage.UserMessage,
 		Timestamp: dialoguePage.CreatedAt,
 	}
 
-	turnJSON, err := json.Marshal(turn)
+	eventJSON, err := json.Marshal(event)
 	if err != nil {
-		fmt.Printf("   ⚠️  Failed to marshal turn: %v\n", err)
+		fmt.Printf("   ⚠️  Failed to marshal event: %v\n", err)
 		return false
 	}
 
-	err = rdb.LPush(ctx, cacheKey, string(turnJSON)).Err()
+	err = rdb.LPush(ctx, cacheKey, string(eventJSON)).Err()
 	if err != nil {
-		fmt.Printf("   ⚠️  Failed to cache turn: %v\n", err)
+		fmt.Printf("   ⚠️  Failed to cache event: %v\n", err)
 		return false
 	}
 
 	// Add agent response to cache
-	agentTurn := ConversationTurn{
+	agentEvent := STMEvent{
 		Type:      "agent",
 		Content:   dialoguePage.AgentResponse,
 		Timestamp: dialoguePage.CreatedAt.Add(time.Second),
 	}
 
-	agentTurnJSON, _ := json.Marshal(agentTurn)
-	rdb.LPush(ctx, cacheKey, string(agentTurnJSON))
+	agentEventJSON, _ := json.Marshal(agentEvent)
+	rdb.LPush(ctx, cacheKey, string(agentEventJSON))
 
 	// 3. Test cache-first retrieval pattern
 	// First check cache (fast)
-	cachedTurns, err := rdb.LRange(ctx, cacheKey, 0, 9).Result()
+	cachedEvents, err := rdb.LRange(ctx, cacheKey, 0, 9).Result()
 	if err != nil {
 		fmt.Printf("   ⚠️  Failed to retrieve from cache: %v\n", err)
 		return false
 	}
 
-	if len(cachedTurns) != 2 {
-		fmt.Printf("   ⚠️  Expected 2 cached turns, got %d\n", len(cachedTurns))
+	if len(cachedEvents) != 2 {
+		fmt.Printf("   ⚠️  Expected 2 cached events, got %d\n", len(cachedEvents))
 		return false
 	}
 
@@ -416,34 +416,34 @@ func testSTMIntegration(ctx context.Context) bool {
 	for i := len(fallbackPages) - 1; i >= 0; i-- {
 		page := fallbackPages[i]
 		
-		// Add user turn
-		userTurn := ConversationTurn{
+		// Add user event
+		userEvent := STMEvent{
 			Type:      "user",
 			Content:   page.UserMessage,
 			Timestamp: page.CreatedAt,
 		}
-		userJSON, _ := json.Marshal(userTurn)
+		userJSON, _ := json.Marshal(userEvent)
 		rdb.LPush(ctx, cacheKey, string(userJSON))
 
-		// Add agent turn
-		agentTurn := ConversationTurn{
+		// Add agent event
+		agentEvent := STMEvent{
 			Type:      "agent",
 			Content:   page.AgentResponse,
 			Timestamp: page.CreatedAt.Add(time.Second),
 		}
-		agentJSON, _ := json.Marshal(agentTurn)
+		agentJSON, _ := json.Marshal(agentEvent)
 		rdb.LPush(ctx, cacheKey, string(agentJSON))
 	}
 
 	// Verify cache rebuild
-	rebuiltTurns, err := rdb.LRange(ctx, cacheKey, 0, -1).Result()
+	rebuiltEvents, err := rdb.LRange(ctx, cacheKey, 0, -1).Result()
 	if err != nil {
 		fmt.Printf("   ⚠️  Failed to verify cache rebuild: %v\n", err)
 		return false
 	}
 
-	if len(rebuiltTurns) != 2 {
-		fmt.Printf("   ⚠️  Cache rebuild failed: expected 2 turns, got %d\n", len(rebuiltTurns))
+	if len(rebuiltEvents) != 2 {
+		fmt.Printf("   ⚠️  Cache rebuild failed: expected 2 events, got %d\n", len(rebuiltEvents))
 		return false
 	}
 
@@ -469,18 +469,18 @@ func testSTMPerformance(ctx context.Context) bool {
 	// Test 1: Batch operations performance
 	start := time.Now()
 	
-	// Simulate 50 conversation turns
+	// Simulate 50 conversation events
 	for i := 0; i < 50; i++ {
-		turn := ConversationTurn{
+		event := STMEvent{
 			Type:      "user",
 			Content:   fmt.Sprintf("Test message %d for performance testing", i+1),
 			Timestamp: time.Now(),
 		}
 		
-		turnJSON, _ := json.Marshal(turn)
-		err := rdb.LPush(ctx, cacheKey, string(turnJSON)).Err()
+		eventJSON, _ := json.Marshal(event)
+		err := rdb.LPush(ctx, cacheKey, string(eventJSON)).Err()
 		if err != nil {
-			fmt.Printf("   ⚠️  Failed to push turn %d: %v\n", i+1, err)
+			fmt.Printf("   ⚠️  Failed to push event %d: %v\n", i+1, err)
 			return false
 		}
 		
@@ -493,9 +493,9 @@ func testSTMPerformance(ctx context.Context) bool {
 	// Test 2: Retrieval performance
 	start = time.Now()
 	
-	turns, err := rdb.LRange(ctx, cacheKey, 0, 9).Result()
+	events, err := rdb.LRange(ctx, cacheKey, 0, 9).Result()
 	if err != nil {
-		fmt.Printf("   ⚠️  Failed to retrieve turns: %v\n", err)
+		fmt.Printf("   ⚠️  Failed to retrieve events: %v\n", err)
 		return false
 	}
 	
@@ -527,8 +527,8 @@ func testSTMPerformance(ctx context.Context) bool {
 	}
 
 	// Verify final state
-	if len(turns) != 10 {
-		fmt.Printf("   ⚠️  Expected 10 turns after batch, got %d\n", len(turns))
+	if len(events) != 10 {
+		fmt.Printf("   ⚠️  Expected 10 events after batch, got %d\n", len(events))
 		return false
 	}
 

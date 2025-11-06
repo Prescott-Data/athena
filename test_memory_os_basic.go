@@ -65,20 +65,9 @@ func main() {
 	interactionReq := &memoryos.StoreInteractionRequest{
 		UserMessage:   "Hello, how can you help me?",
 		AgentResponse: "I can help you with various tasks. What would you like to know?",
-		Metadata: map[string]string{
-			"topic": "greeting",
-		},
 		Timestamp: time.Now(),
 	}
 	fmt.Printf("✅ Interaction request structure: %+v\n", interactionReq)
-
-	// Test search request
-	searchReq := &memoryos.SearchMemoryRequest{
-		Query:               "machine learning concepts",
-		Limit:               5,
-		SimilarityThreshold: 0.7,
-	}
-	fmt.Printf("✅ Search request structure: %+v\n", searchReq)
 
 	// Test 5: Authentication Headers Test
 	fmt.Println("\n5. Testing authentication setup...")

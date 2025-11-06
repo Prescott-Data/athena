@@ -2,217 +2,191 @@ package memory
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
-	"os"
-	"os/signal"
-	"sync"
-	"syscall"
 	"time"
 
 	"bitbucket.org/dromos/memory-os/internal/cache"
-	"bitbucket.org/dromos/memory-os/internal/database"
 	"bitbucket.org/dromos/memory-os/internal/models"
-
-	"go.mongodb.org/mongo-driver/mongo"
+	"github.com/redis/go-redis/v9"
 )
 
-// Worker processes background memory formation tasks using goroutines
+const (
+	HighSimilarityThreshold = 0.9
+	LowSimilarityThreshold  = 0.7
+	STMEventTTL             = 24 * time.Hour
+)
+
+// Worker struct manages the background processing of cognitive tasks
 type Worker struct {
-	taskQueue   *TaskQueue
-	stmStore    *STMStore
-	redis       cache.Interface
-	db          *mongo.Database
-	quit        chan struct{}
-	wg          sync.WaitGroup
-	workerCount int
+	taskQueue TaskQueuer
+	stmStore  STMStorer
+	redis     cache.Interface
 }
 
-// WorkerConfig holds configuration for the memory worker
-type WorkerConfig struct {
-	WorkerCount int
-	Redis       cache.Interface
-	Database    *mongo.Database
-}
-
-// NewWorker creates a new memory worker instance
-func NewWorker(config WorkerConfig) *Worker {
-	taskQueue := NewTaskQueue(config.Redis)
-	stmStore := NewSTMStore(config.Database, config.Redis)
-
-	workerCount := config.WorkerCount
-	if workerCount <= 0 {
-		workerCount = 1 // Default to 1 worker
-	}
-
+// NewWorker creates a new Worker
+func NewWorker(taskQueue TaskQueuer, stmStore STMStorer, redis cache.Interface) *Worker {
 	return &Worker{
-		taskQueue:   taskQueue,
-		stmStore:    stmStore,
-		redis:       config.Redis,
-		db:          config.Database,
-		quit:        make(chan struct{}),
-		workerCount: workerCount,
+		taskQueue: taskQueue,
+		stmStore:  stmStore,
+		redis:     redis,
 	}
 }
 
-// Start begins processing background tasks with goroutines
-func (mw *Worker) Start(ctx context.Context) {
-	log.Printf("INFO: Starting %d memory worker goroutines", mw.workerCount)
-
-	// Start worker goroutines
-	for i := 0; i < mw.workerCount; i++ {
-		mw.wg.Add(1)
-		go mw.workerLoop(ctx, i)
-	}
-
-	// Set up graceful shutdown
-	go mw.handleShutdown()
-
-	log.Println("INFO: Memory worker goroutines started successfully")
-}
-
-// Stop gracefully stops all worker goroutines
-func (mw *Worker) Stop() {
-	log.Println("INFO: Stopping memory worker goroutines...")
-	close(mw.quit)
-	mw.wg.Wait()
-	log.Println("INFO: All memory worker goroutines stopped")
-}
-
-// workerLoop is the main processing loop for a single worker goroutine
-func (mw *Worker) workerLoop(ctx context.Context, workerID int) {
-	defer mw.wg.Done()
-
-	log.Printf("INFO: Memory worker goroutine %d started", workerID)
-
+// Start processing tasks from the queue
+func (w *Worker) Start(ctx context.Context, workerID int) {
+	log.Printf("Worker %d starting...", workerID)
 	for {
 		select {
-		case <-mw.quit:
-			log.Printf("INFO: Memory worker goroutine %d shutting down", workerID)
-			return
 		case <-ctx.Done():
-			log.Printf("INFO: Memory worker goroutine %d context cancelled", workerID)
+			log.Printf("Worker %d stopping...", workerID)
 			return
 		default:
-			// Try to process a task
-			if err := mw.processNextTask(ctx, workerID); err != nil {
-				// Only log errors that aren't timeouts or cache misses (empty queue)
-				if err.Error() != "redis: nil" && err.Error() != "failed to dequeue task: cache miss" {
-					log.Printf("WARN: Worker %d task processing error: %v", workerID, err)
-				}
-				// Brief pause to prevent busy-waiting
-				time.Sleep(100 * time.Millisecond)
+			if err := w.processNextTask(ctx, workerID); err != nil {
+				log.Printf("ERROR: Worker %d failed to process task: %v", workerID, err)
 			}
 		}
 	}
 }
 
-// processNextTask dequeues and processes a single task
-func (mw *Worker) processNextTask(ctx context.Context, workerID int) error {
-	// Create timeout context for task processing
-	taskCtx, cancel := context.WithTimeout(ctx, TaskTimeout)
-	defer cancel()
-
-	// Dequeue next task
-	task, err := mw.taskQueue.DequeueTask(taskCtx)
+// processNextTask fetches and processes the next task from the queue
+func (w *Worker) processNextTask(ctx context.Context, workerID int) error {
+	task, err := w.taskQueue.DequeueTask(ctx)
 	if err != nil {
-		return err // This includes timeout/empty queue errors
+		if err == redis.Nil {
+			// No tasks in the queue, wait a bit
+			time.Sleep(1 * time.Second)
+			return nil
+		}
+		return fmt.Errorf("failed to dequeue task: %w", err)
 	}
 
-	start := time.Now()
-	log.Printf("INFO: Worker %d processing task %s (UserID: %s)", workerID, task.ID, task.UserID)
+	startTime := time.Now()
 
-	// Process the task based on type
-	var processErr error
+	var processingErr error
 	switch task.Type {
-	case TaskTypeMemoryFormation:
-		processErr = mw.processMemoryFormationTask(taskCtx, task)
+	case TaskTypeCognitiveChainCheck:
+		var payload models.CognitiveChainCheckTask
+		if err := json.Unmarshal(task.Payload, &payload); err != nil {
+			processingErr = fmt.Errorf("failed to unmarshal task payload: %w", err)
+		} else {
+			log.Printf("Worker %d processing task %s (UserID: %s)", workerID, task.ID, payload.UserID)
+			processingErr = w.processCognitiveChainCheck(ctx, &payload)
+		}
 	default:
-		processErr = fmt.Errorf("unknown task type: %s", task.Type)
+		processingErr = fmt.Errorf("unknown task type: %s", task.Type)
 	}
 
-	// Log result
-	duration := time.Since(start)
-	if processErr != nil {
-		log.Printf("ERROR: Worker %d task %s failed after %v: %v", workerID, task.ID, duration, processErr)
-		_ = mw.taskQueue.MarkTaskResult(taskCtx, task.ID, false, processErr.Error())
-	} else {
-		log.Printf("INFO: Worker %d task %s completed successfully in %v", workerID, task.ID, duration)
-		_ = mw.taskQueue.MarkTaskResult(taskCtx, task.ID, true, "Task completed successfully")
+	duration := time.Since(startTime)
+	if processingErr != nil {
+		log.Printf("Worker %d task %s failed after %v: %v", workerID, task.ID, duration, processingErr)
+		// Optionally mark the task as failed in the queue
+		w.taskQueue.MarkTaskResult(ctx, task.ID, false, processingErr.Error())
+		return processingErr
 	}
 
-	return processErr
-}
-
-// processMemoryFormationTask handles the 3-step memory formation pipeline
-func (mw *Worker) processMemoryFormationTask(ctx context.Context, task *models.MemoryProcessingTask) error {
-	// Step A: Dialogue Chain Analysis
-	chainID, err := mw.stmStore.DetermineDialogueChain(ctx, task.TenantID, task.UserID, task.AgentID, task.UserMessage, task.AgentResponse)
-	if err != nil {
-		return fmt.Errorf("dialogue chain analysis failed: %w", err)
-	}
-
-	// Step B: Vector Embedding Creation
-	embedding, err := mw.stmStore.CreateEmbedding(ctx, task.UserMessage, task.AgentResponse)
-	if err != nil {
-		return fmt.Errorf("vector embedding creation failed: %w", err)
-	}
-
-	// Step C: Write to STM Store
-	pageID, err := mw.stmStore.StoreDialoguePage(ctx, &models.DialoguePage{
-		UserID:        task.UserID,
-		ChainID:       chainID,
-		UserMessage:   task.UserMessage,
-		AgentResponse: task.AgentResponse,
-		Status:        "in_stm",
-		Metadata:      task.Metadata,
-		CreatedAt:     task.Timestamp,
-		UpdatedAt:     time.Now(),
-	})
-	if err != nil {
-		return fmt.Errorf("STM store write failed: %w", err)
-	}
-
-	// Store vector embedding with reference to the page (tenant/user/agent enforced from context)
-	// Set tenant/user/agent from task context on the embedding
-	embedding.TenantID = task.TenantID
-	embedding.UserID = task.UserID
-	embedding.AgentID = task.AgentID
-
-	if err := mw.stmStore.StoreEmbedding(ctx, task.TenantID, task.UserID, task.AgentID, pageID.Hex(), embedding); err != nil {
-		log.Printf("WARN: Failed to store embedding for page %s: %v", pageID.Hex(), err)
-		// Don't fail the entire task for embedding storage issues
-	}
-
-	log.Printf("INFO: Memory formation completed - UserID: %s, ChainID: %s, PageID: %s",
-		task.UserID, chainID, pageID.Hex())
-
+	log.Printf("Worker %d task %s completed successfully in %v", workerID, task.ID, duration)
+	w.taskQueue.MarkTaskResult(ctx, task.ID, true, "success")
 	return nil
 }
 
-// handleShutdown sets up graceful shutdown handling
-func (mw *Worker) handleShutdown() {
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	select {
-	case sig := <-sigChan:
-		log.Printf("INFO: Received signal %v, shutting down workers", sig)
-		mw.Stop()
-	case <-mw.quit:
-		// Already shutting down
-	}
-}
-
-// StartMemoryWorkers is a convenience function to start workers with default config
-func StartMemoryWorkers(ctx context.Context, workerCount int) *Worker {
-	config := WorkerConfig{
-		WorkerCount: workerCount,
-		Redis:       nil, // Will need to be provided by caller
-		Database:    database.GetDatabase(),
+// processCognitiveChainCheck performs the core logic of analyzing the cognitive chain
+func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.CognitiveChainCheckTask) error {
+	// 1. Get the last two events from the user's STM
+	key := fmt.Sprintf("stm:%s:%s", task.TenantID, task.UserID)
+	eventStrings, err := w.redis.LRange(key, 0, 1)
+	if err != nil {
+		return fmt.Errorf("failed to get recent events from STM: %w", err)
 	}
 
-	worker := NewWorker(config)
-	worker.Start(ctx)
-	return worker
+	if len(eventStrings) < 2 {
+		log.Printf("Not enough events for chain analysis for user %s. Assuming new chain.", task.UserID)
+		return nil // Not an error, just not enough data to process
+	}
+
+	// 2. Unmarshal events
+	var event1, event2 STMEvent
+	if err := json.Unmarshal([]byte(eventStrings[0]), &event1); err != nil {
+		return fmt.Errorf("failed to unmarshal event 1: %w", err)
+	}
+	if err := json.Unmarshal([]byte(eventStrings[1]), &event2); err != nil {
+		return fmt.Errorf("failed to unmarshal event 2: %w", err)
+	}
+
+	// 3. Get embeddings for the content of the last two events
+	embedding1, err := w.stmStore.CreateEmbedding(ctx, event1.Content)
+	if err != nil {
+		return fmt.Errorf("failed to create embedding for event 1: %w", err)
+	}
+	embedding2, err := w.stmStore.CreateEmbedding(ctx, event2.Content)
+	if err != nil {
+		return fmt.Errorf("failed to create embedding for event 2: %w", err)
+	}
+
+	// 4. Calculate cosine similarity
+	similarity, err := cosineSimilarity(embedding1.Vector, embedding2.Vector)
+	if err != nil {
+		return fmt.Errorf("failed to calculate cosine similarity: %w", err)
+	}
+
+	// 5. Decide if the chain continues
+	chainBreak := false
+	if similarity >= HighSimilarityThreshold {
+		// Chain continues, do nothing
+		log.Printf("Chain continues for user %s.", task.UserID)
+		return nil
+	} else if similarity < LowSimilarityThreshold {
+		// Chain breaks
+		log.Printf("Chain break detected for user %s.", task.UserID)
+		chainBreak = true
+	} else {
+		// Gray area, requires LLM to check for continuity
+		log.Printf("Cosine similarity is in the gray area (%f). Using LLM to check for continuity.", similarity)
+		llmContinues, err := w.stmStore.analyzeTopicContinuity(ctx, event1.Content, event2.Content)
+		if err != nil {
+			return fmt.Errorf("failed to analyze topic continuity with LLM: %w", err)
+		}
+
+		if llmContinues {
+			log.Printf("LLM determined chain continues for user %s.", task.UserID)
+			return nil // Chain continues
+		}
+
+		// Chain breaks
+		log.Printf("LLM determined chain break for user %s.", task.UserID)
+		chainBreak = true
+	}
+
+	if chainBreak {
+		// 6. If the chain breaks, get the entire old chain (all but the most recent event)
+		oldChainStrings, err := w.redis.LRange(key, 1, -1)
+		if err != nil {
+			return fmt.Errorf("failed to get old chain from STM: %w", err)
+		}
+
+		var oldChainEvents []models.CognitiveEvent
+		for _, eventStr := range oldChainStrings {
+			var event STMEvent
+			if err := json.Unmarshal([]byte(eventStr), &event); err != nil {
+				log.Printf("WARNING: Failed to unmarshal event in old chain: %v", err)
+				continue // Or handle more gracefully
+			}
+			oldChainEvents = append(oldChainEvents, models.CognitiveEvent{ /* map fields */ })
+		}
+
+		// 7. Trigger MTM formation
+		log.Printf("Processing MTM formation for user %s with %d events.", task.UserID, len(oldChainEvents))
+		if err := w.stmStore.ProcessMTMFormation(ctx, task.TenantID, task.UserID, task.AgentID, oldChainEvents); err != nil {
+			return fmt.Errorf("MTM formation failed: %w", err)
+		}
+
+		// 8. Trim the STM to keep only the most recent event
+		if err := w.redis.LTrim(key, 0, 0); err != nil {
+			// Log a warning, but don't fail the whole task for a trim failure
+			log.Printf("WARNING: Failed to trim STM for user %s: %v", task.UserID, err)
+		}
+	}
+
+	return nil
 }

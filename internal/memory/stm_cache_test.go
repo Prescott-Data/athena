@@ -2,233 +2,158 @@ package memory
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
-	memmodels "bitbucket.org/dromos/memory-os/models/memory"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
-// MockCache implements the cache.Interface for testing
-type MockCache struct {
-	data map[string][]string
+
+
+// Test Helpers
+func setupSTMCacheTest() (*STMCache, *MockRedis) {
+	mockRedis := new(MockRedis)
+	stmCache := NewSTMCache(mockRedis)
+	return stmCache, mockRedis
 }
 
-func NewMockCache() *MockCache {
-	return &MockCache{
-		data: make(map[string][]string),
-	}
-}
-
-func (m *MockCache) Set(key string, value interface{}) error                           { return nil }
-func (m *MockCache) SetWithTTL(key string, value interface{}, ttl time.Duration) error { return nil }
-func (m *MockCache) Get(key string, dest interface{}) error                            { return nil }
-func (m *MockCache) Delete(key string) error {
-	delete(m.data, key)
-	return nil
-}
-func (m *MockCache) DeletePattern(pattern string) error { return nil }
-func (m *MockCache) Exists(key string) (bool, error) {
-	_, exists := m.data[key]
-	return exists, nil
-}
-func (m *MockCache) Health() error { return nil }
-func (m *MockCache) Close() error  { return nil }
-
-// Implement Redis list operations for MockCache
-func (m *MockCache) LRange(key string, start, stop int64) ([]string, error) {
-	if data, exists := m.data[key]; exists {
-		if start == 0 && stop >= int64(len(data)-1) {
-			return data, nil
-		}
-		if stop >= int64(len(data)) {
-			stop = int64(len(data)) - 1
-		}
-		if start <= stop && start >= 0 {
-			return data[start : stop+1], nil
-		}
-	}
-	return []string{}, nil
-}
-
-func (m *MockCache) LPush(key string, values ...interface{}) error {
-	strValues := make([]string, len(values))
-	for i, v := range values {
-		strValues[i] = v.(string)
-	}
-
-	if _, exists := m.data[key]; !exists {
-		m.data[key] = []string{}
-	}
-
-	// Prepend values (LPUSH behavior)
-	m.data[key] = append(strValues, m.data[key]...)
-	return nil
-}
-
-func (m *MockCache) LTrim(key string, start, stop int64) error {
-	if data, exists := m.data[key]; exists {
-		if stop >= int64(len(data)) {
-			stop = int64(len(data)) - 1
-		}
-		if start <= stop && start >= 0 {
-			m.data[key] = data[start : stop+1]
-		}
-	}
-	return nil
-}
-
-func (m *MockCache) LLen(key string) (int64, error) {
-	if data, exists := m.data[key]; exists {
-		return int64(len(data)), nil
-	}
-	return 0, nil
-}
-
-func (m *MockCache) Expire(key string, expiration time.Duration) error { return nil }
-func (m *MockCache) SetEX(key string, value string, expiration time.Duration) error {
-	m.data[key] = []string{value}
-	return nil
-}
-func (m *MockCache) Keys(pattern string) ([]string, error) {
-	var keys []string
-	for key := range m.data {
-		keys = append(keys, key)
-	}
-	return keys, nil
-}
-func (m *MockCache) BRPop(timeout time.Duration, keys ...string) ([]string, error) {
-	return []string{}, nil
-}
-
-func TestSTMCache_AddAndRetrieveConversationTurn(t *testing.T) {
-	mockCache := NewMockCache()
-	stmCache := NewSTMCache(mockCache)
+func TestSTMCache_AddAndRetrieveSTMEvent(t *testing.T) {
+	stmCache, mockRedis := setupSTMCacheTest()
 	ctx := context.Background()
-	userID := "test_user_123"
+	userID := "test-user-123"
+	cacheKey := stmCache.generateSTMKey(userID)
 
-	// Add a user turn
-	userTurn := ConversationTurn{
-		Type:      "user",
-		Content:   "What about our Tokyo office policy?",
-		Timestamp: time.Now(),
+	// 1. Add a user event
+	userEvent := STMEvent{
+		Role:      "user",
+		Type:      STMEventTypeMessage,
+		Content:   "Hello, world!",
+		Timestamp: time.Now().UTC(),
 	}
+	userEventJSON, _ := json.Marshal(userEvent)
 
-	err := stmCache.AddConversationTurn(ctx, userID, userTurn)
-	if err != nil {
-		t.Fatalf("Failed to add conversation turn: %v", err)
-	}
+	mockRedis.On("LPush", cacheKey, []interface{}{string(userEventJSON)}).Return(nil).Once()
+	mockRedis.On("LTrim", cacheKey, int64(0), StmCacheMaxTurns-1).Return(nil).Once()
+	mockRedis.On("Expire", cacheKey, StmCacheTTL).Return(nil).Once()
 
-	// Add an agent turn
-	agentTurn := ConversationTurn{
-		Type:      "agent",
-		Content:   "For Tokyo office, same policy applies but reports go to APAC regional manager",
-		Timestamp: time.Now(),
-	}
+	err := stmCache.AddSTMEvent(ctx, userID, userEvent)
+	assert.NoError(t, err)
 
-	err = stmCache.AddConversationTurn(ctx, userID, agentTurn)
-	if err != nil {
-		t.Fatalf("Failed to add agent turn: %v", err)
+	// 2. Add an agent event
+	agentEvent := STMEvent{
+		Role:      "agent",
+		Type:      STMEventTypeMessage,
+		Content:   "Hi there!",
+		Timestamp: time.Now().UTC(),
 	}
+	agentEventJSON, _ := json.Marshal(agentEvent)
 
-	// Retrieve conversation context
-	turns, err := stmCache.GetConversationContext(ctx, userID)
-	if err != nil {
-		t.Fatalf("Failed to get conversation context: %v", err)
-	}
+	mockRedis.On("LPush", cacheKey, []interface{}{string(agentEventJSON)}).Return(nil).Once()
+	mockRedis.On("LTrim", cacheKey, int64(0), StmCacheMaxTurns-1).Return(nil).Once()
+	mockRedis.On("Expire", cacheKey, StmCacheTTL).Return(nil).Once()
 
-	// Verify we got the turns back (should be in reverse order - newest first)
-	if len(turns) != 2 {
-		t.Fatalf("Expected 2 turns, got %d", len(turns))
-	}
+	err = stmCache.AddSTMEvent(ctx, userID, agentEvent)
+	assert.NoError(t, err)
 
-	// First turn should be the agent (most recent)
-	if turns[0].Type != "agent" {
-		t.Errorf("Expected first turn to be agent, got %s", turns[0].Type)
-	}
+	// 3. Retrieve the context
+	expectedRawEvents := []string{string(agentEventJSON), string(userEventJSON)}
+	mockRedis.On("LRange", cacheKey, int64(0), StmCacheMaxTurns-1).Return(expectedRawEvents, nil).Once()
 
-	// Second turn should be the user
-	if turns[1].Type != "user" {
-		t.Errorf("Expected second turn to be user, got %s", turns[1].Type)
-	}
+	events, err := stmCache.GetSTMContext(ctx, userID)
+	assert.NoError(t, err)
+	assert.Len(t, events, 2)
 
-	if turns[1].Content != "What about our Tokyo office policy?" {
-		t.Errorf("Expected user content to match, got %s", turns[1].Content)
-	}
+	// Note: LIFO order, so agent event is first
+	assert.Equal(t, agentEvent.Content, events[0].Content)
+	assert.Equal(t, userEvent.Content, events[1].Content)
+
+	mockRedis.AssertExpectations(t)
 }
 
-func TestSTMCache_ConvertMessagesToTurns(t *testing.T) {
-	mockCache := NewMockCache()
-	stmCache := NewSTMCache(mockCache)
-
-	// Create test messages
-	messages := []memmodels.Message{
-		{
-			Type:      "user",
-			Content:   "Hello, how are you?",
-			CreatedAt: time.Now().Add(-2 * time.Minute),
-		},
-		{
-			Type:      "agent",
-			Content:   "I'm doing well, thank you!",
-			CreatedAt: time.Now().Add(-1 * time.Minute),
-		},
-	}
-
-	// Convert messages to turns
-	turns := stmCache.ConvertMessagesToTurns(messages)
-
-	// Verify conversion
-	if len(turns) != 2 {
-		t.Fatalf("Expected 2 turns, got %d", len(turns))
-	}
-
-	if turns[0].Type != "user" {
-		t.Errorf("Expected first turn to be user, got %s", turns[0].Type)
-	}
-
-	if turns[0].Content != "Hello, how are you?" {
-		t.Errorf("Expected user content to match, got %s", turns[0].Content)
-	}
-
-	if turns[1].Type != "agent" {
-		t.Errorf("Expected second turn to be agent, got %s", turns[1].Type)
-	}
-}
-
-func TestSTMCache_HotPathPerformance(t *testing.T) {
-	mockCache := NewMockCache()
-	stmCache := NewSTMCache(mockCache)
+func TestSTMCache_Trim(t *testing.T) {
+	stmCache, mockRedis := setupSTMCacheTest()
 	ctx := context.Background()
-	userID := "perf_test_user"
+	userID := "test-user-trim"
+	cacheKey := stmCache.generateSTMKey(userID)
 
-	// Add multiple turns to simulate a conversation
-	for i := 0; i < 20; i++ {
-		turn := ConversationTurn{
-			Type:      "user",
-			Content:   "Test message",
-			Timestamp: time.Now().Add(time.Duration(-i) * time.Second),
-		}
-		stmCache.AddConversationTurn(ctx, userID, turn)
+	// Set max turns to a smaller number for this test
+	originalMaxTurns := StmCacheMaxTurns
+	StmCacheMaxTurns = 2
+	defer func() { StmCacheMaxTurns = originalMaxTurns }()
+
+	// Add 3 events, expecting the oldest to be trimmed
+	event1 := STMEvent{Role: "user", Type: STMEventTypeMessage, Content: "1"}
+	event2 := STMEvent{Role: "agent", Type: STMEventTypeMessage, Content: "2"}
+	event3 := STMEvent{Role: "user", Type: STMEventTypeMessage, Content: "3"}
+
+	event2JSON, _ := json.Marshal(event2)
+	event3JSON, _ := json.Marshal(event3)
+
+	// Mock calls for all 3 additions
+	mockRedis.On("LPush", cacheKey, mock.Anything).Return(nil)
+	mockRedis.On("LTrim", cacheKey, int64(0), StmCacheMaxTurns-1).Return(nil)
+	mockRedis.On("Expire", cacheKey, StmCacheTTL).Return(nil)
+
+	stmCache.AddSTMEvent(ctx, userID, event1)
+	stmCache.AddSTMEvent(ctx, userID, event2)
+	stmCache.AddSTMEvent(ctx, userID, event3)
+
+	// Now, mock the retrieval
+	expectedRawEvents := []string{string(event3JSON), string(event2JSON)}
+	mockRedis.On("LRange", cacheKey, int64(0), StmCacheMaxTurns-1).Return(expectedRawEvents, nil).Once()
+
+	events, err := stmCache.GetSTMContext(ctx, userID)
+	assert.NoError(t, err)
+	assert.Len(t, events, 2)
+	assert.Equal(t, "3", events[0].Content) // Newest
+	assert.Equal(t, "2", events[1].Content) // Second newest
+
+	mockRedis.AssertExpectations(t)
+}
+
+func TestSTMCache_EmptyContext(t *testing.T) {
+	stmCache, mockRedis := setupSTMCacheTest()
+	ctx := context.Background()
+	userID := "test-user-empty"
+	cacheKey := stmCache.generateSTMKey(userID)
+
+	mockRedis.On("LRange", cacheKey, int64(0), StmCacheMaxTurns-1).Return([]string{}, nil).Once()
+
+	events, err := stmCache.GetSTMContext(ctx, userID)
+	assert.NoError(t, err)
+	assert.Len(t, events, 0)
+
+	mockRedis.AssertExpectations(t)
+}
+
+func TestSTMCache_UpdateSTMEntries(t *testing.T) {
+	stmCache, mockRedis := setupSTMCacheTest()
+	ctx := context.Background()
+	userID := "test-user-update"
+	cacheKey := stmCache.generateSTMKey(userID)
+
+	eventsToUpdate := []STMEvent{
+		{Role: "user", Type: STMEventTypeMessage, Content: "older"},
+		{Role: "agent", Type: STMEventTypeMessage, Content: "newer"},
 	}
 
-	// Measure retrieval time (hot path)
-	start := time.Now()
-	turns, err := stmCache.GetConversationContext(ctx, userID)
-	duration := time.Since(start)
+	// Mock the delete call
+	mockRedis.On("Delete", cacheKey).Return(nil).Once()
 
-	if err != nil {
-		t.Fatalf("Failed to get conversation context: %v", err)
-	}
+	// Mock the LPush calls (in reverse order)
+	newerJSON, _ := json.Marshal(eventsToUpdate[1])
+	olderJSON, _ := json.Marshal(eventsToUpdate[0])
+	mockRedis.On("LPush", cacheKey, []interface{}{string(newerJSON)}).Return(nil).Once()
+	mockRedis.On("LPush", cacheKey, []interface{}{string(olderJSON)}).Return(nil).Once()
 
-	// Should only return max turns (10)
-	if int64(len(turns)) != StmCacheMaxTurns {
-		t.Errorf("Expected %d turns, got %d", StmCacheMaxTurns, len(turns))
-	}
+	// Mock the final trim and expire
+	mockRedis.On("LTrim", cacheKey, int64(0), StmCacheMaxTurns-1).Return(nil).Once()
+	mockRedis.On("Expire", cacheKey, StmCacheTTL).Return(nil).Once()
 
-	// Hot path should be very fast (< 10ms for mock)
-	if duration > 10*time.Millisecond {
-		t.Logf("Hot path took %v (may be acceptable for mock cache)", duration)
-	}
+	err := stmCache.UpdateSTMEntries(ctx, userID, eventsToUpdate)
+	assert.NoError(t, err)
 
-	t.Logf("Hot path retrieval completed in %v", duration)
+	mockRedis.AssertExpectations(t)
 }

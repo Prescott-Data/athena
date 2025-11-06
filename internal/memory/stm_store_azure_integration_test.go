@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"testing"
 	"time"
@@ -30,13 +31,12 @@ func TestAzureEmbedding_Integration(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Test data
-	userMessage := "Hello, how are you today?"
-	agentResponse := "I'm doing great! How can I help you?"
-
 	t.Run("CreateEmbedding_Success", func(t *testing.T) {
+		// Test data
+		textToEmbed := "User: Hello, how are you today?\nAgent: I'm doing great! How can I help you?"
+
 		// Call the CreateEmbedding function
-		embedding, err := stmStore.CreateEmbedding(ctx, userMessage, agentResponse)
+		embedding, err := stmStore.CreateEmbedding(ctx, textToEmbed)
 
 		// Validate no error occurred
 		assert.NoError(err, "CreateEmbedding should not return an error")
@@ -44,7 +44,7 @@ func TestAzureEmbedding_Integration(t *testing.T) {
 
 		// Validate embedding properties
 		assert.NotEmpty(embedding.Vector, "Embedding vector should not be empty")
-		assert.Equal(768, embedding.Dimensions, "Embedding should have 768 dimensions")
+		assert.Equal(1536, embedding.Dimensions, "Embedding should have 1536 dimensions")
 		assert.Equal(len(embedding.Vector), embedding.Dimensions, "Vector length should match dimensions")
 		assert.NotEmpty(embedding.Model, "Model should be specified")
 		assert.False(embedding.CreatedAt.IsZero(), "CreatedAt should be set")
@@ -67,7 +67,7 @@ func TestAzureEmbedding_Integration(t *testing.T) {
 
 	t.Run("CreateEmbedding_EmptyInput", func(t *testing.T) {
 		// Test with empty input
-		embedding, err := stmStore.CreateEmbedding(ctx, "", "")
+		embedding, err := stmStore.CreateEmbedding(ctx, "")
 
 		// Should still work (OpenAI handles empty input)
 		assert.NoError(err, "CreateEmbedding should handle empty input")
@@ -77,24 +77,22 @@ func TestAzureEmbedding_Integration(t *testing.T) {
 
 	t.Run("CreateEmbedding_LongInput", func(t *testing.T) {
 		// Test with longer input to validate token handling
-		longUserMessage := "This is a much longer message that contains multiple sentences and various topics. " +
+		longText := "User: This is a much longer message that contains multiple sentences and various topics. " +
 			"We want to test how the embedding model handles longer text inputs and whether it properly " +
 			"processes the content to create meaningful vector representations. This should help us " +
-			"validate that our integration works correctly with various input sizes."
-
-		longAgentResponse := "Thank you for that detailed message. I understand you're testing the embedding " +
+			"validate that our integration works correctly with various input sizes.\n" +
+			"Agent: Thank you for that detailed message. I understand you're testing the embedding " +
 			"functionality with longer text inputs. This is indeed a good approach to validate that the " +
 			"OpenAI integration can handle various message lengths and still produce consistent, high-quality " +
 			"embeddings that will be useful for similarity matching and retrieval in your memory system."
 
-		embedding, err := stmStore.CreateEmbedding(ctx, longUserMessage, longAgentResponse)
+		embedding, err := stmStore.CreateEmbedding(ctx, longText)
 
 		assert.NoError(err, "CreateEmbedding should handle long input")
 		assert.NotNil(embedding, "Embedding should not be nil")
-		assert.Equal(768, embedding.Dimensions, "Embedding should have 768 dimensions")
+		assert.Equal(1536, embedding.Dimensions, "Embedding should have 1536 dimensions")
 
-		t.Logf("SUCCESS: Processed long input (%d chars) into embedding",
-			len(longUserMessage)+len(longAgentResponse))
+		t.Logf("SUCCESS: Processed long input (%d chars) into embedding", len(longText))
 	})
 }
 
@@ -137,11 +135,10 @@ func TestAzureEmbedding_Performance(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("EmbeddingLatency_Reasonable", func(t *testing.T) {
-		userMessage := "Performance test message"
-		agentResponse := "This is a test response for performance validation"
+		textToEmbed := "User: Performance test message\nAgent: This is a test response for performance validation"
 
 		start := time.Now()
-		embedding, err := stmStore.CreateEmbedding(ctx, userMessage, agentResponse)
+		embedding, err := stmStore.CreateEmbedding(ctx, textToEmbed)
 		duration := time.Since(start)
 
 		assert.NoError(err, "CreateEmbedding should succeed")
@@ -166,6 +163,7 @@ func createMockSTMStore(t *testing.T) *STMStore {
 		llmGuards: &LLMGuardrails{
 			redis: nil, // Not needed for this test
 		},
+		HTTPClient: &http.Client{},
 	}
 }
 

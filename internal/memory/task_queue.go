@@ -15,14 +15,22 @@ import (
 	"github.com/google/uuid"
 )
 
+// TaskQueuer defines the interface for task queue operations.
+type TaskQueuer interface {
+	EnqueueCognitiveCheckTask(ctx context.Context, tenantID, userID, agentID string) error
+	DequeueTask(ctx context.Context) (*TaskEnvelope, error)
+	GetQueueStats(ctx context.Context) (map[string]interface{}, error)
+	MarkTaskResult(ctx context.Context, taskID string, success bool, message string) error
+}
+
 const (
 	// MemoryProcessingQueue is the Redis queue key for memory processing tasks (legacy)
 	MemoryProcessingQueue = "memory_processing_queue"
 	// TaskResultsPrefix is the Redis key prefix for task results (legacy)
 	TaskResultsPrefix = "task_results"
 
-	// TaskTypeMemoryFormation is the task type for memory formation
-	TaskTypeMemoryFormation = "memory_formation"
+	// TaskTypeCognitiveChainCheck is the task type for cognitive chain analysis
+	TaskTypeCognitiveChainCheck = "cognitive_chain_check"
 )
 
 // generateScopedQueueName creates a tenant-scoped queue name
@@ -53,6 +61,14 @@ func init() {
 	}
 }
 
+// TaskEnvelope is a generic wrapper for all task types.
+type TaskEnvelope struct {
+	ID         string          `json:"id"`
+	Type       string          `json:"type"`
+	Payload    json.RawMessage `json:"payload"`
+	EnqueuedAt time.Time       `json:"enqueued_at"`
+}
+
 // TaskQueue handles background task processing for memory formation
 type TaskQueue struct {
 	redis cache.Interface
@@ -65,40 +81,51 @@ func NewTaskQueue(redisClient cache.Interface) *TaskQueue {
 	}
 }
 
-// EnqueueMemoryTask adds a memory processing task to the background queue
-func (tq *TaskQueue) EnqueueMemoryTask(ctx context.Context, userID, userMessage, agentResponse string, metadata map[string]interface{}) error {
+// EnqueueCognitiveCheckTask enqueues a lightweight trigger for the worker to check for a chain break.
+func (tq *TaskQueue) EnqueueCognitiveCheckTask(ctx context.Context, tenantID, userID, agentID string) error {
 	start := time.Now()
 
-	task := models.MemoryProcessingTask{
-		ID:            uuid.New().String(),
-		Type:          TaskTypeMemoryFormation,
-		UserID:        userID,
-		UserMessage:   userMessage,
-		AgentResponse: agentResponse,
-		Timestamp:     time.Now(),
-		Metadata:      metadata,
-		CreatedAt:     time.Now(),
+	// Create the specific task payload
+	taskPayload := models.CognitiveChainCheckTask{
+		ID:        uuid.New().String(),
+		Type:      TaskTypeCognitiveChainCheck,
+		TenantID:  tenantID,
+		UserID:    userID,
+		AgentID:   agentID,
+		Timestamp: time.Now(),
 	}
 
-	// Serialize task
-	taskJSON, err := json.Marshal(task)
+	payloadJSON, err := json.Marshal(taskPayload)
 	if err != nil {
-		return fmt.Errorf("failed to marshal memory task: %w", err)
+		return fmt.Errorf("failed to marshal cognitive check task payload: %w", err)
 	}
 
-	// Push to Redis queue (LPUSH for FIFO when using BRPOP)
-	if err := tq.redis.LPush(TaskQueueName, string(taskJSON)); err != nil {
-		return fmt.Errorf("failed to enqueue memory task: %w", err)
+	// Wrap the payload in a generic TaskEnvelope
+	envelope := TaskEnvelope{
+		ID:         taskPayload.ID,
+		Type:       taskPayload.Type,
+		Payload:    payloadJSON,
+		EnqueuedAt: time.Now(),
+	}
+
+	envelopeJSON, err := json.Marshal(envelope)
+	if err != nil {
+		return fmt.Errorf("failed to marshal task envelope: %w", err)
+	}
+
+	// Push to Redis queue
+	if err := tq.redis.LPush(TaskQueueName, string(envelopeJSON)); err != nil {
+		return fmt.Errorf("failed to enqueue cognitive check task: %w", err)
 	}
 
 	duration := time.Since(start)
-	log.Printf("INFO: Memory task enqueued - UserID: %s, TaskID: %s, Duration: %v", userID, task.ID, duration)
+	log.Printf("INFO: Cognitive check task enqueued - UserID: %s, TaskID: %s, Duration: %v", userID, envelope.ID, duration)
 
 	return nil
 }
 
-// DequeueTask blocks waiting for the next task from the queue
-func (tq *TaskQueue) DequeueTask(ctx context.Context) (*models.MemoryProcessingTask, error) {
+// DequeueTask blocks waiting for the next task from the queue.
+func (tq *TaskQueue) DequeueTask(ctx context.Context) (*TaskEnvelope, error) {
 	// Use BRPOP to block and wait for tasks (timeout of 1 second)
 	result, err := tq.redis.BRPop(1*time.Second, TaskQueueName)
 	if err != nil {
@@ -110,14 +137,14 @@ func (tq *TaskQueue) DequeueTask(ctx context.Context) (*models.MemoryProcessingT
 	}
 
 	// result[0] is queue name, result[1] is the task JSON
-	taskJSON := result[1]
+	envelopeJSON := result[1]
 
-	var task models.MemoryProcessingTask
-	if err := json.Unmarshal([]byte(taskJSON), &task); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal task: %w", err)
+	var envelope TaskEnvelope
+	if err := json.Unmarshal([]byte(envelopeJSON), &envelope); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal task envelope: %w", err)
 	}
 
-	return &task, nil
+	return &envelope, nil
 }
 
 // GetQueueStats returns statistics about the task queue
@@ -131,7 +158,8 @@ func (tq *TaskQueue) GetQueueStats(ctx context.Context) (map[string]interface{},
 		"queue_name":   TaskQueueName,
 		"queue_length": queueLength,
 		"task_timeout": TaskTimeout.String(),
-	}, nil
+	},
+	nil
 }
 
 // MarkTaskResult stores the result of a processed task (for debugging/monitoring)
