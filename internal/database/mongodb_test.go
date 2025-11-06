@@ -6,30 +6,31 @@ import (
 	"testing"
 	"time"
 
-	"github.com/testcontainers/testcontainers-go/modules/mongodb"
+	// "github.com/testcontainers/testcontainers-go/modules/mongodb"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // TestMongoDBConnection tests the MongoDB connection functionality
 func TestMongoDBConnection(t *testing.T) {
-	// Setup test container
-	mongoContainer := setupMongoContainer(t)
-	defer func() {
-		if err := mongoContainer.Terminate(context.Background()); err != nil {
-			t.Errorf("Failed to terminate MongoDB container: %v", err)
-		}
-	}()
+	// // Setup test container
+	// mongoContainer := setupMongoContainer(t)
+	// defer func() {
+	// 	if err := mongoContainer.Terminate(context.Background()); err != nil {
+	// 		t.Errorf("Failed to terminate MongoDB container: %v", err)
+	// 	}
+	// }()
 
-	// Get connection string from container
-	connectionString, err := mongoContainer.ConnectionString(context.Background())
-	if err != nil {
-		t.Fatalf("Failed to get MongoDB connection string: %v", err)
-	}
+	// // Get connection string from container
+	// connectionString, err := mongoContainer.ConnectionString(context.Background())
+	// if err != nil {
+	// 	t.Fatalf("Failed to get MongoDB connection string: %v", err)
+	// }
+	connectionString := os.Getenv("MONGO_URI")
 
 	// Set environment variables for test
 	os.Setenv("MONGO_URI", connectionString)
-	os.Setenv("MONGO_DB", "test_docintel_db")
+	os.Setenv("MONGO_DB", "memory_os_e2e")
 
 	// Clean up global variables before test
 	MongoClient = nil
@@ -49,8 +50,8 @@ func TestMongoDBConnection(t *testing.T) {
 		}
 
 		// Verify database name
-		if DB.Name() != "test_docintel_db" {
-			t.Errorf("Expected database name 'test_docintel_db', got '%s'", DB.Name())
+		if DB.Name() != "memory_os_e2e" {
+			t.Errorf("Expected database name 'memory_os_e2e', got '%s'", DB.Name())
 		}
 
 		// Test connection by pinging
@@ -109,23 +110,24 @@ func TestMongoDBConnection(t *testing.T) {
 }
 
 func TestConnectMongoDB_Success(t *testing.T) {
-	// Setup test container
-	mongoContainer := setupMongoContainer(t)
-	defer func() {
-		if err := mongoContainer.Terminate(context.Background()); err != nil {
-			t.Errorf("Failed to terminate MongoDB container: %v", err)
-		}
-	}()
+	// // Setup test container
+	// mongoContainer := setupMongoContainer(t)
+	// defer func() {
+	// 	if err := mongoContainer.Terminate(context.Background()); err != nil {
+	// 		t.Errorf("Failed to terminate MongoDB container: %v", err)
+	// 	}
+	// }()
 
-	// Get connection string from container
-	connectionString, err := mongoContainer.ConnectionString(context.Background())
-	if err != nil {
-		t.Fatalf("Failed to get MongoDB connection string: %v", err)
-	}
+	// // Get connection string from container
+	// connectionString, err := mongoContainer.ConnectionString(context.Background())
+	// if err != nil {
+	// 	t.Fatalf("Failed to get MongoDB connection string: %v", err)
+	// }
+	connectionString := os.Getenv("MONGO_URI")
 
 	config := ConnectionConfig{
 		URI:            connectionString,
-		DatabaseName:   "test_connect_db",
+		DatabaseName:   "memory_os_e2e",
 		ConnectTimeout: 10 * time.Second,
 	}
 
@@ -143,8 +145,8 @@ func TestConnectMongoDB_Success(t *testing.T) {
 		t.Error("Expected database to be non-nil")
 	}
 
-	if db.Name() != "test_connect_db" {
-		t.Errorf("Expected database name 'test_connect_db', got '%s'", db.Name())
+	if db.Name() != "memory_os_e2e" {
+		t.Errorf("Expected database name 'memory_os_e2e', got '%s'", db.Name())
 	}
 }
 
@@ -209,23 +211,24 @@ func TestHealthCheck(t *testing.T) {
 	})
 
 	t.Run("HealthCheck_Success", func(t *testing.T) {
-		// Setup test container
-		mongoContainer := setupMongoContainer(t)
-		defer func() {
-			if err := mongoContainer.Terminate(context.Background()); err != nil {
-				t.Errorf("Failed to terminate MongoDB container: %v", err)
-			}
-		}()
+		// // Setup test container
+		// mongoContainer := setupMongoContainer(t)
+		// defer func() {
+		// 	if err := mongoContainer.Terminate(context.Background()); err != nil {
+		// 		t.Errorf("Failed to terminate MongoDB container: %v", err)
+		// 	}
+		// }()
 
-		// Get connection string from container
-		connectionString, err := mongoContainer.ConnectionString(context.Background())
-		if err != nil {
-			t.Fatalf("Failed to get MongoDB connection string: %v", err)
-		}
+		// // Get connection string from container
+		// connectionString, err := mongoContainer.ConnectionString(context.Background())
+		// if err != nil {
+		// 	t.Fatalf("Failed to get MongoDB connection string: %v", err)
+		// }
+		connectionString := os.Getenv("MONGO_URI")
 
 		config := ConnectionConfig{
 			URI:            connectionString,
-			DatabaseName:   "test_health_db",
+			DatabaseName:   "memory_os_e2e",
 			ConnectTimeout: 10 * time.Second,
 		}
 
@@ -290,23 +293,24 @@ func TestDisconnectMongoDB(t *testing.T) {
 	})
 
 	t.Run("DisconnectMongoDB_Success", func(t *testing.T) {
-		// Setup test container
-		mongoContainer := setupMongoContainer(t)
-		defer func() {
-			if err := mongoContainer.Terminate(context.Background()); err != nil {
-				t.Errorf("Failed to terminate MongoDB container: %v", err)
-			}
-		}()
+		// // Setup test container
+		// mongoContainer := setupMongoContainer(t)
+		// defer func() {
+		// 	if err := mongoContainer.Terminate(context.Background()); err != nil {
+		// 		t.Errorf("Failed to terminate MongoDB container: %v", err)
+		// 	}
+		// }()
 
-		// Get connection string from container
-		connectionString, err := mongoContainer.ConnectionString(context.Background())
-		if err != nil {
-			t.Fatalf("Failed to get MongoDB connection string: %v", err)
-		}
+		// // Get connection string from container
+		// connectionString, err := mongoContainer.ConnectionString(context.Background())
+		// if err != nil {
+		// 	t.Fatalf("Failed to get MongoDB connection string: %v", err)
+		// }
+		connectionString := os.Getenv("MONGO_URI")
 
 		config := ConnectionConfig{
 			URI:            connectionString,
-			DatabaseName:   "test_disconnect_db",
+			DatabaseName:   "memory_os_e2e",
 			ConnectTimeout: 30 * time.Second,
 		}
 
@@ -438,19 +442,20 @@ func TestConnectionConfig(t *testing.T) {
 }
 
 func TestMongoDBHealthCheck(t *testing.T) {
-	// Setup test container
-	mongoContainer := setupMongoContainer(t)
-	defer func() {
-		if err := mongoContainer.Terminate(context.Background()); err != nil {
-			t.Errorf("Failed to terminate MongoDB container: %v", err)
-		}
-	}()
+	// // Setup test container
+	// mongoContainer := setupMongoContainer(t)
+	// defer func() {
+	// 	if err := mongoContainer.Terminate(context.Background()); err != nil {
+	// 		t.Errorf("Failed to terminate MongoDB container: %v", err)
+	// 	}
+	// }()
 
-	// Get connection string from container
-	connectionString, err := mongoContainer.ConnectionString(context.Background())
-	if err != nil {
-		t.Fatalf("Failed to get MongoDB connection string: %v", err)
-	}
+	// // Get connection string from container
+	// connectionString, err := mongoContainer.ConnectionString(context.Background())
+	// if err != nil {
+	// 	t.Fatalf("Failed to get MongoDB connection string: %v", err)
+	// }
+	connectionString := os.Getenv("MONGO_URI")
 
 	// Create direct connection for testing
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -474,7 +479,7 @@ func TestMongoDBHealthCheck(t *testing.T) {
 	})
 
 	t.Run("TestDatabaseAccess", func(t *testing.T) {
-		db := client.Database("test_health_db")
+		db := client.Database("memory_os_e2e")
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -487,7 +492,7 @@ func TestMongoDBHealthCheck(t *testing.T) {
 	})
 
 	t.Run("TestCollectionOperations", func(t *testing.T) {
-		db := client.Database("test_health_db")
+		db := client.Database("memory_os_e2e")
 		collection := db.Collection("health_test")
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -524,19 +529,20 @@ func TestMongoDBHealthCheck(t *testing.T) {
 }
 
 func TestMongoDBIndexOperations(t *testing.T) {
-	// Setup test container
-	mongoContainer := setupMongoContainer(t)
-	defer func() {
-		if err := mongoContainer.Terminate(context.Background()); err != nil {
-			t.Errorf("Failed to terminate MongoDB container: %v", err)
-		}
-	}()
+	// // Setup test container
+	// mongoContainer := setupMongoContainer(t)
+	// defer func() {
+	// 	if err := mongoContainer.Terminate(context.Background()); err != nil {
+	// 		t.Errorf("Failed to terminate MongoDB container: %v", err)
+	// 	}
+	// }()
 
-	// Get connection string from container
-	connectionString, err := mongoContainer.ConnectionString(context.Background())
-	if err != nil {
-		t.Fatalf("Failed to get MongoDB connection string: %v", err)
-	}
+	// // Get connection string from container
+	// connectionString, err := mongoContainer.ConnectionString(context.Background())
+	// if err != nil {
+	// 	t.Fatalf("Failed to get MongoDB connection string: %v", err)
+	// }
+	connectionString := os.Getenv("MONGO_URI")
 
 	// Create direct connection for testing
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -549,7 +555,7 @@ func TestMongoDBIndexOperations(t *testing.T) {
 	}
 	defer client.Disconnect(ctx)
 
-	db := client.Database("test_index_db")
+	db := client.Database("memory_os_e2e")
 	collection := db.Collection("test_indexes")
 
 	t.Run("TestCreateIndex", func(t *testing.T) {
@@ -592,19 +598,20 @@ func TestMongoDBIndexOperations(t *testing.T) {
 }
 
 func TestMongoDBConnectionPool(t *testing.T) {
-	// Setup test container
-	mongoContainer := setupMongoContainer(t)
-	defer func() {
-		if err := mongoContainer.Terminate(context.Background()); err != nil {
-			t.Errorf("Failed to terminate MongoDB container: %v", err)
-		}
-	}()
+	// // Setup test container
+	// mongoContainer := setupMongoContainer(t)
+	// defer func() {
+	// 	if err := mongoContainer.Terminate(context.Background()); err != nil {
+	// 		t.Errorf("Failed to terminate MongoDB container: %v", err)
+	// 	}
+	// }()
 
-	// Get connection string from container
-	connectionString, err := mongoContainer.ConnectionString(context.Background())
-	if err != nil {
-		t.Fatalf("Failed to get MongoDB connection string: %v", err)
-	}
+	// // Get connection string from container
+	// connectionString, err := mongoContainer.ConnectionString(context.Background())
+	// if err != nil {
+	// 	t.Fatalf("Failed to get MongoDB connection string: %v", err)
+	// }
+	connectionString := os.Getenv("MONGO_URI")
 
 	t.Run("TestConcurrentConnections", func(t *testing.T) {
 		// Create client with connection pool settings
@@ -622,8 +629,14 @@ func TestMongoDBConnectionPool(t *testing.T) {
 		}
 		defer client.Disconnect(ctx)
 
-		db := client.Database("test_pool_db")
+		db := client.Database("memory_os_e2e")
 		collection := db.Collection("test_pool")
+
+		// Clean up the collection before the test
+		_, err = collection.DeleteMany(ctx, map[string]interface{}{})
+		if err != nil {
+			t.Fatalf("Failed to clean up collection before test: %v", err)
+		}
 
 		// Test concurrent operations
 		done := make(chan bool, 5)
@@ -665,38 +678,38 @@ func TestMongoDBConnectionPool(t *testing.T) {
 		}
 	})
 }
+// // setupMongoContainer creates a MongoDB test container
+// func setupMongoContainer(t *testing.T) *mongodb.MongoDBContainer {
+// 	ctx := context.Background()
 
-// setupMongoContainer creates a MongoDB test container
-func setupMongoContainer(t *testing.T) *mongodb.MongoDBContainer {
-	ctx := context.Background()
+// 	mongoContainer, err := mongodb.Run(ctx,
+// 		"mongo:6",
+// 		mongodb.WithUsername("test"),
+// 		mongodb.WithPassword("test"),
+// 	)
+// 	if err != nil {
+// 		t.Fatalf("Failed to start MongoDB container: %v", err)
+// 	}
 
-	mongoContainer, err := mongodb.Run(ctx,
-		"mongo:6",
-		mongodb.WithUsername("test"),
-		mongodb.WithPassword("test"),
-	)
-	if err != nil {
-		t.Fatalf("Failed to start MongoDB container: %v", err)
-	}
-
-	return mongoContainer
-}
+// 	return mongoContainer
+// }
 
 // BenchmarkMongoDBConnection benchmarks the MongoDB connection performance
 func BenchmarkMongoDBConnection(b *testing.B) {
-	// Setup test container
-	mongoContainer := setupMongoContainer(&testing.T{})
-	defer func() {
-		if err := mongoContainer.Terminate(context.Background()); err != nil {
-			b.Errorf("Failed to terminate MongoDB container: %v", err)
-		}
-	}()
+	// // Setup test container
+	// mongoContainer := setupMongoContainer(&testing.T{})
+	// defer func() {
+	// 	if err := mongoContainer.Terminate(context.Background()); err != nil {
+	// 		b.Errorf("Failed to terminate MongoDB container: %v", err)
+	// 	}
+	// }()
 
-	// Get connection string from container
-	connectionString, err := mongoContainer.ConnectionString(context.Background())
-	if err != nil {
-		b.Fatalf("Failed to get MongoDB connection string: %v", err)
-	}
+	// // Get connection string from container
+	// connectionString, err := mongoContainer.ConnectionString(context.Background())
+	// if err != nil {
+	// 	b.Fatalf("Failed to get MongoDB connection string: %v", err)
+	// }
+	connectionString := os.Getenv("MONGO_URI")
 
 	// Create client
 	clientOpts := options.Client().ApplyURI(connectionString)
@@ -709,7 +722,7 @@ func BenchmarkMongoDBConnection(b *testing.B) {
 	}
 	defer client.Disconnect(ctx)
 
-	db := client.Database("benchmark_db")
+	db := client.Database("memory_os_e2e")
 	collection := db.Collection("benchmark_collection")
 
 	b.ResetTimer()
@@ -741,7 +754,7 @@ func BenchmarkMongoDBConnection(b *testing.B) {
 		cancel()
 		if err != nil {
 			b.Fatalf("Failed to insert test document: %v", err)
-		}
+	}
 
 		b.ResetTimer()
 

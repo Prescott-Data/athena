@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"bitbucket.org/dromos/memory-os/internal/cache"
+	"bitbucket.org/dromos/memory-os/internal/models"
 
 	_ "github.com/joho/godotenv/autoload"
 	
@@ -74,13 +75,13 @@ func TestSTMCache_Integration(t *testing.T) {
 	// Test 1: Add STM events
 	event1 := STMEvent{
 		Role:      "user",
-		Type:      STMEventTypeMessage,
+		Type:      models.STMEventTypeMessage,
 		Content:   "Hello, how are you?",
 		Timestamp: time.Now().Add(-2 * time.Minute),
 	}
 	event2 := STMEvent{
 		Role:      "agent",
-		Type:      STMEventTypeMessage,
+		Type:      models.STMEventTypeMessage,
 		Content:   "I'm doing well, thank you!",
 		Timestamp: time.Now().Add(-1 * time.Minute),
 	}
@@ -97,10 +98,10 @@ func TestSTMCache_Integration(t *testing.T) {
 	assert.Len(events, 2)
 
 	// Verify events are in reverse order (newest first)
-	assert.Equal(STMEventTypeMessage, events[0].Type)
+	assert.Equal(models.STMEventTypeMessage, events[0].Type)
 	assert.Equal("agent", events[0].Role)
 	assert.Equal("I'm doing well, thank you!", events[0].Content)
-	assert.Equal(STMEventTypeMessage, events[1].Type)
+	assert.Equal(models.STMEventTypeMessage, events[1].Type)
 	assert.Equal("user", events[1].Role)
 	assert.Equal("Hello, how are you?", events[1].Content)
 
@@ -115,7 +116,7 @@ func TestSTMCache_Integration(t *testing.T) {
 	for i := 1; i <= 3; i++ {
 		event := STMEvent{
 			Role:      "user",
-			Type:      STMEventTypeMessage,
+			Type:      models.STMEventTypeMessage,
 			Content:   fmt.Sprintf("Message %d", i),
 			Timestamp: time.Now().Add(time.Duration(i) * time.Second),
 		}
@@ -152,7 +153,7 @@ func TestSTMCache_Metrics_Integration(t *testing.T) {
 	_ = stmCache.ClearSTMContext(ctx, userID)
 
 	// 1. Test AddSTMEvent
-	event1 := STMEvent{Role: "user", Type: STMEventTypeMessage, Content: "Hi", Timestamp: time.Now()}
+	event1 := STMEvent{Role: "user", Type: models.STMEventTypeMessage, Content: "Hi", Timestamp: time.Now()}
 	err = stmCache.AddSTMEvent(ctx, userID, event1)
 	assert.NoError(err)
 
@@ -168,9 +169,9 @@ func TestSTMCache_Metrics_Integration(t *testing.T) {
 	_ = stmCache.ClearSTMContext(ctx, userID)
 
 	// Add 3 events, only 2 should remain
-	_ = stmCache.AddSTMEvent(ctx, userID, STMEvent{Role: "user", Type: STMEventTypeMessage, Content: "1", Timestamp: time.Now()})
-	_ = stmCache.AddSTMEvent(ctx, userID, STMEvent{Role: "user", Type: STMEventTypeMessage, Content: "2", Timestamp: time.Now()})
-	_ = stmCache.AddSTMEvent(ctx, userID, STMEvent{Role: "user", Type: STMEventTypeMessage, Content: "3", Timestamp: time.Now()})
+	_ = stmCache.AddSTMEvent(ctx, userID, STMEvent{Role: "user", Type: models.STMEventTypeMessage, Content: "1", Timestamp: time.Now()})
+	_ = stmCache.AddSTMEvent(ctx, userID, STMEvent{Role: "user", Type: models.STMEventTypeMessage, Content: "2", Timestamp: time.Now()})
+	_ = stmCache.AddSTMEvent(ctx, userID, STMEvent{Role: "user", Type: models.STMEventTypeMessage, Content: "3", Timestamp: time.Now()})
 
 	events, err = stmCache.GetSTMContext(ctx, userID)
 	assert.NoError(err)

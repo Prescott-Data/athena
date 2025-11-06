@@ -74,7 +74,7 @@ func Test_analyzeTopicContinuity_BuildsPrompt_ParsesResponse(t *testing.T) {
 	// Mock the HTTP response
 	mockResp := &http.Response{
 		StatusCode: http.StatusOK,
-		Body:       ioutil.NopCloser(strings.NewReader(`{"choices":[{"text":"true"}]}`)),
+		Body:       ioutil.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"true"}}]}`)),
 	}
 	mockTripper.On("RoundTrip", mock.Anything).Return(mockResp, nil).Once()
 
@@ -99,7 +99,7 @@ func Test_CreateSegmentSummary_BuildsRichPrompt(t *testing.T) {
 	// Mock the HTTP response
 	mockResp := &http.Response{
 		StatusCode: http.StatusOK,
-		Body:       ioutil.NopCloser(strings.NewReader(`{"choices":[{"text":"Summary"}]}`)),
+		Body:       ioutil.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"Summary"}}]}`)),
 	}
 	mockTripper.On("RoundTrip", mock.Anything).Return(mockResp, nil).Once()
 
@@ -119,7 +119,7 @@ func Test_ProcessMTMFormation_CallsPipelineInOrder(t *testing.T) {
 	// Mock the HTTP response for CreateSegmentSummary
 	mockRespSummary := &http.Response{
 		StatusCode: http.StatusOK,
-		Body:       ioutil.NopCloser(strings.NewReader(`{"choices":[{"text":"Summary"}]}`)),
+		Body:       ioutil.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"Summary"}}]}`)),
 	}
 	// Mock the HTTP response for CreateEmbedding
 	mockRespEmbedding := &http.Response{

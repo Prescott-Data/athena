@@ -8,7 +8,6 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	gen "bitbucket.org/dromos/memory-os/api/grpc/gen"
 	"bitbucket.org/dromos/memory-os/internal/cache"
@@ -41,7 +40,7 @@ type MemoryServer struct {
 	taskQueue                            taskQueue
 	mongoClient                          *mongo.Client
 	// getIDsFromSessionFunc allows mocking the DB call in tests
-	getIDsFromSessionFunc func(ctx context.Context, s *MemoryServer, sessionID string) (string, string, string, error)
+	getIDsFromSessionFunc func(s *MemoryServer, ctx context.Context, sessionID string) (string, string, string, error)
 }
 
 // NewMemoryServer creates a new Memory OS server instance
@@ -101,7 +100,7 @@ func (s *MemoryServer) GetConfig() *config.Config {
 // StoreInteraction is the main entry point for new events.
 func (s *MemoryServer) StoreInteraction(ctx context.Context, req *gen.StoreInteractionRequest) (*gen.StoreInteractionResponse, error) {
 	sessionID := req.SessionId
-	tenantID, userID, agentID, err := s.getIDsFromSessionFunc(ctx, s, sessionID)
+	tenantID, userID, agentID, err := s.getIDsFromSessionFunc(s, ctx, sessionID)
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "session not found or invalid: %v", err)
 	}

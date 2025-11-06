@@ -10,24 +10,11 @@ import (
 	"time"
 
 	"bitbucket.org/dromos/memory-os/internal/cache"
+	"bitbucket.org/dromos/memory-os/internal/models"
 	memmodels "bitbucket.org/dromos/memory-os/models/memory"
 
 	// Load environment variables from .env file
 	_ "github.com/joho/godotenv/autoload"
-)
-
-// STMEventType defines the type of event stored in the STM.
-type STMEventType string
-
-const (
-	// STMEventTypeMessage represents a message from a user or agent.
-	STMEventTypeMessage STMEventType = "message"
-	// STMEventTypeThought represents an internal reasoning step of the agent.
-	STMEventTypeThought STMEventType = "thought"
-	// STMEventTypeAction represents a concrete action the agent is taking (e.g., tool call).
-	STMEventTypeAction STMEventType = "action"
-	// STMEventTypeObservation represents the result or output of an action.
-	STMEventTypeObservation STMEventType = "observation"
 )
 
 func init() {
@@ -72,10 +59,10 @@ var (
 // STMEvent represents a single event in the short-term memory cache.
 // This can be a conversation turn, an agent's thought, an action, or an observation.
 type STMEvent struct {
-	Role      string       `json:"role"`      // Who the event belongs to (e.g., "user", "agent")
-	Type      STMEventType `json:"type"`      // Type of the event (e.g., "message", "thought")
-	Content   string       `json:"content"`   // The content of the event
-	Timestamp time.Time    `json:"timestamp"` // When the event occurred
+	Role      string                `json:"role"`      // Who the event belongs to (e.g., "user", "agent")
+	Type      models.STMEventType   `json:"type"`      // Type of the event (e.g., "message", "thought")
+	Content   string                `json:"content"`   // The content of the event
+	Timestamp time.Time             `json:"timestamp"` // When the event occurred
 }
 
 // STMCache provides Short-Term Memory caching for conversations and agent events.
@@ -217,7 +204,7 @@ func (s *STMCache) ConvertMessagesToSTMEvents(messages []memmodels.Message) []ST
 	for _, msg := range messages {
 		event := STMEvent{
 			Role:      msg.Type,
-			Type:      STMEventTypeMessage,
+			Type:      models.STMEventTypeMessage,
 			Content:   msg.Content,
 			Timestamp: msg.CreatedAt,
 		}

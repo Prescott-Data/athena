@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"bitbucket.org/dromos/memory-os/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -28,7 +29,7 @@ func TestSTMCache_AddAndRetrieveSTMEvent(t *testing.T) {
 	// 1. Add a user event
 	userEvent := STMEvent{
 		Role:      "user",
-		Type:      STMEventTypeMessage,
+		Type:      models.STMEventTypeMessage,
 		Content:   "Hello, world!",
 		Timestamp: time.Now().UTC(),
 	}
@@ -44,7 +45,7 @@ func TestSTMCache_AddAndRetrieveSTMEvent(t *testing.T) {
 	// 2. Add an agent event
 	agentEvent := STMEvent{
 		Role:      "agent",
-		Type:      STMEventTypeMessage,
+		Type:      models.STMEventTypeMessage,
 		Content:   "Hi there!",
 		Timestamp: time.Now().UTC(),
 	}
@@ -84,9 +85,9 @@ func TestSTMCache_Trim(t *testing.T) {
 	defer func() { StmCacheMaxTurns = originalMaxTurns }()
 
 	// Add 3 events, expecting the oldest to be trimmed
-	event1 := STMEvent{Role: "user", Type: STMEventTypeMessage, Content: "1"}
-	event2 := STMEvent{Role: "agent", Type: STMEventTypeMessage, Content: "2"}
-	event3 := STMEvent{Role: "user", Type: STMEventTypeMessage, Content: "3"}
+	event1 := STMEvent{Role: "user", Type: models.STMEventTypeMessage, Content: "1"}
+	event2 := STMEvent{Role: "agent", Type: models.STMEventTypeMessage, Content: "2"}
+	event3 := STMEvent{Role: "user", Type: models.STMEventTypeMessage, Content: "3"}
 
 	event2JSON, _ := json.Marshal(event2)
 	event3JSON, _ := json.Marshal(event3)
@@ -135,8 +136,8 @@ func TestSTMCache_UpdateSTMEntries(t *testing.T) {
 	cacheKey := stmCache.generateSTMKey(userID)
 
 	eventsToUpdate := []STMEvent{
-		{Role: "user", Type: STMEventTypeMessage, Content: "older"},
-		{Role: "agent", Type: STMEventTypeMessage, Content: "newer"},
+		{Role: "user", Type: models.STMEventTypeMessage, Content: "older"},
+		{Role: "agent", Type: models.STMEventTypeMessage, Content: "newer"},
 	}
 
 	// Mock the delete call
