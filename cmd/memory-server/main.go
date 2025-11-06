@@ -16,7 +16,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	gw "bitbucket.org/dromos/memory-os/api/grpc/gen/api/grpc"
+	gw "bitbucket.org/dromos/memory-os/api/grpc/gen"
 	"bitbucket.org/dromos/memory-os/api/middleware"
 	"bitbucket.org/dromos/memory-os/internal/config"
 	"bitbucket.org/dromos/memory-os/internal/server"

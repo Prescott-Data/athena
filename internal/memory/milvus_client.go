@@ -399,11 +399,11 @@ func (mc *MilvusClient) GetEmbeddingByPageID(ctx context.Context, tenantID, user
 	}
 
 	return &models.EmbeddingData{
-		PageID:     pageID,
-		Vector:     vector,
-		Dimensions: len(vector),
-		Model:      "retrieved_from_milvus",
-		CreatedAt:  time.Unix(createdAt, 0),
+		ReferenceID: pageID,
+		Vector:      vector,
+		Dimensions:  len(vector),
+		Model:       "retrieved_from_milvus",
+		CreatedAt:   time.Unix(createdAt, 0),
 	}, nil
 }
 

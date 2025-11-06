@@ -419,21 +419,6 @@
         }
       }
     },
-    "v1ConversationTurn": {
-      "type": "object",
-      "properties": {
-        "userMessage": {
-          "type": "string"
-        },
-        "agentResponse": {
-          "type": "string"
-        },
-        "timestamp": {
-          "type": "string",
-          "format": "date-time"
-        }
-      }
-    },
     "v1CreateSessionRequest": {
       "type": "object",
       "properties": {
@@ -514,7 +499,7 @@
         "recentTurns": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/v1ConversationTurn"
+            "$ref": "#/definitions/v1STMEvent"
           }
         },
         "relevantPages": {
@@ -621,6 +606,24 @@
         "lastActivity": {
           "type": "string",
           "format": "date-time"
+        }
+      }
+    },
+    "v1STMEvent": {
+      "type": "object",
+      "properties": {
+        "userMessage": {
+          "type": "string",
+          "description": "The user message content."
+        },
+        "agentResponse": {
+          "type": "string",
+          "description": "The agent response content."
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the turn occurred."
         }
       }
     },

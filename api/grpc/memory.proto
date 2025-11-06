@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package memory.v1;
 
-option go_package = "bitbucket.org/dromos/memory-os/api/grpc/gen";
+option go_package = "bitbucket.org/dromos/memory-os/api/grpc/gen;gen";
 
 import "google/api/annotations.proto";
 import "google/protobuf/timestamp.proto";
@@ -127,7 +127,7 @@ message GetContextRequest {
 }
 
 message GetContextResponse {
-  repeated ConversationTurn recent_turns = 1;
+  repeated STMEvent recent_turns = 1;
   repeated DialoguePage relevant_pages = 2;
   repeated Segment segments = 3;
   UserPersona user_persona = 4;
@@ -188,9 +188,12 @@ message Session {
   map<string, string> metadata = 5;
 }
 
-message ConversationTurn {
+message STMEvent {
+  // The user message content.
   string user_message = 1;
+  // The agent response content.
   string agent_response = 2;
+  // When the turn occurred.
   google.protobuf.Timestamp timestamp = 3;
 }
 
