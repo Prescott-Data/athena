@@ -2,11 +2,10 @@ package memory
 
 import (
 	"context"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
-
 
 	"bitbucket.org/dromos/memory-os/internal/models"
 	"github.com/stretchr/testify/assert"
@@ -40,10 +39,10 @@ func setupSTMStoreTest() (*STMStore, *MockRoundTripper) {
 	// We are not testing the full DB/Milvus/Redis stack here, so we can pass nil for them
 	// and rely on mocking the HTTP client for the parts of the functions we are testing.
 	stmStore := &STMStore{
-		db:        nil, // Not used in these specific unit tests
-		redis:     nil, // Not used in these specific unit tests
-		milvus:    nil, // Not used in these specific unit tests
-		llmGuards: &LLMGuardrails{},
+		db:         nil, // Not used in these specific unit tests
+		redis:      nil, // Not used in these specific unit tests
+		milvus:     nil, // Not used in these specific unit tests
+		llmGuards:  &LLMGuardrails{},
 		HTTPClient: &http.Client{Transport: mockTripper},
 	}
 	return stmStore, mockTripper
@@ -56,7 +55,7 @@ func Test_CreateEmbedding_BuildsRequest(t *testing.T) {
 	// Mock the HTTP response
 	mockResp := &http.Response{
 		StatusCode: http.StatusOK,
-		Body:       ioutil.NopCloser(strings.NewReader(`{"data":[{"embedding":[0.1, 0.2, 0.3]}]}`)),
+		Body:       io.NopCloser(strings.NewReader(`{"data":[{"embedding":[0.1, 0.2, 0.3]}]}`)),
 	}
 	mockTripper.On("RoundTrip", mock.Anything).Return(mockResp, nil).Once()
 
@@ -74,11 +73,11 @@ func Test_analyzeTopicContinuity_BuildsPrompt_ParsesResponse(t *testing.T) {
 	// Mock the HTTP response
 	mockResp := &http.Response{
 		StatusCode: http.StatusOK,
-		Body:       ioutil.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"true"}}]}`)),
+		Body:       io.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"true"}}]}`)),
 	}
 	mockTripper.On("RoundTrip", mock.Anything).Return(mockResp, nil).Once()
 
-	continuous, err := stmStore.analyzeTopicContinuity(ctx, "previous content", "new content")
+	continuous, err := stmStore.analyzeTopicContinuity(ctx, "test-user", "previous content", "new content")
 	assert.NoError(t, err)
 	assert.True(t, continuous)
 
@@ -99,7 +98,7 @@ func Test_CreateSegmentSummary_BuildsRichPrompt(t *testing.T) {
 	// Mock the HTTP response
 	mockResp := &http.Response{
 		StatusCode: http.StatusOK,
-		Body:       ioutil.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"Summary"}}]}`)),
+		Body:       io.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"Summary"}}]}`)),
 	}
 	mockTripper.On("RoundTrip", mock.Anything).Return(mockResp, nil).Once()
 
@@ -119,12 +118,12 @@ func Test_ProcessMTMFormation_CallsPipelineInOrder(t *testing.T) {
 	// Mock the HTTP response for CreateSegmentSummary
 	mockRespSummary := &http.Response{
 		StatusCode: http.StatusOK,
-		Body:       ioutil.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"Summary"}}]}`)),
+		Body:       io.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"Summary"}}]}`)),
 	}
 	// Mock the HTTP response for CreateEmbedding
 	mockRespEmbedding := &http.Response{
 		StatusCode: http.StatusOK,
-		Body:       ioutil.NopCloser(strings.NewReader(`{"data":[{"embedding":[0.1, 0.2, 0.3]}]}`)),
+		Body:       io.NopCloser(strings.NewReader(`{"data":[{"embedding":[0.1, 0.2, 0.3]}]}`)),
 	}
 	mockTripper.On("RoundTrip", mock.Anything).Return(mockRespSummary, nil).Once()
 	mockTripper.On("RoundTrip", mock.Anything).Return(mockRespEmbedding, nil).Once()

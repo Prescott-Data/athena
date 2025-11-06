@@ -22,7 +22,7 @@ import (
 // stmCache defines the interface for the short-term memory cache.
 // This allows for mocking in tests.
 type stmCache interface {
-	AddSTMEvent(ctx context.Context, userID string, event memory.STMEvent) error
+	AddSTMEvent(ctx context.Context, tenantID, userID, agentID string, event memory.STMEvent) error
 }
 
 // taskQueue defines the interface for the background task queue.
@@ -114,7 +114,7 @@ func (s *MemoryServer) StoreInteraction(ctx context.Context, req *gen.StoreInter
 	}
 
 	// Always save the user event to the STM cache
-	if err := s.stmCache.AddSTMEvent(ctx, userID, userEvent); err != nil {
+	if err := s.stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, userEvent); err != nil {
 		log.Printf("ERROR: Failed to add user event to STM cache: %v", err)
 	}
 
@@ -131,7 +131,7 @@ func (s *MemoryServer) StoreInteraction(ctx context.Context, req *gen.StoreInter
 			Content:   req.AgentResponse,
 			Timestamp: time.Now(),
 		}
-		if err := s.stmCache.AddSTMEvent(ctx, userID, agentEvent); err != nil {
+		if err := s.stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, agentEvent); err != nil {
 			log.Printf("ERROR: Failed to add agent event to STM cache: %v", err)
 		}
 	}

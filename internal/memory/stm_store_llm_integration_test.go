@@ -51,7 +51,7 @@ func TestSTMStore_LLMIntegration(t *testing.T) {
 		previousContent1 := "User: What's the weather like today?\nAgent: It's sunny and 75 degrees."
 		newContent1 := "User: Will it rain later?\nAgent: There's a 20% chance of rain this afternoon."
 
-		isContinuous, err := stmStore.analyzeTopicContinuity(ctx, previousContent1, newContent1)
+		isContinuous, err := stmStore.analyzeTopicContinuity(ctx, "test-user", previousContent1, newContent1)
 		assert.NoError(err)
 		assert.True(isContinuous, "Weather-related questions should be continuous")
 
@@ -59,7 +59,7 @@ func TestSTMStore_LLMIntegration(t *testing.T) {
 		previousContent2 := "User: What's the weather like today?\nAgent: It's sunny and 75 degrees."
 		newContent2 := "User: How do I bake a cake?\nAgent: Start by preheating your oven to 350°F."
 
-		isContinuous, err = stmStore.analyzeTopicContinuity(ctx, previousContent2, newContent2)
+		isContinuous, err = stmStore.analyzeTopicContinuity(ctx, "test-user", previousContent2, newContent2)
 		assert.NoError(err)
 		assert.False(isContinuous, "Weather to baking should be a topic change")
 	})

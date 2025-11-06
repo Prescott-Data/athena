@@ -11,7 +11,7 @@ import (
 	"bitbucket.org/dromos/memory-os/internal/models"
 
 	_ "github.com/joho/godotenv/autoload"
-	
+
 	"github.com/stretchr/testify/assert"
 )
 
@@ -67,10 +67,12 @@ func TestSTMCache_Integration(t *testing.T) {
 
 	stmCache := NewSTMCache(redisClient)
 	ctx := context.Background()
+	tenantID := "test_tenant"
 	userID := "integration_test_user_1"
+	agentID := "test_agent"
 
 	// Clear any existing data for this user key
-	_ = stmCache.ClearSTMContext(ctx, userID)
+	_ = stmCache.ClearSTMContext(ctx, tenantID, userID, agentID)
 
 	// Test 1: Add STM events
 	event1 := STMEvent{
@@ -86,14 +88,14 @@ func TestSTMCache_Integration(t *testing.T) {
 		Timestamp: time.Now().Add(-1 * time.Minute),
 	}
 
-	err = stmCache.AddSTMEvent(ctx, userID, event1)
+	err = stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, event1)
 	assert.NoError(err)
 
-	err = stmCache.AddSTMEvent(ctx, userID, event2)
+	err = stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, event2)
 	assert.NoError(err)
 
 	// Test 2: Retrieve STM context
-	events, err := stmCache.GetSTMContext(ctx, userID)
+	events, err := stmCache.GetSTMContext(ctx, tenantID, userID, agentID)
 	assert.NoError(err)
 	assert.Len(events, 2)
 
@@ -106,12 +108,10 @@ func TestSTMCache_Integration(t *testing.T) {
 	assert.Equal("Hello, how are you?", events[1].Content)
 
 	// Test 3: Verify max events limit works
-	originalMaxTurns := StmCacheMaxTurns
-	StmCacheMaxTurns = 2                                   // Temporarily set to 2
-	defer func() { StmCacheMaxTurns = originalMaxTurns }() // Reset after test
-
 	// Clear and add 3 events
-	_ = stmCache.ClearSTMContext(ctx, userID)
+	_ = stmCache.ClearSTMContext(ctx, tenantID, userID, agentID)
+	os.Setenv("STM_CACHE_MAX_TURNS", "2")
+	defer os.Unsetenv("STM_CACHE_MAX_TURNS")
 
 	for i := 1; i <= 3; i++ {
 		event := STMEvent{
@@ -120,12 +120,12 @@ func TestSTMCache_Integration(t *testing.T) {
 			Content:   fmt.Sprintf("Message %d", i),
 			Timestamp: time.Now().Add(time.Duration(i) * time.Second),
 		}
-		err = stmCache.AddSTMEvent(ctx, userID, event)
+		err = stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, event)
 		assert.NoError(err)
 	}
 
 	// Should only return 2 most recent events
-	events, err = stmCache.GetSTMContext(ctx, userID)
+	events, err = stmCache.GetSTMContext(ctx, tenantID, userID, agentID)
 	assert.NoError(err)
 	assert.Len(events, 2)
 	assert.Equal("Message 3", events[0].Content) // Newest first
@@ -144,36 +144,37 @@ func TestSTMCache_Metrics_Integration(t *testing.T) {
 
 	stmCache := NewSTMCache(redisClient)
 	ctx := context.Background()
+	tenantID := "test_tenant"
 	userID := "metrics_test_user_1"
+	agentID := "test_agent"
 
 	// Reset metrics before test
 	// MetricSTMCacheOps.Reset() // This might not be available depending on your metrics library
 
 	// Clear any existing data for this user key
-	_ = stmCache.ClearSTMContext(ctx, userID)
+	_ = stmCache.ClearSTMContext(ctx, tenantID, userID, agentID)
 
 	// 1. Test AddSTMEvent
 	event1 := STMEvent{Role: "user", Type: models.STMEventTypeMessage, Content: "Hi", Timestamp: time.Now()}
-	err = stmCache.AddSTMEvent(ctx, userID, event1)
+	err = stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, event1)
 	assert.NoError(err)
 
 	// 2. Test GetSTMContext
-	events, err := stmCache.GetSTMContext(ctx, userID)
+	events, err := stmCache.GetSTMContext(ctx, tenantID, userID, agentID)
 	assert.NoError(err)
 	assert.Equal(1, len(events))
 
 	// Test max events trimming
-	StmCacheMaxTurns = 2                     // Temporarily set to 2
-	defer func() { StmCacheMaxTurns = 10 }() // Reset after test
-
-	_ = stmCache.ClearSTMContext(ctx, userID)
+	_ = stmCache.ClearSTMContext(ctx, tenantID, userID, agentID)
+	os.Setenv("STM_CACHE_MAX_TURNS", "2")
+	defer os.Unsetenv("STM_CACHE_MAX_TURNS")
 
 	// Add 3 events, only 2 should remain
-	_ = stmCache.AddSTMEvent(ctx, userID, STMEvent{Role: "user", Type: models.STMEventTypeMessage, Content: "1", Timestamp: time.Now()})
-	_ = stmCache.AddSTMEvent(ctx, userID, STMEvent{Role: "user", Type: models.STMEventTypeMessage, Content: "2", Timestamp: time.Now()})
-	_ = stmCache.AddSTMEvent(ctx, userID, STMEvent{Role: "user", Type: models.STMEventTypeMessage, Content: "3", Timestamp: time.Now()})
+	_ = stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, STMEvent{Role: "user", Type: models.STMEventTypeMessage, Content: "1", Timestamp: time.Now()})
+	_ = stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, STMEvent{Role: "user", Type: models.STMEventTypeMessage, Content: "2", Timestamp: time.Now()})
+	_ = stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, STMEvent{Role: "user", Type: models.STMEventTypeMessage, Content: "3", Timestamp: time.Now()})
 
-	events, err = stmCache.GetSTMContext(ctx, userID)
+	events, err = stmCache.GetSTMContext(ctx, tenantID, userID, agentID)
 	assert.NoError(err)
 	assert.Len(events, 2)
 	assert.Equal("3", events[0].Content) // Newest first

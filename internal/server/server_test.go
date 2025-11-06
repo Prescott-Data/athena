@@ -17,8 +17,8 @@ type MockSTMCache struct {
 	mock.Mock
 }
 
-func (m *MockSTMCache) AddSTMEvent(ctx context.Context, userID string, event memory.STMEvent) error {
-	args := m.Called(ctx, userID, event)
+func (m *MockSTMCache) AddSTMEvent(ctx context.Context, tenantID, userID, agentID string, event memory.STMEvent) error {
+	args := m.Called(ctx, tenantID, userID, agentID, event)
 	return args.Error(0)
 }
 
@@ -58,9 +58,9 @@ func TestStoreInteraction_SmartTrigger(t *testing.T) {
 		}
 
 		// Expect the user event to be saved
-		mockCache.On("AddSTMEvent", ctx, "test-user", mock.AnythingOfType("memory.STMEvent")).Return(nil).Once()
+		mockCache.On("AddSTMEvent", ctx, "test-tenant", "test-user", "test-agent", mock.AnythingOfType("memory.STMEvent")).Return(nil).Once()
 		// Expect the agent event to be saved
-		mockCache.On("AddSTMEvent", ctx, "test-user", mock.AnythingOfType("memory.STMEvent")).Return(nil).Once()
+		mockCache.On("AddSTMEvent", ctx, "test-tenant", "test-user", "test-agent", mock.AnythingOfType("memory.STMEvent")).Return(nil).Once()
 		// Expect the task queue to be triggered exactly once
 		mockQueue.On("EnqueueCognitiveCheckTask", ctx, "test-tenant", "test-user", "test-agent").Return(nil).Once()
 
@@ -94,7 +94,7 @@ func TestStoreInteraction_SmartTrigger(t *testing.T) {
 		}
 
 		// Expect the user event to be saved
-		mockCache.On("AddSTMEvent", ctx, "test-user", mock.AnythingOfType("memory.STMEvent")).Return(nil).Once()
+		mockCache.On("AddSTMEvent", ctx, "test-tenant", "test-user", "test-agent", mock.AnythingOfType("memory.STMEvent")).Return(nil).Once()
 		// Expect the task queue to be triggered for the user message
 		mockQueue.On("EnqueueCognitiveCheckTask", ctx, "test-tenant", "test-user", "test-agent").Return(nil).Once()
 
