@@ -47,7 +47,7 @@ func TestStoreInteraction_SmartTrigger(t *testing.T) {
 			taskQueue: mockQueue,
 		}
 		// Mock the database call
-		server.getIDsFromSessionFunc = func(ctx context.Context, s *MemoryServer, sessionID string) (string, string, string, error) {
+		server.getIDsFromSessionFunc = func(s *MemoryServer, ctx context.Context, sessionID string) (string, string, string, error) {
 			return "test-tenant", "test-user", "test-agent", nil
 		}
 
@@ -82,7 +82,7 @@ func TestStoreInteraction_SmartTrigger(t *testing.T) {
 			stmCache:  mockCache,
 			taskQueue: mockQueue,
 		}
-		server.getIDsFromSessionFunc = func(ctx context.Context, s *MemoryServer, sessionID string) (string, string, string, error) {
+		server.getIDsFromSessionFunc = func(s *MemoryServer, ctx context.Context, sessionID string) (string, string, string, error) {
 			return "test-tenant", "test-user", "test-agent", nil
 		}
 

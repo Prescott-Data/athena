@@ -278,7 +278,7 @@ Previous turn:
 New turn:
 %s
 
-Respond with only "true" if the conversations are continuous/related or "false" if they represent a topic change or new conversation.`, 
+Respond with only "true" if the conversations are continuous/related or "false" if they represent a topic change or new conversation.`,
 		previousContent, newContent)
 
 	// Create LLM completion request
@@ -288,8 +288,10 @@ Respond with only "true" if the conversations are continuous/related or "false" 
 	}
 
 	request := map[string]interface{}{
-		"model":       modelName,
-		"prompt":      prompt,
+		"model": modelName,
+		"messages": []map[string]string{
+			{"role": "user", "content": prompt},
+		},
 		"max_tokens":  10,
 		"temperature": 0.1,
 		"stop":        []string{"\n"},
@@ -311,6 +313,7 @@ Respond with only "true" if the conversations are continuous/related or "false" 
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("api-key", AzureOpenAIAPIKey)
 
 	resp, err := s.HTTPClient.Do(req)
 	if err != nil {
@@ -330,7 +333,9 @@ Respond with only "true" if the conversations are continuous/related or "false" 
 	// Parse the LLM response
 	var llmResponse struct {
 		Choices []struct {
-			Text string `json:"text"`
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(responseBody, &llmResponse); err != nil {
@@ -342,7 +347,7 @@ Respond with only "true" if the conversations are continuous/related or "false" 
 	}
 
 	// Parse the response text to determine continuity
-	responseText := strings.ToLower(strings.TrimSpace(llmResponse.Choices[0].Text))
+	responseText := strings.ToLower(strings.TrimSpace(llmResponse.Choices[0].Message.Content))
 	return responseText == "true", nil
 }
 
@@ -367,7 +372,6 @@ func (s *STMStore) CreateEmbedding(ctx context.Context, textToEmbed string) (*mo
 	// Create Azure OpenAI embedding request
 	embeddingRequest := map[string]interface{}{
 		"input": textToEmbed,
-		"model": embeddingModel,
 	}
 
 	requestBody, err := json.Marshal(embeddingRequest)
@@ -379,7 +383,12 @@ func (s *STMStore) CreateEmbedding(ctx context.Context, textToEmbed string) (*mo
 	httpCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	url := fmt.Sprintf("%s/openai/deployments/%s/embeddings?api-version=2023-05-15", AzureOpenAIEndpoint, embeddingModel)
+	// Use the complete URL directly from your environment variables.
+	// This is the same pattern you use for LLM_BASE_URL and is the correct fix.
+	url := EmbeddingBaseURL
+	if url == "" {
+		return nil, fmt.Errorf("EMBEDDING_BASE_URL environment variable not set")
+	}
 
 	req, err := http.NewRequestWithContext(httpCtx, "POST", url, bytes.NewBuffer(requestBody))
 	if err != nil {
@@ -469,8 +478,10 @@ func (s *STMStore) CreateSegmentSummary(ctx context.Context, events []models.Cog
 		modelName = "Qwen/Qwen3-32B-AWQ"
 	}
 	reqBody := map[string]interface{}{
-		"model":       modelName,
-		"prompt":      prompt,
+		"model": modelName,
+		"messages": []map[string]string{
+			{"role": "user", "content": prompt},
+		},
 		"max_tokens":  64,
 		"temperature": 0.3,
 		"stop":        []string{"\n"},
@@ -494,7 +505,9 @@ func (s *STMStore) CreateSegmentSummary(ctx context.Context, events []models.Cog
 	raw, _ := io.ReadAll(resp.Body)
 	var llmResp struct {
 		Choices []struct {
-			Text string `json:"text"`
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(raw, &llmResp); err != nil {
@@ -503,7 +516,7 @@ func (s *STMStore) CreateSegmentSummary(ctx context.Context, events []models.Cog
 	if len(llmResp.Choices) == 0 {
 		return "", fmt.Errorf("empty summary choices")
 	}
-	return strings.TrimSpace(llmResp.Choices[0].Text), nil
+	return strings.TrimSpace(llmResp.Choices[0].Message.Content), nil
 }
 
 // ProcessMTMFormation orchestrates the MTM persistence pipeline
