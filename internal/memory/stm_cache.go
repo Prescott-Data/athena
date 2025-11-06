@@ -17,52 +17,26 @@ import (
 	_ "github.com/joho/godotenv/autoload"
 )
 
-func init() {
-	// Parse TTL hours
-	ttlHours := 2 // default to 2 hours
-	if ttlStr := os.Getenv("STM_CACHE_TTL"); ttlStr != "" {
+// parseDurationEnv reads a time.Duration from env (in hours) with default
+func parseDurationEnv(key string, defHours int) time.Duration {
+	ttlHours := defHours
+	if ttlStr := os.Getenv(key); ttlStr != "" {
 		if parsed, err := strconv.Atoi(ttlStr); err == nil {
 			ttlHours = parsed
 		} else {
-			log.Printf("WARN: Invalid STM_CACHE_TTL value: %s, using default: %d", ttlStr, ttlHours)
+			log.Printf("WARN: Invalid %s value: %s, using default: %d hours", key, ttlStr, defHours)
 		}
 	}
-
-	stmCacheMaxTurns := 10 // default to 10 turns
-	if maxTurnsStr := os.Getenv("STM_CACHE_MAX_TURNS"); maxTurnsStr != "" {
-		if parsed, err := strconv.Atoi(maxTurnsStr); err == nil {
-			stmCacheMaxTurns = parsed
-		} else {
-			log.Printf("WARN: Invalid STM_CACHE_MAX_TURNS value: %s, using default: %d", maxTurnsStr, stmCacheMaxTurns)
-		}
-	}
-
-	// Set default key prefix if not provided
-	if StmCacheKeyPrefix == "" {
-		StmCacheKeyPrefix = "stm_cache"
-	}
-
-	// Set the global variables after successful parsing
-	StmCacheMaxTurns = int64(stmCacheMaxTurns)
-	StmCacheTTL = time.Duration(ttlHours) * time.Hour
+	return time.Duration(ttlHours) * time.Hour
 }
-
-var (
-	// StmCacheKeyPrefix is the prefix for all STM cache keys
-	StmCacheKeyPrefix = os.Getenv("STM_CACHE_KEY_PREFIX")
-	// StmCacheMaxTurns is the maximum number of conversation events to keep in memory
-	StmCacheMaxTurns int64
-	// StmCacheTTL is the default TTL for STM cache entries
-	StmCacheTTL time.Duration
-)
 
 // STMEvent represents a single event in the short-term memory cache.
 // This can be a conversation turn, an agent's thought, an action, or an observation.
 type STMEvent struct {
-	Role      string                `json:"role"`      // Who the event belongs to (e.g., "user", "agent")
-	Type      models.STMEventType   `json:"type"`      // Type of the event (e.g., "message", "thought")
-	Content   string                `json:"content"`   // The content of the event
-	Timestamp time.Time             `json:"timestamp"` // When the event occurred
+	Role      string              `json:"role"`      // Who the event belongs to (e.g., "user", "agent")
+	Type      models.STMEventType `json:"type"`      // Type of the event (e.g., "message", "thought")
+	Content   string              `json:"content"`   // The content of the event
+	Timestamp time.Time           `json:"timestamp"` // When the event occurred
 }
 
 // STMCache provides Short-Term Memory caching for conversations and agent events.
@@ -79,10 +53,11 @@ func NewSTMCache(redisClient cache.Interface) *STMCache {
 }
 
 // GetSTMContext retrieves the last N events from the Redis cache.
-func (s *STMCache) GetSTMContext(ctx context.Context, userID string) ([]STMEvent, error) {
+func (s *STMCache) GetSTMContext(ctx context.Context, tenantID, userID, agentID string) ([]STMEvent, error) {
 	start := time.Now()
 
-	cacheKey := s.generateSTMKey(userID)
+	StmCacheMaxTurns := int64(parseIntEnv("STM_CACHE_MAX_TURNS", 10))
+	cacheKey := s.generateSTMKeyWithScope(tenantID, userID, agentID)
 
 	// Use Redis LRANGE to get the last N events instantly
 	rawEvents, err := s.redis.LRange(cacheKey, 0, StmCacheMaxTurns-1)
@@ -111,10 +86,12 @@ func (s *STMCache) GetSTMContext(ctx context.Context, userID string) ([]STMEvent
 }
 
 // AddSTMEvent adds a new event to the STM cache.
-func (s *STMCache) AddSTMEvent(ctx context.Context, userID string, event STMEvent) error {
+func (s *STMCache) AddSTMEvent(ctx context.Context, tenantID, userID, agentID string, event STMEvent) error {
 	start := time.Now()
 
-	cacheKey := s.generateSTMKey(userID)
+	StmCacheMaxTurns := int64(parseIntEnv("STM_CACHE_MAX_TURNS", 10))
+	StmCacheTTL := parseDurationEnv("STM_CACHE_TTL", 2) // 2 hours default
+	cacheKey := s.generateSTMKeyWithScope(tenantID, userID, agentID)
 
 	// Serialize the event
 	eventJSON, err := json.Marshal(event)
@@ -149,10 +126,14 @@ func (s *STMCache) AddSTMEvent(ctx context.Context, userID string, event STMEven
 }
 
 // UpdateSTMEntries updates the cache with a complete set of STM events.
-func (s *STMCache) UpdateSTMEntries(ctx context.Context, userID string, events []STMEvent) error {
+func (s *STMCache) UpdateSTMEntries(ctx context.Context, tenantID, userID, agentID string, events []STMEvent) error {
 	start := time.Now()
 
-	cacheKey := s.generateSTMKey(userID)
+	StmCacheTTL := parseDurationEnv("STM_CACHE_TTL", 2) // 2 hours default
+
+	StmCacheMaxTurns := int64(parseIntEnv("STM_CACHE_MAX_TURNS", 10))
+
+	cacheKey := s.generateSTMKeyWithScope(tenantID, userID, agentID)
 
 	// Clear existing cache
 	if err := s.redis.Delete(cacheKey); err != nil {
@@ -192,8 +173,8 @@ func (s *STMCache) UpdateSTMEntries(ctx context.Context, userID string, events [
 }
 
 // ClearSTMContext clears the STM cache for a user.
-func (s *STMCache) ClearSTMContext(ctx context.Context, userID string) error {
-	cacheKey := s.generateSTMKey(userID)
+func (s *STMCache) ClearSTMContext(ctx context.Context, tenantID, userID, agentID string) error {
+	cacheKey := s.generateSTMKeyWithScope(tenantID, userID, agentID)
 	return s.redis.Delete(cacheKey)
 }
 
@@ -214,19 +195,18 @@ func (s *STMCache) ConvertMessagesToSTMEvents(messages []memmodels.Message) []ST
 	return events
 }
 
-// generateSTMKey creates the Redis key for a user's STM cache
-func (s *STMCache) generateSTMKey(userID string) string {
-	return fmt.Sprintf("%s:user_%s", StmCacheKeyPrefix, userID)
-}
-
 // generateSTMKeyWithScope creates the Redis key for a user's STM cache with tenant/agent scope
 func (s *STMCache) generateSTMKeyWithScope(tenantID, userID, agentID string) string {
+	StmCacheKeyPrefix := os.Getenv("STM_CACHE_KEY_PREFIX")
+	if StmCacheKeyPrefix == "" {
+		StmCacheKeyPrefix = "stm_cache" // Set default if empty
+	}
 	return fmt.Sprintf("%s:v1:%s:%s:%s:user_%s", StmCacheKeyPrefix, tenantID, userID, agentID, userID)
 }
 
 // GetCacheStats returns statistics about the STM cache for a user
-func (s *STMCache) GetCacheStats(ctx context.Context, userID string) (map[string]interface{}, error) {
-	cacheKey := s.generateSTMKey(userID)
+func (s *STMCache) GetCacheStats(ctx context.Context, tenantID, userID, agentID string) (map[string]interface{}, error) {
+	cacheKey := s.generateSTMKeyWithScope(tenantID, userID, agentID)
 
 	exists, err := s.redis.Exists(cacheKey)
 	if err != nil {
@@ -244,6 +224,9 @@ func (s *STMCache) GetCacheStats(ctx context.Context, userID string) (map[string
 	if err != nil {
 		return nil, fmt.Errorf("failed to get cache length: %w", err)
 	}
+
+	StmCacheMaxTurns := int64(parseIntEnv("STM_CACHE_MAX_TURNS", 10))
+	StmCacheTTL := parseDurationEnv("STM_CACHE_TTL", 2)
 
 	return map[string]interface{}{
 		"exists":    true,

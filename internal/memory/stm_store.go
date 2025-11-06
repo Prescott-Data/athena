@@ -27,7 +27,7 @@ import (
 // STMStorer defines the interface for STM store operations.
 type STMStorer interface {
 	CreateEmbedding(ctx context.Context, textToEmbed string) (*models.EmbeddingData, error)
-	analyzeTopicContinuity(ctx context.Context, previousContent string, newContent string) (bool, error)
+	analyzeTopicContinuity(ctx context.Context, userID string, previousContent string, newContent string) (bool, error)
 	ProcessMTMFormation(ctx context.Context, tenantID, userID, agentID string, events []models.CognitiveEvent) error
 }
 
@@ -36,37 +36,6 @@ const (
 	CognitiveEventsCollection = "cognitive_events"
 	// CognitiveChainsCollection is the MongoDB collection name for cognitive chains
 	CognitiveChainsCollection = "cognitive_chains"
-)
-
-var (
-	// AIAgentBaseURL is the base URL for the AI Agent service
-	AIAgentBaseURL = os.Getenv("AI_AGENT_BASE_URL")
-	// LLMBaseURL is the base URL for the LLM service
-	LLMBaseURL = os.Getenv("LLM_BASE_URL")
-	// LLMModelName is the model name for the LLM service
-	LLMModelName = os.Getenv("LLM_MODEL_NAME")
-	// Azure OpenAI configuration
-	AzureOpenAIEndpoint = os.Getenv("AZURE_OPENAI_ENDPOINT")        // https://dromos-open-ai.openai.azure.com
-	AzureOpenAIAPIKey   = os.Getenv("AZURE_OPENAI_API_KEY")         // Azure OpenAI API key
-	EmbeddingBaseURL    = os.Getenv("EMBEDDING_BASE_URL")           // Full embedding endpoint URL
-	EmbeddingModelName  = os.Getenv("EMBEDDING_MODEL_NAME")         // Default: text-embedding-ada-002
-	EmbeddingAPIVersion = os.Getenv("EMBEDDING_API_VERSION")        // Default: 2023-05-15
-	EmbeddingDimensions = parseIntEnv("EMBEDDING_DIMENSIONS", 1536) // Azure OpenAI text-embedding-ada-002
-	// MilvusHost is the Milvus server host
-	MilvusHost = os.Getenv("MILVUS_HOST")
-	// MilvusPort is the Milvus server port
-	MilvusPort = os.Getenv("MILVUS_PORT")
-	// MilvusDatabase is the Milvus database name
-	MilvusDatabase = os.Getenv("MILVUS_DATABASE")
-
-	// Cosine gate thresholds (env-tunable)
-	ChainSimHigh = parseFloatEnv("CHAIN_SIM_HIGH", 0.72)
-	ChainSimLow  = parseFloatEnv("CHAIN_SIM_LOW", 0.52)
-
-	// LLM guardrails (env-tunable)
-	LLMRateLimit               = parseIntEnv("LLM_RATE_LIMIT_PER_MINUTE", 50)           // calls per minute per user
-	LLMCircuitBreakerThreshold = parseIntEnv("LLM_CIRCUIT_BREAKER_THRESHOLD", 5)        // failures before opening
-	LLMCircuitBreakerTimeout   = parseIntEnv("LLM_CIRCUIT_BREAKER_TIMEOUT_SECONDS", 60) // seconds to wait before retry
 )
 
 // parseFloatEnv reads a float from env with default
@@ -172,6 +141,9 @@ type STMStore struct {
 
 // NewSTMStore creates a new STM store instance
 func NewSTMStore(database *mongo.Database, redisClient cache.Interface) *STMStore {
+	MilvusHost := os.Getenv("MILVUS_HOST")
+	MilvusPort := os.Getenv("MILVUS_PORT")
+
 	// Initialize Milvus client
 	var milvusClient *MilvusClient
 	if MilvusHost != "" && MilvusPort != "" {
@@ -200,10 +172,11 @@ func NewSTMStore(database *mongo.Database, redisClient cache.Interface) *STMStor
 
 // checkRateLimit checks if user has exceeded LLM call rate limit
 func (lg *LLMGuardrails) checkRateLimit(ctx context.Context, userID string) bool {
+	_ = ctx
 	if lg.redis == nil {
 		return true // Allow if Redis unavailable
 	}
-
+	LLMRateLimit := parseIntEnv("LLM_RATE_LIMIT_PER_MINUTE", 50)
 	rateLimitKey := fmt.Sprintf("llm_rate_limit:%s", userID)
 
 	// Get current count
@@ -232,6 +205,8 @@ func (lg *LLMGuardrails) checkCircuitBreaker() bool {
 		return true
 	}
 
+	LLMCircuitBreakerTimeout := parseIntEnv("LLM_CIRCUIT_BREAKER_TIMEOUT_SECONDS", 60)
+
 	// Check if timeout has passed
 	if time.Since(lg.circuitBreakerOpened) > time.Duration(LLMCircuitBreakerTimeout)*time.Second {
 		lg.circuitBreakerOpen = false
@@ -254,6 +229,7 @@ func (lg *LLMGuardrails) recordLLMResult(success bool) {
 			log.Printf("INFO: LLM circuit breaker closed after successful call")
 		}
 	} else {
+		LLMCircuitBreakerThreshold := parseIntEnv("LLM_CIRCUIT_BREAKER_THRESHOLD", 5)
 		lg.failureCount++
 		if lg.failureCount >= LLMCircuitBreakerThreshold && !lg.circuitBreakerOpen {
 			lg.circuitBreakerOpen = true
@@ -264,9 +240,24 @@ func (lg *LLMGuardrails) recordLLMResult(success bool) {
 }
 
 // analyzeTopicContinuity uses the LLM endpoint to analyze topic continuity
-func (s *STMStore) analyzeTopicContinuity(ctx context.Context, previousContent string, newContent string) (bool, error) {
-	if LLMBaseURL == "" {
+func (s *STMStore) analyzeTopicContinuity(ctx context.Context, userID string, previousContent string, newContent string) (bool, error) {
+
+	llmBaseURL := os.Getenv("LLM_BASE_URL")
+	apiKey := os.Getenv("AZURE_OPENAI_API_KEY")
+
+	if llmBaseURL == "" {
 		return false, fmt.Errorf("LLM_BASE_URL not configured")
+	}
+
+	if apiKey == "" {
+		return false, fmt.Errorf("AZURE_OPENAI_API_KEY not configured")
+	}
+
+	if !s.llmGuards.checkRateLimit(ctx, userID) {
+		return false, fmt.Errorf("LLM rate limit exceeded for user %s", userID)
+	}
+	if !s.llmGuards.checkCircuitBreaker() {
+		return false, fmt.Errorf("LLM circuit breaker is open")
 	}
 
 	// Create prompt for the LLM to analyze topic continuity
@@ -282,13 +273,7 @@ Respond with only "true" if the conversations are continuous/related or "false" 
 		previousContent, newContent)
 
 	// Create LLM completion request
-	modelName := LLMModelName
-	if modelName == "" {
-		modelName = "Qwen/Qwen3-32B-AWQ"
-	}
-
 	request := map[string]interface{}{
-		"model": modelName,
 		"messages": []map[string]string{
 			{"role": "user", "content": prompt},
 		},
@@ -303,17 +288,17 @@ Respond with only "true" if the conversations are continuous/related or "false" 
 	}
 
 	// Use more aggressive timeout for LLM fallback calls
-	llmTimeout := parseIntEnv("LLM_TIMEOUT_SECONDS", 10)
+	llmTimeout := parseIntEnv("LLM_TIMEOUT_SECONDS", 10) // This is fine, as it's a "def"
 	httpCtx, cancel := context.WithTimeout(ctx, time.Duration(llmTimeout)*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(httpCtx, "POST", LLMBaseURL, bytes.NewBuffer(requestBody))
+	req, err := http.NewRequestWithContext(httpCtx, "POST", llmBaseURL, bytes.NewBuffer(requestBody))
 	if err != nil {
 		return false, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("api-key", AzureOpenAIAPIKey)
+	req.Header.Set("api-key", apiKey) // Use the local apiKey variable
 
 	resp, err := s.HTTPClient.Do(req)
 	if err != nil {
@@ -355,16 +340,28 @@ Respond with only "true" if the conversations are continuous/related or "false" 
 func (s *STMStore) CreateEmbedding(ctx context.Context, textToEmbed string) (*models.EmbeddingData, error) {
 	start := time.Now()
 
+	// --- FIX: Read variables inside the function ---
+	apiKey := os.Getenv("AZURE_OPENAI_API_KEY")
+	url := os.Getenv("EMBEDDING_BASE_URL")
+	embeddingModel := os.Getenv("EMBEDDING_MODEL_NAME")
+	// --- END FIX ---
+
 	// Check Azure OpenAI configuration
-	if AzureOpenAIEndpoint == "" {
-		return nil, fmt.Errorf("Azure OpenAI endpoint not configured")
+	if url == "" {
+		return nil, fmt.Errorf("EMBEDDING_BASE_URL environment variable not set")
 	}
-	if AzureOpenAIAPIKey == "" {
-		return nil, fmt.Errorf("Azure OpenAI API key not configured")
+	if apiKey == "" {
+		return nil, fmt.Errorf("azure OpenAI API key not configured")
+	}
+
+	if !s.llmGuards.checkRateLimit(ctx, "embedding_user") {
+		return nil, fmt.Errorf("embedding API rate limit exceeded")
+	}
+	if !s.llmGuards.checkCircuitBreaker() {
+		return nil, fmt.Errorf("embedding API circuit breaker is open")
 	}
 
 	// Use configured model or default to text-embedding-ada-002
-	embeddingModel := EmbeddingModelName
 	if embeddingModel == "" {
 		embeddingModel = "text-embedding-ada-002"
 	}
@@ -383,34 +380,31 @@ func (s *STMStore) CreateEmbedding(ctx context.Context, textToEmbed string) (*mo
 	httpCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	// Use the complete URL directly from your environment variables.
-	// This is the same pattern you use for LLM_BASE_URL and is the correct fix.
-	url := EmbeddingBaseURL
-	if url == "" {
-		return nil, fmt.Errorf("EMBEDDING_BASE_URL environment variable not set")
-	}
-
 	req, err := http.NewRequestWithContext(httpCtx, "POST", url, bytes.NewBuffer(requestBody))
 	if err != nil {
+		s.llmGuards.recordLLMResult(false) // Record failure
 		return nil, fmt.Errorf("failed to create Azure OpenAI embedding request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("api-key", AzureOpenAIAPIKey)
+	req.Header.Set("api-key", apiKey)
 
 	resp, err := s.HTTPClient.Do(req)
 	if err != nil {
+		s.llmGuards.recordLLMResult(false) // Record failure
 		return nil, fmt.Errorf("failed to make Azure OpenAI embedding API call: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		s.llmGuards.recordLLMResult(false) // Record failure
 		responseBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("Azure OpenAI API returned status %d: %s", resp.StatusCode, string(responseBody))
+		return nil, fmt.Errorf("azure OpenAI API returned status %d: %s", resp.StatusCode, string(responseBody))
 	}
 
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		s.llmGuards.recordLLMResult(false) // Record failure
 		return nil, fmt.Errorf("failed to read Azure OpenAI embedding response: %w", err)
 	}
 
@@ -420,19 +414,22 @@ func (s *STMStore) CreateEmbedding(ctx context.Context, textToEmbed string) (*mo
 			Embedding []float64 `json:"embedding"`
 		} `json:"data"`
 		Usage struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			TotalTokens      int `json:"total_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
+			PromptTokens int `json:"prompt_tokens"`
+			TotalTokens  int `json:"total_tokens"`
 		} `json:"usage"`
 	}
 
 	if err := json.Unmarshal(responseBody, &embeddingResponse); err != nil {
+		s.llmGuards.recordLLMResult(false) // Record failure
 		return nil, fmt.Errorf("failed to unmarshal Azure OpenAI embedding response: %w", err)
 	}
 
 	if len(embeddingResponse.Data) == 0 || len(embeddingResponse.Data[0].Embedding) == 0 {
+		s.llmGuards.recordLLMResult(false) // Record failure
 		return nil, fmt.Errorf("no embedding data in Azure OpenAI response")
 	}
+
+	s.llmGuards.recordLLMResult(true) // Record success
 
 	embedding := &models.EmbeddingData{
 		Vector:     embeddingResponse.Data[0].Embedding,
@@ -461,8 +458,22 @@ func (s *STMStore) StoreCognitiveEvent(ctx context.Context, event *models.Cognit
 
 // CreateSegmentSummary generates a one-sentence summary for a segment using the LLM
 func (s *STMStore) CreateSegmentSummary(ctx context.Context, events []models.CognitiveEvent) (string, error) {
+	LLMBaseURL := os.Getenv("LLM_BASE_URL")
+	apiKey := os.Getenv("AZURE_OPENAI_API_KEY")
+
 	if LLMBaseURL == "" {
 		return "", fmt.Errorf("LLM_BASE_URL not configured")
+	}
+
+	if apiKey == "" {
+		return "", fmt.Errorf("AZURE_OPENAI_API_KEY not configured")
+	}
+
+	if !s.llmGuards.checkRateLimit(ctx, "summary_user") {
+		return "", fmt.Errorf("LLM summary rate limit exceeded")
+	}
+	if !s.llmGuards.checkCircuitBreaker() {
+		return "", fmt.Errorf("LLM summary circuit breaker is open")
 	}
 
 	var b strings.Builder
@@ -473,12 +484,8 @@ func (s *STMStore) CreateSegmentSummary(ctx context.Context, events []models.Cog
 	b.WriteString("---\n\nFocus on the \"why\" behind the agent's actions, as revealed in its thoughts. The summary should be from the perspective of the agent.\n\nOne-sentence summary:")
 
 	prompt := b.String()
-	modelName := LLMModelName
-	if modelName == "" {
-		modelName = "Qwen/Qwen3-32B-AWQ"
-	}
+
 	reqBody := map[string]interface{}{
-		"model": modelName,
 		"messages": []map[string]string{
 			{"role": "user", "content": prompt},
 		},
@@ -494,6 +501,9 @@ func (s *STMStore) CreateSegmentSummary(ctx context.Context, events []models.Cog
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
+
+	req.Header.Set("api-key", apiKey)
+
 	resp, err := s.HTTPClient.Do(req)
 	if err != nil {
 		return "", err

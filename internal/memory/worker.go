@@ -93,8 +93,13 @@ func (w *Worker) processNextTask(ctx context.Context, workerID int) error {
 
 // processCognitiveChainCheck performs the core logic of analyzing the cognitive chain
 func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.CognitiveChainCheckTask) error {
+
+	// Use the correct Redis key generation
+	// This MUST match the key generation logic used in stm_cache.go
+	// (Assuming StmCacheKeyPrefix is available or you import it)
+	key := fmt.Sprintf("stm_cache:user_%s", task.UserID) // Using the key from stm_cache.go
+
 	// 1. Get the last two events from the user's STM
-	key := fmt.Sprintf("stm:%s:%s", task.TenantID, task.UserID)
 	eventStrings, err := w.redis.LRange(key, 0, 1)
 	if err != nil {
 		return fmt.Errorf("failed to get recent events from STM: %w", err)
@@ -106,7 +111,7 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 	}
 
 	// 2. Unmarshal events
-	var event1, event2 STMEvent
+	var event1, event2 models.CognitiveEvent
 	if err := json.Unmarshal([]byte(eventStrings[0]), &event1); err != nil {
 		return fmt.Errorf("failed to unmarshal event 1: %w", err)
 	}
@@ -125,6 +130,12 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 	}
 
 	// 4. Calculate cosine similarity
+	// --- THIS IS THE FIX ---
+	// Read variables inside the function
+	chainSimHigh := parseFloatEnv("CHAIN_SIM_HIGH", 0.72)
+	chainSimLow := parseFloatEnv("CHAIN_SIM_LOW", 0.52)
+	// --- END FIX ---
+
 	similarity, err := cosineSimilarity(embedding1.Vector, embedding2.Vector)
 	if err != nil {
 		return fmt.Errorf("failed to calculate cosine similarity: %w", err)
@@ -132,18 +143,19 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 
 	// 5. Decide if the chain continues
 	chainBreak := false
-	if similarity >= HighSimilarityThreshold {
+	if similarity >= chainSimHigh {
 		// Chain continues, do nothing
 		log.Printf("Chain continues for user %s.", task.UserID)
 		return nil
-	} else if similarity < LowSimilarityThreshold {
+	} else if similarity < chainSimLow {
 		// Chain breaks
 		log.Printf("Chain break detected for user %s.", task.UserID)
 		chainBreak = true
 	} else {
 		// Gray area, requires LLM to check for continuity
 		log.Printf("Cosine similarity is in the gray area (%f). Using LLM to check for continuity.", similarity)
-		llmContinues, err := w.stmStore.analyzeTopicContinuity(ctx, event1.Content, event2.Content)
+
+		llmContinues, err := w.stmStore.analyzeTopicContinuity(ctx, task.UserID, event1.Content, event2.Content)
 		if err != nil {
 			return fmt.Errorf("failed to analyze topic continuity with LLM: %w", err)
 		}
@@ -166,25 +178,29 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 		}
 
 		var oldChainEvents []models.CognitiveEvent
-		for _, eventStr := range oldChainStrings {
-			var event STMEvent
-			if err := json.Unmarshal([]byte(eventStr), &event); err != nil {
+		// Iterate in reverse to maintain chronological order (LPUSH makes newest first)
+		for i := len(oldChainStrings) - 1; i >= 0; i-- {
+			var event models.CognitiveEvent
+			if err := json.Unmarshal([]byte(oldChainStrings[i]), &event); err != nil {
 				log.Printf("WARNING: Failed to unmarshal event in old chain: %v", err)
-				continue // Or handle more gracefully
+				continue
 			}
-			oldChainEvents = append(oldChainEvents, models.CognitiveEvent{ /* map fields */ })
+			oldChainEvents = append(oldChainEvents, event)
 		}
 
 		// 7. Trigger MTM formation
 		log.Printf("Processing MTM formation for user %s with %d events.", task.UserID, len(oldChainEvents))
-		if err := w.stmStore.ProcessMTMFormation(ctx, task.TenantID, task.UserID, task.AgentID, oldChainEvents); err != nil {
-			return fmt.Errorf("MTM formation failed: %w", err)
-		}
 
-		// 8. Trim the STM to keep only the most recent event
-		if err := w.redis.LTrim(key, 0, 0); err != nil {
-			// Log a warning, but don't fail the whole task for a trim failure
-			log.Printf("WARNING: Failed to trim STM for user %s: %v", task.UserID, err)
+		// 8. Implement "Save-Then-Trim" logic
+		if err := w.stmStore.ProcessMTMFormation(ctx, task.TenantID, task.UserID, task.AgentID, oldChainEvents); err != nil {
+			// MTM FAILED! Return the error. DO NOT TRIM.
+			return fmt.Errorf("MTM formation failed: %w", err)
+		} else {
+			// MTM SUCCEEDED! It is now safe to trim the STM.
+			if err := w.redis.LTrim(key, 0, 0); err != nil {
+				// The MTM save worked, but the trim failed.
+				log.Printf("WARNING: MTM save succeeded but failed to trim STM for user %s: %v", task.UserID, err)
+			}
 		}
 	}
 

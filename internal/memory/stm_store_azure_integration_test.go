@@ -7,11 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"bitbucket.org/dromos/memory-os/internal/cache"
-
 	"github.com/stretchr/testify/assert"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // TestAzureEmbedding_Integration validates the Azure OpenAI embedding integration
@@ -102,6 +98,9 @@ func TestGoogleConfiguration_Validation(t *testing.T) {
 
 	t.Run("EnvironmentVariables_Loaded", func(t *testing.T) {
 		// Test that environment variables are properly loaded
+		EmbeddingModelName := os.Getenv("EMBEDDING_MODEL_NAME")
+		EmbeddingDimensions := os.Getenv("EMBEDDING_DIMENSIONS")
+		azureEndpoint := os.Getenv("AZURE_OPENAI_ENDPOINT")
 		// Note: API key is retrieved from Secret Manager, not environment
 
 		// EmbeddingModelName can be empty (has default)
@@ -109,14 +108,13 @@ func TestGoogleConfiguration_Validation(t *testing.T) {
 			assert.Contains(EmbeddingModelName, "embedding", "EmbeddingModelName should be an embedding model")
 		}
 
-		assert.Equal(1536, EmbeddingDimensions, "EmbeddingDimensions should be 1536")
+		assert.Equal("1536", EmbeddingDimensions, "EmbeddingDimensions should be 1536")
 
-		azureEndpoint := AzureOpenAIEndpoint
 		if azureEndpoint == "" {
 			azureEndpoint = "not-configured"
 		}
 
-		t.Logf("Configuration: Model=%s, Dimensions=%d, AzureEndpoint=%s",
+		t.Logf("Configuration: Model=%s, Dimensions=%s, AzureEndpoint=%s",
 			EmbeddingModelName, EmbeddingDimensions, azureEndpoint)
 	})
 }
@@ -153,6 +151,7 @@ func TestAzureEmbedding_Performance(t *testing.T) {
 
 // createMockSTMStore creates a minimal STM store for testing (without full dependencies)
 func createMockSTMStore(t *testing.T) *STMStore {
+	t.Helper()
 	// Create a minimal STM store without Redis/MongoDB dependencies for embedding testing
 	// Since CreateEmbedding only needs the struct, we can create a minimal instance
 
@@ -167,39 +166,39 @@ func createMockSTMStore(t *testing.T) *STMStore {
 	}
 }
 
-// setupTestDatabase creates a test MongoDB connection (optional, for full integration)
-func setupTestDatabase() (*mongo.Database, error) {
-	// Use test database if needed for full integration testing
-	mongoURI := os.Getenv("MONGODB_URI")
-	if mongoURI == "" {
-		mongoURI = "mongodb://localhost:27017"
-	}
+// // setupTestDatabase creates a test MongoDB connection (optional, for full integration)
+// func setupTestDatabase() (*mongo.Database, error) {
+// 	// Use test database if needed for full integration testing
+// 	mongoURI := os.Getenv("MONGODB_URI")
+// 	if mongoURI == "" {
+// 		mongoURI = "mongodb://localhost:27017"
+// 	}
 
-	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI(mongoURI))
-	if err != nil {
-		return nil, err
-	}
+// 	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI(mongoURI))
+// 	if err != nil {
+// 		return nil, err
+// 	}
 
-	return client.Database("test_docintel"), nil
-}
+// 	return client.Database("test_docintel"), nil
+// }
 
 // setupTestRedis creates a test Redis connection (optional, for full integration)
-func setupTestRedis() (cache.Interface, error) {
-	// Use test Redis if needed for full integration testing
-	redisHost := os.Getenv("REDIS_HOST")
-	if redisHost == "" {
-		redisHost = "localhost"
-	}
+// func setupTestRedis() (cache.Interface, error) {
+// 	// Use test Redis if needed for full integration testing
+// 	redisHost := os.Getenv("REDIS_HOST")
+// 	if redisHost == "" {
+// 		redisHost = "localhost"
+// 	}
 
-	redisPort := os.Getenv("REDIS_PORT")
-	if redisPort == "" {
-		redisPort = "6379"
-	}
+// 	redisPort := os.Getenv("REDIS_PORT")
+// 	if redisPort == "" {
+// 		redisPort = "6379"
+// 	}
 
-	// Set test environment
-	os.Setenv("REDIS_HOST", redisHost)
-	os.Setenv("REDIS_PORT", redisPort)
-	os.Setenv("REDIS_DB", "15") // Use DB 15 for testing
+// 	// Set test environment
+// 	os.Setenv("REDIS_HOST", redisHost)
+// 	os.Setenv("REDIS_PORT", redisPort)
+// 	os.Setenv("REDIS_DB", "15") // Use DB 15 for testing
 
-	return cache.NewRedisClient()
-}
+// 	return cache.NewRedisClient()
+// }

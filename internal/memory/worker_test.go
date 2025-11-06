@@ -6,13 +6,10 @@ import (
 	"errors"
 	"testing"
 
-
 	"bitbucket.org/dromos/memory-os/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
-
-
 
 // MockTaskQueue is a mock implementation of the TaskQueue for testing
 type MockTaskQueue struct {
@@ -56,8 +53,8 @@ func (m *MockSTMStore) CreateEmbedding(ctx context.Context, textToEmbed string) 
 	return args.Get(0).(*models.EmbeddingData), args.Error(1)
 }
 
-func (m *MockSTMStore) analyzeTopicContinuity(ctx context.Context, previousContent string, newContent string) (bool, error) {
-	args := m.Called(ctx, previousContent, newContent)
+func (m *MockSTMStore) analyzeTopicContinuity(ctx context.Context, userID, previousContent, newContent string) (bool, error) {
+	args := m.Called(ctx, userID, previousContent, newContent)
 	return args.Bool(0), args.Error(1)
 }
 
@@ -175,7 +172,7 @@ func Test_ProcessCognitiveChainCheck_GrayArea_LLMFallback_Continues(t *testing.T
 	mockSTMStore.On("CreateEmbedding", ctx, event2.Content).Return(&models.EmbeddingData{Vector: []float64{0.8, 0.6}}, nil).Once()
 	mockSTMStore.On("CreateEmbedding", ctx, event1.Content).Return(&models.EmbeddingData{Vector: []float64{1, 0}}, nil).Once()
 
-	mockSTMStore.On("analyzeTopicContinuity", ctx, event2.Content, event1.Content).Return(true, nil).Once()
+	mockSTMStore.On("analyzeTopicContinuity", ctx, "test-user", event2.Content, event1.Content).Return(true, nil).Once()
 
 	err := worker.processCognitiveChainCheck(ctx, task)
 	assert.NoError(t, err)
@@ -202,7 +199,7 @@ func Test_ProcessCognitiveChainCheck_GrayArea_LLMFallback_Breaks(t *testing.T) {
 	mockSTMStore.On("CreateEmbedding", ctx, event2.Content).Return(&models.EmbeddingData{Vector: []float64{0.8, 0.6}}, nil).Once()
 	mockSTMStore.On("CreateEmbedding", ctx, event1.Content).Return(&models.EmbeddingData{Vector: []float64{1, 0}}, nil).Once()
 
-	mockSTMStore.On("analyzeTopicContinuity", ctx, event2.Content, event1.Content).Return(false, nil).Once()
+	mockSTMStore.On("analyzeTopicContinuity", ctx, "test-user", event1.Content, event2.Content).Return(false, nil).Once()
 
 	mockRedis.On("LRange", mock.Anything, int64(1), int64(-1)).Return([]string{string(event1JSON)}, nil).Once()
 	mockSTMStore.On("ProcessMTMFormation", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()

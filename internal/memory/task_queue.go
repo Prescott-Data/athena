@@ -114,6 +114,7 @@ func (tq *TaskQueue) EnqueueCognitiveCheckTask(ctx context.Context, tenantID, us
 	}
 
 	// Push to Redis queue
+	TaskQueueName := generateScopedQueueName(tenantID, userID, agentID)
 	if err := tq.redis.LPush(TaskQueueName, string(envelopeJSON)); err != nil {
 		return fmt.Errorf("failed to enqueue cognitive check task: %w", err)
 	}
@@ -155,11 +156,11 @@ func (tq *TaskQueue) GetQueueStats(ctx context.Context) (map[string]interface{},
 	}
 
 	return map[string]interface{}{
-		"queue_name":   TaskQueueName,
-		"queue_length": queueLength,
-		"task_timeout": TaskTimeout.String(),
-	},
-	nil
+			"queue_name":   TaskQueueName,
+			"queue_length": queueLength,
+			"task_timeout": TaskTimeout.String(),
+		},
+		nil
 }
 
 // MarkTaskResult stores the result of a processed task (for debugging/monitoring)
