@@ -2,21 +2,22 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
 
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
-	gen "bitbucket.org/dromos/memory-os/api/grpc/gen"
+	"bitbucket.org/dromos/memory-os/api/grpc/gen"
 	"bitbucket.org/dromos/memory-os/internal/cache"
 	"bitbucket.org/dromos/memory-os/internal/config"
 	"bitbucket.org/dromos/memory-os/internal/database"
 	"bitbucket.org/dromos/memory-os/internal/memory"
 	"bitbucket.org/dromos/memory-os/internal/models"
+	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // stmCache defines the interface for the short-term memory cache.
@@ -25,20 +26,15 @@ type stmCache interface {
 	AddSTMEvent(ctx context.Context, tenantID, userID, agentID string, event memory.STMEvent) error
 }
 
-// taskQueue defines the interface for the background task queue.
-// This allows for mocking in tests.
-type taskQueue interface {
-	EnqueueCognitiveCheckTask(ctx context.Context, tenantID, userID, agentID string) error
-}
-
 // MemoryServer represents the main Memory OS server
 type MemoryServer struct {
 	gen.UnimplementedMemoryServiceServer // Embed for forward compatibility
-	config                               *config.Config
-	stmStore                             *memory.STMStore
-	stmCache                             stmCache
-	taskQueue                            taskQueue
-	mongoClient                          *mongo.Client
+	config *config.Config
+	stmStore *memory.STMStore
+	stmCache stmCache
+	taskQueue memory.TaskQueuer
+	mongoClient *mongo.Client
+	redisClient cache.Interface
 	// getIDsFromSessionFunc allows mocking the DB call in tests
 	getIDsFromSessionFunc func(s *MemoryServer, ctx context.Context, sessionID string) (string, string, string, error)
 }
@@ -47,8 +43,8 @@ type MemoryServer struct {
 func NewMemoryServer(cfg *config.Config) (*MemoryServer, error) {
 	// Initialize database connections
 	mongoClient, db, err := database.ConnectMongoDB(database.ConnectionConfig{
-		URI:            cfg.Database.MongoDB.URI,
-		DatabaseName:   cfg.Database.MongoDB.Database,
+		URI: cfg.Database.MongoDB.URI,
+		DatabaseName: cfg.Database.MongoDB.Database,
 		ConnectTimeout: 30 * time.Second,
 	})
 	if err != nil {
@@ -66,11 +62,12 @@ func NewMemoryServer(cfg *config.Config) (*MemoryServer, error) {
 	taskQueue := memory.NewTaskQueue(redisClient)
 
 	server := &MemoryServer{
-		config:      cfg,
-		stmStore:    stmStore,
-		stmCache:    stmCache,
-		taskQueue:   taskQueue,
+		config: cfg,
+		stmStore: stmStore,
+		stmCache: stmCache,
+		taskQueue: taskQueue,
 		mongoClient: mongoClient,
+		redisClient: redisClient,
 	}
 	// Point the function field to the real method
 	server.getIDsFromSessionFunc = (*MemoryServer).getIDsFromSession
@@ -107,9 +104,9 @@ func (s *MemoryServer) StoreInteraction(ctx context.Context, req *gen.StoreInter
 
 	// Create and process the user event
 	userEvent := memory.STMEvent{
-		Role:      "user",
-		Type:      models.STMEventTypeMessage,
-		Content:   req.UserMessage,
+		Role: "user",
+		Type: models.STMEventTypeMessage,
+		Content: req.UserMessage,
 		Timestamp: time.Now(),
 	}
 
@@ -119,16 +116,49 @@ func (s *MemoryServer) StoreInteraction(ctx context.Context, req *gen.StoreInter
 	}
 
 	// Conditionally trigger the worker only for user messages
-	if err := s.taskQueue.EnqueueCognitiveCheckTask(ctx, tenantID, userID, agentID); err != nil {
-		log.Printf("ERROR: Failed to enqueue cognitive check task: %v", err)
+	if userEvent.Role == "user" && userEvent.Type == models.STMEventTypeMessage {
+		taskPayload := models.CognitiveChainCheckTask{
+			ID: uuid.New().String(),
+			Type: memory.TaskTypeCognitiveChainCheck,
+			TenantID: tenantID,
+			UserID: userID,
+			AgentID: agentID,
+			Timestamp: time.Now(),
+		}
+
+		payloadJSON, err := json.Marshal(taskPayload)
+		if err != nil {
+			log.Printf("ERROR: Failed to marshal cognitive check task payload: %v", err)
+		} else {
+			envelope := memory.TaskEnvelope{
+				ID: taskPayload.ID,
+				Type: taskPayload.Type,
+				Payload: payloadJSON,
+				EnqueuedAt: time.Now(),
+			}
+
+			envelopeJSON, err := json.Marshal(envelope)
+			if err != nil {
+				log.Printf("ERROR: Failed to marshal task envelope: %v", err)
+			} else {
+				scopedQueueName := memory.GenerateScopedQueueName(tenantID, userID, agentID)
+				if err := s.redisClient.LPush(scopedQueueName, string(envelopeJSON)); err != nil {
+					log.Printf("ERROR: Failed to enqueue cognitive check task: %v", err)
+				} else {
+					if err := s.redisClient.LPush(memory.GlobalWorkQueueName, scopedQueueName); err != nil {
+						log.Printf("ERROR: Failed to push to global work queue: %v", err)
+					}
+				}
+			}
+		}
 	}
 
 	// Create and process the agent event if it exists
 	if req.AgentResponse != "" {
 		agentEvent := memory.STMEvent{
-			Role:      "agent",
-			Type:      models.STMEventTypeMessage,
-			Content:   req.AgentResponse,
+			Role: "agent",
+			Type: models.STMEventTypeMessage,
+			Content: req.AgentResponse,
 			Timestamp: time.Now(),
 		}
 		if err := s.stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, agentEvent); err != nil {
@@ -139,7 +169,7 @@ func (s *MemoryServer) StoreInteraction(ctx context.Context, req *gen.StoreInter
 	log.Printf("INFO: Interaction processed successfully for SessionID: %s", sessionID)
 
 	return &gen.StoreInteractionResponse{
-		Success:       true,
+		Success: true,
 		InteractionId: "", // The concept of a single interaction ID is now obsolete
 	}, nil
 }

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	gen "bitbucket.org/dromos/memory-os/api/grpc/gen"
+	"bitbucket.org/dromos/memory-os/internal/cache"
 	"bitbucket.org/dromos/memory-os/internal/memory"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -22,13 +23,14 @@ func (m *MockSTMCache) AddSTMEvent(ctx context.Context, tenantID, userID, agentI
 	return args.Error(0)
 }
 
-// MockTaskQueue is a mock implementation of the taskQueue interface.
-type MockTaskQueue struct {
+// MockRedis is a mock implementation of the cache.Interface for testing
+type MockRedis struct {
+	cache.Interface
 	mock.Mock
 }
 
-func (m *MockTaskQueue) EnqueueCognitiveCheckTask(ctx context.Context, tenantID, userID, agentID string) error {
-	args := m.Called(ctx, tenantID, userID, agentID)
+func (m *MockRedis) LPush(key string, values ...interface{}) error {
+	args := m.Called(key, values)
 	return args.Error(0)
 }
 
@@ -40,11 +42,11 @@ func TestStoreInteraction_SmartTrigger(t *testing.T) {
 	t.Run("Should trigger worker for user message and save both events", func(t *testing.T) {
 		// Arrange
 		mockCache := new(MockSTMCache)
-		mockQueue := new(MockTaskQueue)
+		mockRedis := new(MockRedis)
 
 		server := &MemoryServer{
-			stmCache:  mockCache,
-			taskQueue: mockQueue,
+			stmCache:    mockCache,
+			redisClient: mockRedis,
 		}
 		// Mock the database call
 		server.getIDsFromSessionFunc = func(s *MemoryServer, ctx context.Context, sessionID string) (string, string, string, error) {
@@ -61,8 +63,11 @@ func TestStoreInteraction_SmartTrigger(t *testing.T) {
 		mockCache.On("AddSTMEvent", ctx, "test-tenant", "test-user", "test-agent", mock.AnythingOfType("memory.STMEvent")).Return(nil).Once()
 		// Expect the agent event to be saved
 		mockCache.On("AddSTMEvent", ctx, "test-tenant", "test-user", "test-agent", mock.AnythingOfType("memory.STMEvent")).Return(nil).Once()
-		// Expect the task queue to be triggered exactly once
-		mockQueue.On("EnqueueCognitiveCheckTask", ctx, "test-tenant", "test-user", "test-agent").Return(nil).Once()
+
+		// Expect the two-step enqueue
+		scopedQueueName := memory.GenerateScopedQueueName("test-tenant", "test-user", "test-agent")
+		mockRedis.On("LPush", scopedQueueName, mock.Anything).Return(nil).Once()
+		mockRedis.On("LPush", memory.GlobalWorkQueueName, []interface{}{scopedQueueName}).Return(nil).Once()
 
 		// Act
 		_, err := server.StoreInteraction(ctx, req)
@@ -70,17 +75,17 @@ func TestStoreInteraction_SmartTrigger(t *testing.T) {
 		// Assert
 		assert.NoError(t, err)
 		mockCache.AssertExpectations(t)
-		mockQueue.AssertExpectations(t)
+		mockRedis.AssertExpectations(t)
 	})
 
 	t.Run("Should only save user event and trigger worker when no agent response", func(t *testing.T) {
 		// Arrange
 		mockCache := new(MockSTMCache)
-		mockQueue := new(MockTaskQueue)
+		mockRedis := new(MockRedis)
 
 		server := &MemoryServer{
-			stmCache:  mockCache,
-			taskQueue: mockQueue,
+			stmCache:    mockCache,
+			redisClient: mockRedis,
 		}
 		server.getIDsFromSessionFunc = func(s *MemoryServer, ctx context.Context, sessionID string) (string, string, string, error) {
 			return "test-tenant", "test-user", "test-agent", nil
@@ -95,8 +100,11 @@ func TestStoreInteraction_SmartTrigger(t *testing.T) {
 
 		// Expect the user event to be saved
 		mockCache.On("AddSTMEvent", ctx, "test-tenant", "test-user", "test-agent", mock.AnythingOfType("memory.STMEvent")).Return(nil).Once()
-		// Expect the task queue to be triggered for the user message
-		mockQueue.On("EnqueueCognitiveCheckTask", ctx, "test-tenant", "test-user", "test-agent").Return(nil).Once()
+
+		// Expect the two-step enqueue
+		scopedQueueName := memory.GenerateScopedQueueName("test-tenant", "test-user", "test-agent")
+		mockRedis.On("LPush", scopedQueueName, mock.Anything).Return(nil).Once()
+		mockRedis.On("LPush", memory.GlobalWorkQueueName, []interface{}{scopedQueueName}).Return(nil).Once()
 
 		// Act
 		_, err := server.StoreInteraction(ctx, req)
@@ -104,6 +112,6 @@ func TestStoreInteraction_SmartTrigger(t *testing.T) {
 		// Assert
 		assert.NoError(t, err)
 		mockCache.AssertExpectations(t)
-		mockQueue.AssertExpectations(t)
+		mockRedis.AssertExpectations(t)
 	})
 }

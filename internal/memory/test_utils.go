@@ -41,6 +41,11 @@ func (m *MockRedis) LPush(key string, values ...interface{}) error {
 	return args.Error(0)
 }
 
+func (m *MockRedis) RPop(key string) (string, error) {
+	args := m.Called(key)
+	return args.String(0), args.Error(1)
+}
+
 func (m *MockRedis) LRange(key string, start, stop int64) ([]string, error) {
 	args := m.Called(key, start, stop)
 	return args.Get(0).([]string), args.Error(1)

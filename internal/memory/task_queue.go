@@ -10,22 +10,15 @@ import (
 	"time"
 
 	"bitbucket.org/dromos/memory-os/internal/cache"
-	"bitbucket.org/dromos/memory-os/internal/models"
-
-	"github.com/google/uuid"
 )
 
 // TaskQueuer defines the interface for task queue operations.
 type TaskQueuer interface {
-	EnqueueCognitiveCheckTask(ctx context.Context, tenantID, userID, agentID string) error
-	DequeueTask(ctx context.Context) (*TaskEnvelope, error)
 	GetQueueStats(ctx context.Context) (map[string]interface{}, error)
-	MarkTaskResult(ctx context.Context, taskID string, success bool, message string) error
+	MarkTaskResult(ctx context.Context, tenantID, userID, agentID, taskID string, success bool, message string) error
 }
 
 const (
-	// MemoryProcessingQueue is the Redis queue key for memory processing tasks (legacy)
-	MemoryProcessingQueue = "memory_processing_queue"
 	// TaskResultsPrefix is the Redis key prefix for task results (legacy)
 	TaskResultsPrefix = "task_results"
 
@@ -33,8 +26,8 @@ const (
 	TaskTypeCognitiveChainCheck = "cognitive_chain_check"
 )
 
-// generateScopedQueueName creates a tenant-scoped queue name
-func generateScopedQueueName(tenantID, userID, agentID string) string {
+// GenerateScopedQueueName creates a tenant-scoped queue name
+func GenerateScopedQueueName(tenantID, userID, agentID string) string {
 	return fmt.Sprintf("memory_processing_queue:v1:%s:%s:%s", tenantID, userID, agentID)
 }
 
@@ -44,8 +37,8 @@ func generateScopedTaskResultKey(tenantID, userID, agentID, taskID string) strin
 }
 
 var (
-	// TaskQueueName is the name of the Redis queue for memory tasks
-	TaskQueueName = "memory_processing_queue"
+	// GlobalWorkQueueName is the name of the Redis queue that holds the names of the scoped work queues.
+	GlobalWorkQueueName = "cognitive_work_queue"
 	// TaskTimeout is the timeout for processing individual tasks
 	TaskTimeout = 300 * time.Second // 5 minutes
 )
@@ -81,82 +74,15 @@ func NewTaskQueue(redisClient cache.Interface) *TaskQueue {
 	}
 }
 
-// EnqueueCognitiveCheckTask enqueues a lightweight trigger for the worker to check for a chain break.
-func (tq *TaskQueue) EnqueueCognitiveCheckTask(ctx context.Context, tenantID, userID, agentID string) error {
-	start := time.Now()
-
-	// Create the specific task payload
-	taskPayload := models.CognitiveChainCheckTask{
-		ID:        uuid.New().String(),
-		Type:      TaskTypeCognitiveChainCheck,
-		TenantID:  tenantID,
-		UserID:    userID,
-		AgentID:   agentID,
-		Timestamp: time.Now(),
-	}
-
-	payloadJSON, err := json.Marshal(taskPayload)
-	if err != nil {
-		return fmt.Errorf("failed to marshal cognitive check task payload: %w", err)
-	}
-
-	// Wrap the payload in a generic TaskEnvelope
-	envelope := TaskEnvelope{
-		ID:         taskPayload.ID,
-		Type:       taskPayload.Type,
-		Payload:    payloadJSON,
-		EnqueuedAt: time.Now(),
-	}
-
-	envelopeJSON, err := json.Marshal(envelope)
-	if err != nil {
-		return fmt.Errorf("failed to marshal task envelope: %w", err)
-	}
-
-	// Push to Redis queue
-	TaskQueueName := generateScopedQueueName(tenantID, userID, agentID)
-	if err := tq.redis.LPush(TaskQueueName, string(envelopeJSON)); err != nil {
-		return fmt.Errorf("failed to enqueue cognitive check task: %w", err)
-	}
-
-	duration := time.Since(start)
-	log.Printf("INFO: Cognitive check task enqueued - UserID: %s, TaskID: %s, Duration: %v", userID, envelope.ID, duration)
-
-	return nil
-}
-
-// DequeueTask blocks waiting for the next task from the queue.
-func (tq *TaskQueue) DequeueTask(ctx context.Context) (*TaskEnvelope, error) {
-	// Use BRPOP to block and wait for tasks (timeout of 1 second)
-	result, err := tq.redis.BRPop(1*time.Second, TaskQueueName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to dequeue task: %w", err)
-	}
-
-	if len(result) < 2 {
-		return nil, fmt.Errorf("invalid BRPOP result format")
-	}
-
-	// result[0] is queue name, result[1] is the task JSON
-	envelopeJSON := result[1]
-
-	var envelope TaskEnvelope
-	if err := json.Unmarshal([]byte(envelopeJSON), &envelope); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal task envelope: %w", err)
-	}
-
-	return &envelope, nil
-}
-
 // GetQueueStats returns statistics about the task queue
 func (tq *TaskQueue) GetQueueStats(ctx context.Context) (map[string]interface{}, error) {
-	queueLength, err := tq.redis.LLen(TaskQueueName)
+	queueLength, err := tq.redis.LLen(GlobalWorkQueueName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get queue length: %w", err)
 	}
 
 	return map[string]interface{}{
-			"queue_name":   TaskQueueName,
+			"queue_name":   GlobalWorkQueueName,
 			"queue_length": queueLength,
 			"task_timeout": TaskTimeout.String(),
 		},
@@ -164,7 +90,7 @@ func (tq *TaskQueue) GetQueueStats(ctx context.Context) (map[string]interface{},
 }
 
 // MarkTaskResult stores the result of a processed task (for debugging/monitoring)
-func (tq *TaskQueue) MarkTaskResult(ctx context.Context, taskID string, success bool, message string) error {
+func (tq *TaskQueue) MarkTaskResult(ctx context.Context, tenantID, userID, agentID, taskID string, success bool, message string) error {
 	result := map[string]interface{}{
 		"success":      success,
 		"message":      message,
@@ -176,7 +102,7 @@ func (tq *TaskQueue) MarkTaskResult(ctx context.Context, taskID string, success 
 		return fmt.Errorf("failed to marshal task result: %w", err)
 	}
 
-	resultKey := fmt.Sprintf("%s:%s", TaskResultsPrefix, taskID)
+	resultKey := generateScopedTaskResultKey(tenantID, userID, agentID, taskID)
 
 	// Store result with 1 hour expiration
 	if err := tq.redis.SetEX(resultKey, string(resultJSON), time.Hour); err != nil {

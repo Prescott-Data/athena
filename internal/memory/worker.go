@@ -52,22 +52,46 @@ func (w *Worker) Start(ctx context.Context, workerID int) {
 
 // processNextTask fetches and processes the next task from the queue
 func (w *Worker) processNextTask(ctx context.Context, workerID int) error {
-	task, err := w.taskQueue.DequeueTask(ctx)
+	// Step 1: Block and wait for a scoped queue name from the global work queue
+	result, err := w.redis.BRPop(1*time.Second, GlobalWorkQueueName)
 	if err != nil {
 		if err == redis.Nil {
 			// No tasks in the queue, wait a bit
 			time.Sleep(1 * time.Second)
 			return nil
 		}
-		return fmt.Errorf("failed to dequeue task: %w", err)
+		return fmt.Errorf("failed to dequeue from global work queue: %w", err)
+	}
+
+	if len(result) < 2 {
+		return fmt.Errorf("invalid BRPOP result from global work queue")
+	}
+
+	scopedQueueName := result[1]
+
+	// Step 2: Pop the actual task from the scoped queue
+	envelopeJSON, err := w.redis.RPop(scopedQueueName)
+	if err != nil {
+		if err == redis.Nil {
+			// This might happen in a race condition, it's not a fatal error
+			log.Printf("WARN: Worker %d found empty scoped queue: %s", workerID, scopedQueueName)
+			return nil
+		}
+		return fmt.Errorf("failed to dequeue from scoped queue %s: %w", scopedQueueName, err)
+	}
+
+	var task TaskEnvelope
+	if err := json.Unmarshal([]byte(envelopeJSON), &task); err != nil {
+		return fmt.Errorf("failed to unmarshal task envelope: %w", err)
 	}
 
 	startTime := time.Now()
 
 	var processingErr error
+	var payload models.CognitiveChainCheckTask
+
 	switch task.Type {
 	case TaskTypeCognitiveChainCheck:
-		var payload models.CognitiveChainCheckTask
 		if err := json.Unmarshal(task.Payload, &payload); err != nil {
 			processingErr = fmt.Errorf("failed to unmarshal task payload: %w", err)
 		} else {
@@ -82,12 +106,12 @@ func (w *Worker) processNextTask(ctx context.Context, workerID int) error {
 	if processingErr != nil {
 		log.Printf("Worker %d task %s failed after %v: %v", workerID, task.ID, duration, processingErr)
 		// Optionally mark the task as failed in the queue
-		w.taskQueue.MarkTaskResult(ctx, task.ID, false, processingErr.Error())
+		w.taskQueue.MarkTaskResult(ctx, payload.TenantID, payload.UserID, payload.AgentID, task.ID, false, processingErr.Error())
 		return processingErr
 	}
 
 	log.Printf("Worker %d task %s completed successfully in %v", workerID, task.ID, duration)
-	w.taskQueue.MarkTaskResult(ctx, task.ID, true, "success")
+	w.taskQueue.MarkTaskResult(ctx, payload.TenantID, payload.UserID, payload.AgentID, task.ID, true, "success")
 	return nil
 }
 
@@ -206,3 +230,4 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 
 	return nil
 }
+
