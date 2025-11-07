@@ -11,32 +11,18 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-// MockTaskQueue is a mock implementation of the TaskQueue for testing
-type MockTaskQueue struct {
+// MockTaskQueuer is a mock implementation of the TaskQueuer for testing
+type MockTaskQueuer struct {
 	mock.Mock
 }
 
-func (m *MockTaskQueue) EnqueueCognitiveCheckTask(ctx context.Context, tenantID, userID, agentID string) error {
-	args := m.Called(ctx, tenantID, userID, agentID)
-	return args.Error(0)
-}
-
-func (m *MockTaskQueue) GetQueueStats(ctx context.Context) (map[string]interface{}, error) {
+func (m *MockTaskQueuer) GetQueueStats(ctx context.Context) (map[string]interface{}, error) {
 	args := m.Called(ctx)
 	return args.Get(0).(map[string]interface{}), args.Error(1)
 }
 
-func (m *MockTaskQueue) DequeueTask(ctx context.Context) (*TaskEnvelope, error) {
-	args := m.Called(ctx)
-	// Handle potential nil return for error cases
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*TaskEnvelope), args.Error(1)
-}
-
-func (m *MockTaskQueue) MarkTaskResult(ctx context.Context, taskID string, success bool, result string) error {
-	args := m.Called(ctx, taskID, success, result)
+func (m *MockTaskQueuer) MarkTaskResult(ctx context.Context, tenantID, userID, agentID, taskID string, success bool, result string) error {
+	args := m.Called(ctx, tenantID, userID, agentID, taskID, success, result)
 	return args.Error(0)
 }
 
@@ -64,16 +50,12 @@ func (m *MockSTMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID
 }
 
 // Test Helpers
-func setupWorkerTest() (*Worker, *MockTaskQueue, *MockSTMStore, *MockRedis) {
-	mockTaskQueue := new(MockTaskQueue)
+func setupWorkerTest() (*Worker, *MockTaskQueuer, *MockSTMStore, *MockRedis) {
+	mockTaskQueue := new(MockTaskQueuer)
 	mockSTMStore := new(MockSTMStore)
 	mockRedis := new(MockRedis)
 
-	worker := &Worker{
-		taskQueue: mockTaskQueue,
-		stmStore:  mockSTMStore,
-		redis:     mockRedis,
-	}
+	worker := NewWorker(mockTaskQueue, mockSTMStore, mockRedis)
 
 	return worker, mockTaskQueue, mockSTMStore, mockRedis
 }
@@ -82,22 +64,27 @@ func Test_ProcessNextTask_DispatchesCorrectly(t *testing.T) {
 	worker, mockTaskQueue, _, mockRedis := setupWorkerTest()
 	ctx := context.Background()
 
-	taskPayload := models.CognitiveChainCheckTask{ID: "test-task"}
+	taskPayload := models.CognitiveChainCheckTask{ID: "test-task", TenantID: "test-tenant", UserID: "test-user", AgentID: "test-agent"}
 	payloadJSON, _ := json.Marshal(taskPayload)
 	envelope := &TaskEnvelope{
 		ID:      "test-task",
 		Type:    TaskTypeCognitiveChainCheck,
 		Payload: payloadJSON,
 	}
+	envelopeJSON, _ := json.Marshal(envelope)
 
-	mockTaskQueue.On("DequeueTask", mock.Anything).Return(envelope, nil).Once()
-	mockTaskQueue.On("MarkTaskResult", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	scopedQueueName := GenerateScopedQueueName(taskPayload.TenantID, taskPayload.UserID, taskPayload.AgentID)
+
+	mockRedis.On("BRPop", mock.Anything, []string{GlobalWorkQueueName}).Return([]string{GlobalWorkQueueName, scopedQueueName}, nil).Once()
+	mockRedis.On("RPop", scopedQueueName).Return(string(envelopeJSON), nil).Once()
+	mockTaskQueue.On("MarkTaskResult", mock.Anything, taskPayload.TenantID, taskPayload.UserID, taskPayload.AgentID, taskPayload.ID, true, "success").Return(nil)
 	mockRedis.On("LRange", mock.Anything, mock.Anything, mock.Anything).Return([]string{}, nil) // Prevent panic
 
 	err := worker.processNextTask(ctx, 1)
 	assert.NoError(t, err)
 
 	mockTaskQueue.AssertExpectations(t)
+	mockRedis.AssertExpectations(t)
 }
 
 func Test_ProcessCognitiveChainCheck_ChainContinues_HighSim(t *testing.T) {
@@ -156,6 +143,9 @@ func Test_ProcessCognitiveChainCheck_ChainBreaks_LowSim(t *testing.T) {
 }
 
 func Test_ProcessCognitiveChainCheck_GrayArea_LLMFallback_Continues(t *testing.T) {
+	t.Setenv("CHAIN_SIM_HIGH", "0.9")
+	t.Setenv("CHAIN_SIM_LOW", "0.7")
+
 	worker, _, mockSTMStore, mockRedis := setupWorkerTest()
 	ctx := context.Background()
 	task := &models.CognitiveChainCheckTask{UserID: "test-user"}
@@ -183,6 +173,9 @@ func Test_ProcessCognitiveChainCheck_GrayArea_LLMFallback_Continues(t *testing.T
 }
 
 func Test_ProcessCognitiveChainCheck_GrayArea_LLMFallback_Breaks(t *testing.T) {
+	t.Setenv("CHAIN_SIM_HIGH", "0.9")
+	t.Setenv("CHAIN_SIM_LOW", "0.7")
+
 	worker, _, mockSTMStore, mockRedis := setupWorkerTest()
 	ctx := context.Background()
 	task := &models.CognitiveChainCheckTask{UserID: "test-user"}
@@ -199,7 +192,7 @@ func Test_ProcessCognitiveChainCheck_GrayArea_LLMFallback_Breaks(t *testing.T) {
 	mockSTMStore.On("CreateEmbedding", ctx, event2.Content).Return(&models.EmbeddingData{Vector: []float64{0.8, 0.6}}, nil).Once()
 	mockSTMStore.On("CreateEmbedding", ctx, event1.Content).Return(&models.EmbeddingData{Vector: []float64{1, 0}}, nil).Once()
 
-	mockSTMStore.On("analyzeTopicContinuity", ctx, "test-user", event1.Content, event2.Content).Return(false, nil).Once()
+	mockSTMStore.On("analyzeTopicContinuity", ctx, "test-user", event2.Content, event1.Content).Return(false, nil).Once()
 
 	mockRedis.On("LRange", mock.Anything, int64(1), int64(-1)).Return([]string{string(event1JSON)}, nil).Once()
 	mockSTMStore.On("ProcessMTMFormation", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()

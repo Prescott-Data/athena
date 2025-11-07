@@ -20,4 +20,5 @@ type Interface interface {
 	SetEX(key string, value string, expiration time.Duration) error
 	Keys(pattern string) ([]string, error)
 	BRPop(timeout time.Duration, keys ...string) ([]string, error)
+	RPop(key string) (string, error)
 }

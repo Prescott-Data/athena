@@ -211,3 +211,15 @@ func (r *RedisClient) BRPop(timeout time.Duration, keys ...string) ([]string, er
 	}
 	return result, nil
 }
+
+// RPop pops an element from the right of a list
+func (r *RedisClient) RPop(key string) (string, error) {
+	result, err := r.client.RPop(r.ctx, key).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return "", err // Return error for cache miss
+		}
+		return "", err
+	}
+	return result, nil
+}
