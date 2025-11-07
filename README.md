@@ -331,17 +331,34 @@ Let's walk through what happens when a user sends a message:
 4.  To keep the memory from growing indefinitely, the list is trimmed to a maximum size (defined by `StmCacheMaxTurns`) using the `LTRIM` command. This creates a "sliding window" of the most recent conversational turns.
 5.  A Time-To-Live (TTL) is also set on the Redis key, so if a conversation goes inactive for a long period, the memory is automatically cleared.
 
-**Step 2: A Task is Enqueued for Analysis**
+**Step 2: A Task is Enqueued using the "Index Queue" Pattern**
 
-1.  Immediately after the new event is added to the cache, the `EnqueueCognitiveCheckTask` function in `task_queue.go` is called.
-2.  This function creates a new task of type `TaskTypeCognitiveChainCheck`. This task is essentially a lightweight message that tells a worker "Hey, a new event just happened for this user. You should check if the conversation is still on the same topic."
-3.  The task is then pushed onto a Redis list that serves as the task queue.
+  This is where the new, scalable architecture comes into play. Instead of a single global queue, we use a "queue
+  of queues".
 
-**Step 3: The Worker Processes the Task**
+   1. Immediately after the event is cached, the API server (server.go) begins the producer logic.
+   2. It generates a scoped queue name that is unique to the agent (e.g.,
+      'memory_processing_queue:v1:tenant-abc:user-123:agent-xyz').
+   3. It creates a CognitiveChainCheckTask, which tells a worker to analyze the latest interaction for that specific
+      agent.
+   4. Two-Step Enqueue:
+       * Step 2a: The task is pushed onto the agent's private, scoped queue using LPUSH.
+       * Step 2b: The name of that scoped queue is then pushed onto the global work queue (cognitive_work_queue)
+         using 'LPUSH'.
 
-1.  The `Worker` (defined in `worker.go`) is a background process that is always running. Its main job is to wait for new tasks to appear in the queue.
-2.  Using a blocking command (`BRPOP`), a worker pulls the `CognitiveChainCheckTask` from the queue.
-3.  The worker then calls the `processCognitiveChainCheck` function to perform the core analysis.
+  This ensures that tasks for different agents are isolated, preventing a "Noisy Neighbor" scenario where a busy
+  agent could block others.
+
+  **Step 3: The Worker Processes the Task from the Index Queue**
+
+   1. The Worker (worker.go), a constantly running background process, acts as the consumer.
+   2. Two-Step Dequeue:
+       * Step 3a: The worker performs a blocking pop (BRPOP) on the global work queue to get the name of a scoped
+         queue that has work to be done.
+       * Step 3b: The worker then performs a pop (RPop) on that scoped queue name to retrieve the actual
+         CognitiveChainCheckTask.
+   3. Once the task is retrieved, the worker calls the processCognitiveChainCheck function to perform the core
+      analysis.
 
 **Step 4: The "Cosine Gate" - Analyzing Conversational Flow**
 
