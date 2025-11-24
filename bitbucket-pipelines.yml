@@ -8,7 +8,8 @@ definitions:
 
 pipelines:
   branches:
-    main:
+    # DEV BRANCH - Deploy to Azure Container Apps
+    dev:
       - parallel:
           - step:
               name: "Lint Code"
@@ -16,7 +17,7 @@ pipelines:
                 - go fmt ./...
                 - go vet ./...
                 - go mod tidy
-          
+
           - step:
               name: "Run Tests"
               script:
@@ -27,7 +28,7 @@ pipelines:
                 - echo "--- Skipping E2E tests (require infrastructure) ---"
               after-script:
                 - test $? -eq 0 && echo "Tests passed successfully!" || echo "Tests failed!"
-                 
+
       - step:
           name: "Build Binary"
           caches:
@@ -72,7 +73,7 @@ pipelines:
               ACR_NAME="dromos"
               IMAGE_NAME="memory-os"
               IMAGE_TAG="$BITBUCKET_COMMIT"
-              
+
               # EXECUTION
               echo "--- Attempting Azure login via Service Principal Secret ---"
               az login --service-principal -u "$AZURE_APP_ID" -p "$AZURE_CLIENT_SECRET" -t "$AZURE_TENANT_ID" --verbose
@@ -91,8 +92,8 @@ pipelines:
               echo "--- Docker push SUCCEEDED ---"
 
       - step:
-          name: Deploy to Azure Container App
-          deployment: production
+          name: Deploy to Azure Container App (Dev)
+          deployment: development
           image: mcr.microsoft.com/azure-cli
           script:
             - |
@@ -112,7 +113,7 @@ pipelines:
               : "${BITBUCKET_COMMIT:?BITBUCKET_COMMIT is not set.}"
               : "${MONGO_URI:?MONGO_URI is not set in Repository Variables.}"
               : "${REDIS_HOST:?REDIS_HOST is not set in Repository Variables.}"
-              
+
               # Set defaults for all optional variables
               export PORT="${PORT:-8080}"
               export REDIS_DB="${REDIS_DB:-0}"
@@ -209,3 +210,225 @@ pipelines:
                   AI_AGENT_BASE_URL="$AI_AGENT_BASE_URL" \
                 --verbose
               echo "--- Azure Container App update command SUCCEEDED ---"
+
+    # STAGING BRANCH - Deploy to AKS Staging Cluster
+    staging:
+      - parallel:
+          - step:
+              name: "Lint Code"
+              script:
+                - go fmt ./...
+                - go vet ./...
+                - go mod tidy
+
+          - step:
+              name: "Run Tests"
+              script:
+                - echo "--- Running unit tests ---"
+                - go test -v ./pkg/memoryos -timeout=5m
+                - go test -v ./api/middleware -timeout=5m
+                - echo "--- Unit tests completed successfully ---"
+              after-script:
+                - test $? -eq 0 && echo "Tests passed successfully!" || echo "Tests failed!"
+
+      - step:
+          name: "Build Binary"
+          caches:
+            - godeps
+          script:
+            - go mod download
+            - go mod verify
+            - CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o memory-server cmd/memory-server/main.go
+          artifacts:
+            - memory-server
+
+      - step:
+          name: Build and Push Docker Image
+          image: mcr.microsoft.com/azure-cli
+          size: 2x
+          services:
+            - docker
+          caches:
+            - docker
+          script:
+            - |
+              set -eo pipefail
+              trap 'echo "!!! SCRIPT FAILED at line $LINENO !!!"' ERR
+
+              # VALIDATION
+              : "${AZURE_APP_ID:?AZURE_APP_ID is not set}"
+              : "${AZURE_TENANT_ID:?AZURE_TENANT_ID is not set}"
+              : "${AZURE_CLIENT_SECRET:?AZURE_CLIENT_SECRET is not set}"
+              : "${BITBUCKET_COMMIT:?BITBUCKET_COMMIT is not set}"
+
+              # VARIABLES
+              ACR_LOGIN_SERVER="dromos-cxe7ctfaaqaggqhb.azurecr.io"
+              ACR_NAME="dromos"
+              RESOURCE_GROUP="dromos"
+              IMAGE_NAME="memory-os"
+              IMAGE_TAG="$BITBUCKET_COMMIT"
+
+              # Azure login and ACR login
+              az login --service-principal -u "$AZURE_APP_ID" -p "$AZURE_CLIENT_SECRET" -t "$AZURE_TENANT_ID"
+              az acr login --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP"
+
+              # Build and push
+              docker build -t "${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}" .
+              docker push "${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}"
+              echo "--- Image pushed: ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG} ---"
+
+      - step:
+          name: Deploy to AKS Staging
+          deployment: staging
+          image: mcr.microsoft.com/azure-cli
+          script:
+            - |
+              set -eo pipefail
+              trap 'echo "!!! SCRIPT FAILED at line $LINENO !!!"' ERR
+
+              # VALIDATION
+              : "${AZURE_APP_ID:?AZURE_APP_ID is not set}"
+              : "${AZURE_TENANT_ID:?AZURE_TENANT_ID is not set}"
+              : "${AZURE_CLIENT_SECRET:?AZURE_CLIENT_SECRET is not set}"
+              : "${BITBUCKET_COMMIT:?BITBUCKET_COMMIT is not set}"
+
+              # VARIABLES
+              AKS_CLUSTER_NAME="dromos-console-aks-staging"
+              AKS_RESOURCE_GROUP="dromos"
+              ACR_LOGIN_SERVER="dromos-cxe7ctfaaqaggqhb.azurecr.io"
+              IMAGE_NAME="memory-os"
+              IMAGE_TAG="$BITBUCKET_COMMIT"
+              NAMESPACE="dromos-memory-os"
+
+              # Azure login
+              az login --service-principal -u "$AZURE_APP_ID" -p "$AZURE_CLIENT_SECRET" -t "$AZURE_TENANT_ID"
+
+              # Get AKS credentials
+              echo "--- Getting AKS credentials for staging cluster ---"
+              az aks get-credentials --resource-group "$AKS_RESOURCE_GROUP" --name "$AKS_CLUSTER_NAME" --overwrite-existing
+
+              # Install kubectl if not available
+              az aks install-cli 2>/dev/null || true
+
+              # Update deployment image
+              echo "--- Updating memory-os deployment image ---"
+              kubectl set image deployment/memory-os \
+                memory-os="${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}" \
+                -n "$NAMESPACE"
+
+              # Wait for rollout
+              echo "--- Waiting for rollout to complete ---"
+              kubectl rollout status deployment/memory-os -n "$NAMESPACE" --timeout=300s
+
+              echo "--- Deployment to AKS Staging SUCCEEDED ---"
+
+    # MAIN BRANCH - Deploy to AKS Production Cluster
+    main:
+      - parallel:
+          - step:
+              name: "Lint Code"
+              script:
+                - go fmt ./...
+                - go vet ./...
+                - go mod tidy
+
+          - step:
+              name: "Run Tests"
+              script:
+                - echo "--- Running unit tests ---"
+                - go test -v ./pkg/memoryos -timeout=5m
+                - go test -v ./api/middleware -timeout=5m
+                - echo "--- Unit tests completed successfully ---"
+              after-script:
+                - test $? -eq 0 && echo "Tests passed successfully!" || echo "Tests failed!"
+
+      - step:
+          name: "Build Binary"
+          caches:
+            - godeps
+          script:
+            - go mod download
+            - go mod verify
+            - CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o memory-server cmd/memory-server/main.go
+          artifacts:
+            - memory-server
+
+      - step:
+          name: Build and Push Docker Image
+          image: mcr.microsoft.com/azure-cli
+          size: 2x
+          services:
+            - docker
+          caches:
+            - docker
+          script:
+            - |
+              set -eo pipefail
+              trap 'echo "!!! SCRIPT FAILED at line $LINENO !!!"' ERR
+
+              # VALIDATION
+              : "${AZURE_APP_ID:?AZURE_APP_ID is not set}"
+              : "${AZURE_TENANT_ID:?AZURE_TENANT_ID is not set}"
+              : "${AZURE_CLIENT_SECRET:?AZURE_CLIENT_SECRET is not set}"
+              : "${BITBUCKET_COMMIT:?BITBUCKET_COMMIT is not set}"
+
+              # VARIABLES
+              ACR_LOGIN_SERVER="dromos-cxe7ctfaaqaggqhb.azurecr.io"
+              ACR_NAME="dromos"
+              RESOURCE_GROUP="dromos"
+              IMAGE_NAME="memory-os"
+              IMAGE_TAG="$BITBUCKET_COMMIT"
+
+              # Azure login and ACR login
+              az login --service-principal -u "$AZURE_APP_ID" -p "$AZURE_CLIENT_SECRET" -t "$AZURE_TENANT_ID"
+              az acr login --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP"
+
+              # Build and push
+              docker build -t "${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}" .
+              docker push "${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}"
+              echo "--- Image pushed: ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG} ---"
+
+      - step:
+          name: Deploy to AKS Production
+          deployment: production
+          image: mcr.microsoft.com/azure-cli
+          script:
+            - |
+              set -eo pipefail
+              trap 'echo "!!! SCRIPT FAILED at line $LINENO !!!"' ERR
+
+              # VALIDATION
+              : "${AZURE_APP_ID:?AZURE_APP_ID is not set}"
+              : "${AZURE_TENANT_ID:?AZURE_TENANT_ID is not set}"
+              : "${AZURE_CLIENT_SECRET:?AZURE_CLIENT_SECRET is not set}"
+              : "${BITBUCKET_COMMIT:?BITBUCKET_COMMIT is not set}"
+
+              # VARIABLES
+              AKS_CLUSTER_NAME="dromos-console-aks-prod"
+              AKS_RESOURCE_GROUP="dromos"
+              ACR_LOGIN_SERVER="dromos-cxe7ctfaaqaggqhb.azurecr.io"
+              IMAGE_NAME="memory-os"
+              IMAGE_TAG="$BITBUCKET_COMMIT"
+              NAMESPACE="dromos-memory-os"
+
+              # Azure login
+              az login --service-principal -u "$AZURE_APP_ID" -p "$AZURE_CLIENT_SECRET" -t "$AZURE_TENANT_ID"
+
+              # Get AKS credentials
+              echo "--- Getting AKS credentials for production cluster ---"
+              az aks get-credentials --resource-group "$AKS_RESOURCE_GROUP" --name "$AKS_CLUSTER_NAME" --overwrite-existing
+
+              # Install kubectl if not available
+              az aks install-cli 2>/dev/null || true
+
+              # Update deployment image
+              echo "--- Updating memory-os deployment image ---"
+              kubectl set image deployment/memory-os \
+                memory-os="${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}" \
+                -n "$NAMESPACE"
+
+              # Wait for rollout
+              echo "--- Waiting for rollout to complete ---"
+              kubectl rollout status deployment/memory-os -n "$NAMESPACE" --timeout=300s
+
+              echo "--- Deployment to AKS Production SUCCEEDED ---"
