@@ -9,6 +9,7 @@ import (
 	"bitbucket.org/dromos/memory-os/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 // MockTaskQueuer is a mock implementation of the TaskQueuer for testing
@@ -47,6 +48,19 @@ func (m *MockSTMStore) analyzeTopicContinuity(ctx context.Context, userID, previ
 func (m *MockSTMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, agentID string, events []models.CognitiveEvent) error {
 	args := m.Called(ctx, tenantID, userID, agentID, events)
 	return args.Error(0)
+}
+
+func (m *MockSTMStore) StoreCognitiveEvent(ctx context.Context, event *models.CognitiveEvent) (primitive.ObjectID, error) {
+	args := m.Called(ctx, event)
+	return args.Get(0).(primitive.ObjectID), args.Error(1)
+}
+
+func (m *MockSTMStore) SearchSimilarChains(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int) ([]*models.CognitiveChain, error) {
+	args := m.Called(ctx, tenantID, userID, agentID, queryVector, limit)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*models.CognitiveChain), args.Error(1)
 }
 
 // Test Helpers

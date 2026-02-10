@@ -6,8 +6,6 @@ import (
 	"time"
 
 	"bitbucket.org/dromos/memory-os/internal/models"
-
-	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 func TestHeatScorer_calculateAccessFrequency(t *testing.T) {
@@ -15,21 +13,21 @@ func TestHeatScorer_calculateAccessFrequency(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		segment     *models.Segment
+		chain       *models.CognitiveChain
 		expected    float64
 		description string
 	}{
 		{
 			name: "no access",
-			segment: &models.Segment{
+			chain: &models.CognitiveChain{
 				AccessCount: 0,
 			},
 			expected:    0.0,
-			description: "Segment with no access should have 0 frequency score",
+			description: "Chain with no access should have 0 frequency score",
 		},
 		{
 			name: "single access",
-			segment: &models.Segment{
+			chain: &models.CognitiveChain{
 				AccessCount: 1,
 			},
 			expected:    0.693147, // log(1 + 1) ≈ 0.693
@@ -37,7 +35,7 @@ func TestHeatScorer_calculateAccessFrequency(t *testing.T) {
 		},
 		{
 			name: "multiple accesses",
-			segment: &models.Segment{
+			chain: &models.CognitiveChain{
 				AccessCount: 9, // log(10) ≈ 2.303
 			},
 			expected:    2.302585,
@@ -47,7 +45,7 @@ func TestHeatScorer_calculateAccessFrequency(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := scorer.calculateAccessFrequency(tt.segment)
+			result := scorer.calculateAccessFrequency(tt.chain)
 			if absFloat(result-tt.expected) > 0.001 { // Allow small floating point differences
 				t.Errorf("calculateAccessFrequency() = %v, want %v", result, tt.expected)
 			}
@@ -57,44 +55,42 @@ func TestHeatScorer_calculateAccessFrequency(t *testing.T) {
 
 func TestHeatScorer_calculateInteractionDepth(t *testing.T) {
 	scorer := &HeatScorer{}
-	ctx := context.Background()
 
 	tests := []struct {
 		name        string
-		segment     *models.Segment
+		chain       *models.CognitiveChain
 		expected    float64
 		description string
 	}{
 		{
-			name: "no pages",
-			segment: &models.Segment{
-				PageIDs: []primitive.ObjectID{},
+			name: "no events",
+			chain: &models.CognitiveChain{
+				EventCount: 0,
 			},
 			expected:    0.0,
-			description: "Segment with no pages should have 0 depth score",
+			description: "Chain with no events should have 0 depth score",
 		},
 		{
-			name: "single page",
-			segment: &models.Segment{
-				PageIDs: []primitive.ObjectID{primitive.NewObjectID()},
+			name: "single event",
+			chain: &models.CognitiveChain{
+				EventCount: 1,
 			},
 			expected:    0.693147, // log(1 + 1) ≈ 0.693
-			description: "Single page should use logarithmic scaling",
+			description: "Single event should use logarithmic scaling",
 		},
 		{
-			name: "stored interaction size",
-			segment: &models.Segment{
-				PageIDs:         []primitive.ObjectID{primitive.NewObjectID()},
-				InteractionSize: 5,
+			name: "multiple events",
+			chain: &models.CognitiveChain{
+				EventCount: 5,
 			},
 			expected:    1.791759, // log(5 + 1) ≈ 1.792
-			description: "Should use stored interaction size when available",
+			description: "Should use event count for interaction depth",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := scorer.calculateInteractionDepth(ctx, tt.segment)
+			result := scorer.calculateInteractionDepth(tt.chain)
 			if absFloat(result-tt.expected) > 0.001 {
 				t.Errorf("calculateInteractionDepth() = %v, want %v", result, tt.expected)
 			}
@@ -114,45 +110,45 @@ func TestHeatScorer_calculateRecencyScore(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		segment     *models.Segment
+		chain       *models.CognitiveChain
 		currentTime time.Time
 		expected    float64
 		description string
 	}{
 		{
-			name: "just accessed",
-			segment: &models.Segment{
-				CreatedAt:      now,
-				LastAccessTime: &now,
+			name: "just occurred",
+			chain: &models.CognitiveChain{
+				StartedAt:   now,
+				LastEventAt: now,
 			},
 			currentTime: now,
 			expected:    1.0, // e^(-0/24) = 1
-			description: "Just accessed segment should have maximum recency",
+			description: "Just occurred chain should have maximum recency",
 		},
 		{
 			name: "one day old",
-			segment: &models.Segment{
-				CreatedAt:      now.Add(-24 * time.Hour),
-				LastAccessTime: nil, // Will use CreatedAt
+			chain: &models.CognitiveChain{
+				StartedAt: now.Add(-24 * time.Hour),
+				// LastEventAt is zero, will use StartedAt
 			},
 			currentTime: now,
 			expected:    0.367879, // e^(-24/24) = e^(-1) ≈ 0.368
-			description: "One day old segment should have exponential decay",
+			description: "One day old chain should have exponential decay",
 		},
 		{
 			name: "very old",
-			segment: &models.Segment{
-				CreatedAt: now.Add(-200 * time.Hour), // Older than max age
+			chain: &models.CognitiveChain{
+				StartedAt: now.Add(-200 * time.Hour), // Older than max age
 			},
 			currentTime: now,
 			expected:    0.001, // Below max age threshold
-			description: "Very old segment should have minimal recency score",
+			description: "Very old chain should have minimal recency score",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := scorer.calculateRecencyScore(tt.segment, tt.currentTime)
+			result := scorer.calculateRecencyScore(tt.chain, tt.currentTime)
 			if absFloat(result-tt.expected) > 0.001 {
 				t.Errorf("calculateRecencyScore() = %v, want %v", result, tt.expected)
 			}
@@ -162,49 +158,44 @@ func TestHeatScorer_calculateRecencyScore(t *testing.T) {
 
 func TestHeatScorer_calculateUserEngagement(t *testing.T) {
 	scorer := &HeatScorer{}
-	ctx := context.Background()
 
 	tests := []struct {
 		name        string
-		segment     *models.Segment
+		chain       *models.CognitiveChain
 		expected    float64
 		description string
 	}{
 		{
-			name: "no pages",
-			segment: &models.Segment{
-				PageIDs: []primitive.ObjectID{},
+			name: "no events",
+			chain: &models.CognitiveChain{
+				EventCount: 0,
 			},
 			expected:    0.0,
-			description: "Segment with no pages should have 0 engagement",
+			description: "Chain with no events should have 0 engagement",
 		},
 		{
 			name: "simple engagement",
-			segment: &models.Segment{
-				PageIDs:      []primitive.ObjectID{primitive.NewObjectID()},
-				TopicSummary: "Short summary",
+			chain: &models.CognitiveChain{
+				EventCount: 1,
+				Summary:    "Short summary",
 			},
 			expected:    0.22702358, // tanh(log(2)/3) ≈ 0.227
-			description: "Single page with short summary",
+			description: "Single event with short summary",
 		},
 		{
 			name: "high engagement",
-			segment: &models.Segment{
-				PageIDs: []primitive.ObjectID{
-					primitive.NewObjectID(),
-					primitive.NewObjectID(),
-					primitive.NewObjectID(),
-				},
-				TopicSummary: "This is a very long summary that indicates a complex and detailed conversation with multiple exchanges between the user and assistant about various topics",
+			chain: &models.CognitiveChain{
+				EventCount: 3,
+				Summary:    "This is a very long summary that indicates a complex and detailed conversation with multiple exchanges between the user and assistant about various topics",
 			},
 			expected:    0.5038,
-			description: "Multiple pages with long summary should have higher engagement",
+			description: "Multiple events with long summary should have higher engagement",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := scorer.calculateUserEngagement(ctx, tt.segment)
+			result := scorer.calculateUserEngagement(tt.chain)
 			if absFloat(result-tt.expected) > 0.001 {
 				t.Errorf("calculateUserEngagement() = %v, want %v", result, tt.expected)
 			}
@@ -217,30 +208,30 @@ func TestHeatScorer_calculateTopicImportance(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		segment     *models.Segment
+		chain       *models.CognitiveChain
 		expected    float64
 		description string
 	}{
 		{
 			name: "no important keywords",
-			segment: &models.Segment{
-				TopicSummary: "Just a normal conversation about weather",
+			chain: &models.CognitiveChain{
+				Summary: "Just a normal conversation about weather",
 			},
 			expected:    0.462117, // tanh(0.5) ≈ 0.462
 			description: "Normal topic should have default importance",
 		},
 		{
 			name: "urgent topic",
-			segment: &models.Segment{
-				TopicSummary: "Urgent problem that needs immediate help",
+			chain: &models.CognitiveChain{
+				Summary: "Urgent problem that needs immediate help",
 			},
 			expected:    0.66403, // tanh(0.5 + 0.1 * 3) = tanh(0.8) ≈ 0.664
 			description: "Urgent topic should have higher importance",
 		},
 		{
 			name: "multiple important keywords",
-			segment: &models.Segment{
-				TopicSummary: "Critical error causing urgent issue that needs help",
+			chain: &models.CognitiveChain{
+				Summary: "Critical error causing urgent issue that needs help",
 			},
 			expected:    0.76159, // tanh(0.5 + 0.1 * 5) = tanh(1.0) ≈ 0.761
 			description: "Multiple important keywords should boost importance",
@@ -249,7 +240,7 @@ func TestHeatScorer_calculateTopicImportance(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := scorer.calculateTopicImportance(tt.segment)
+			result := scorer.calculateTopicImportance(tt.chain)
 			if absFloat(result-tt.expected) > 0.001 {
 				t.Errorf("calculateTopicImportance() = %v, want %v", result, tt.expected)
 			}
@@ -257,7 +248,7 @@ func TestHeatScorer_calculateTopicImportance(t *testing.T) {
 	}
 }
 
-func TestHeatScorer_ComputeSegmentHeat_Integration(t *testing.T) {
+func TestHeatScorer_ComputeChainHeat_Integration(t *testing.T) {
 	scorer := &HeatScorer{
 		config: HeatScoringConfig{
 			Alpha:           1.0, // Access frequency weight
@@ -273,22 +264,18 @@ func TestHeatScorer_ComputeSegmentHeat_Integration(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
 
-	// Test segment with moderate activity
-	segment := &models.Segment{
-		SegmentID:       "test_segment_1",
-		AccessCount:     5, // Good access frequency
-		InteractionSize: 3, // Moderate interaction depth
-		PageIDs: []primitive.ObjectID{
-			primitive.NewObjectID(),
-			primitive.NewObjectID(),
-			primitive.NewObjectID(),
-		},
-		TopicSummary:   "Discussion about important project deadline",
-		CreatedAt:      now.Add(-12 * time.Hour),                                        // 12 hours ago
+	// Test chain with moderate activity
+	chain := &models.CognitiveChain{
+		ChainID:        "test_chain_1",
+		AccessCount:    5, // Good access frequency
+		EventCount:     3, // Moderate interaction depth
+		Summary:        "Discussion about important project deadline",
+		StartedAt:      now.Add(-12 * time.Hour),                                        // 12 hours ago
+		LastEventAt:    now.Add(-2 * time.Hour),                                         // 2 hours ago
 		LastAccessTime: func() *time.Time { t := now.Add(-2 * time.Hour); return &t }(), // 2 hours ago
 	}
 
-	heatScore, heatFactors, err := scorer.ComputeSegmentHeat(ctx, segment)
+	heatScore, heatFactors, err := scorer.ComputeSegmentHeat(ctx, chain)
 
 	if err != nil {
 		t.Fatalf("ComputeSegmentHeat() error = %v", err)
@@ -323,31 +310,31 @@ func TestHeatScorer_ComputeSegmentHeat_Integration(t *testing.T) {
 		heatFactors.UserEngagement, heatFactors.TopicImportance)
 }
 
-func TestHeatScorer_ComputeSegmentHeat_EdgeCases(t *testing.T) {
+func TestHeatScorer_ComputeChainHeat_EdgeCases(t *testing.T) {
 	scorer := NewHeatScorer(nil) // No database for unit tests
 	ctx := context.Background()
 
 	tests := []struct {
 		name        string
-		segment     *models.Segment
+		chain       *models.CognitiveChain
 		expectError bool
 		description string
 	}{
 		{
-			name: "empty segment",
-			segment: &models.Segment{
-				CreatedAt: time.Now(),
+			name: "empty chain",
+			chain: &models.CognitiveChain{
+				StartedAt: time.Now(),
 			},
 			expectError: false,
-			description: "Empty segment should not cause errors",
+			description: "Empty chain should not cause errors",
 		},
 		{
 			name: "zero access count",
-			segment: &models.Segment{
-				SegmentID:    "test_zero_access",
-				AccessCount:  0,
-				CreatedAt:    time.Now(),
-				TopicSummary: "Test summary",
+			chain: &models.CognitiveChain{
+				ChainID:     "test_zero_access",
+				AccessCount: 0,
+				StartedAt:   time.Now(),
+				Summary:     "Test summary",
 			},
 			expectError: false,
 			description: "Zero access count should be handled gracefully",
@@ -356,7 +343,7 @@ func TestHeatScorer_ComputeSegmentHeat_EdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			heatScore, heatFactors, err := scorer.ComputeSegmentHeat(ctx, tt.segment)
+			heatScore, heatFactors, err := scorer.ComputeSegmentHeat(ctx, tt.chain)
 
 			if tt.expectError && err == nil {
 				t.Errorf("ComputeSegmentHeat() expected error but got none")
@@ -378,6 +365,74 @@ func TestHeatScorer_ComputeSegmentHeat_EdgeCases(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHeatScorer_calculateCognitiveDepth(t *testing.T) {
+	scorer := &HeatScorer{
+		db: nil, // Will test nil database handling
+	}
+	ctx := context.Background()
+
+	tests := []struct {
+		name        string
+		chain       *models.CognitiveChain
+		expected    float64
+		description string
+	}{
+		{
+			name: "nil database returns default",
+			chain: &models.CognitiveChain{
+				ChainID:    "test-chain-1",
+				EventCount: 5,
+			},
+			expected:    0.5,
+			description: "Should return default 0.5 when database is nil",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := scorer.calculateCognitiveDepth(ctx, tt.chain)
+			if absFloat(result-tt.expected) > 0.001 {
+				t.Errorf("calculateCognitiveDepth() = %v, want %v", result, tt.expected)
+			}
+			t.Logf("%s: CognitiveDepth=%.3f", tt.description, result)
+		})
+	}
+}
+
+func TestHeatScorer_ComputeSegmentHeat_WithCognitiveDepth(t *testing.T) {
+	scorer := NewHeatScorer(nil) // Nil DB will use default cognitive depth
+	ctx := context.Background()
+
+	chain := &models.CognitiveChain{
+		ChainID:     "test-chain-cognitive",
+		UserID:      "user1",
+		Summary:     "Complex problem solving with tool usage",
+		AccessCount: 3,
+		EventCount:  5,
+		StartedAt:   time.Now().Add(-1 * time.Hour),
+		LastEventAt: time.Now().Add(-30 * time.Minute),
+	}
+
+	score, factors, err := scorer.ComputeSegmentHeat(ctx, chain)
+	if err != nil {
+		t.Fatalf("ComputeSegmentHeat failed: %v", err)
+	}
+
+	// Verify cognitive depth factor is included
+	if factors.CognitiveDepth == 0.0 {
+		t.Error("CognitiveDepth factor should not be zero")
+	}
+
+	// Cognitive depth should contribute to overall score
+	if score <= 0.0 {
+		t.Errorf("Heat score should be positive, got %.3f", score)
+	}
+
+	t.Logf("Heat Score: %.3f, Factors: AccessFreq=%.3f, Depth=%.3f, Recency=%.3f, Engagement=%.3f, TopicImp=%.3f, CogDepth=%.3f",
+		score, factors.AccessFrequency, factors.InteractionDepth, factors.RecencyScore,
+		factors.UserEngagement, factors.TopicImportance, factors.CognitiveDepth)
 }
 
 // Helper function for floating point comparison
