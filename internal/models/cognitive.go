@@ -28,8 +28,8 @@ type CognitiveEvent struct {
 	AgentID    string                 `json:"agentId" bson:"agentId"`
 	ChainID    string                 `json:"chainId" bson:"chainId"`
 	EventIndex int                    `json:"eventIndex" bson:"eventIndex"`
-	Role       string                 `json:"role"`      // "user", "agent"
-	Type       STMEventType           `json:"type"`      // "message", "thought", "action", "observation"
+	Role       string                 `json:"role"` // "user", "agent"
+	Type       STMEventType           `json:"type"` // "message", "thought", "action", "observation"
 	Content    string                 `json:"content"`
 	Status     string                 `json:"status"` // "in_stm", "archived"
 	Metadata   map[string]interface{} `json:"metadata,omitempty" bson:"metadata,omitempty"`
@@ -45,10 +45,18 @@ type CognitiveChain struct {
 	ChainID     string             `json:"chainId" bson:"chainId"`
 	Topic       string             `json:"topic" bson:"topic"`
 	Summary     string             `json:"summary" bson:"summary"`
+	Entities    []string           `json:"entities" bson:"entities,omitempty"`
 	StartedAt   time.Time          `json:"startedAt" bson:"startedAt"`
 	LastEventAt time.Time          `json:"lastEventAt" bson:"lastEventAt"`
 	EventCount  int                `json:"eventCount" bson:"eventCount"`
 	Status      string             `json:"status" bson:"status"` // "active", "archived"
+	// --- NEW FIELDS FOR HEAT SCORING ---
+	AccessCount     int          `json:"accessCount" bson:"accessCount,omitempty"`
+	InteractionSize int          `json:"interactionSize" bson:"interactionSize,omitempty"`
+	LastAccessTime  *time.Time   `json:"lastAccessTime" bson:"lastAccessTime,omitempty"`
+	HeatScore       float64      `json:"heatScore" bson:"heatScore,omitempty"`
+	HeatFactors     *HeatFactors `json:"heatFactors" bson:"heatFactors,omitempty"`
+	// --- END NEW FIELDS ---
 }
 
 // CognitiveChainCheckTask represents a lightweight task for background processing.
@@ -71,22 +79,4 @@ type EmbeddingData struct {
 	Dimensions  int       `json:"dimensions"`
 	Model       string    `json:"model"`
 	CreatedAt   time.Time `json:"createdAt"`
-}
-
-// DialoguePage is a temporary placeholder for the old data model.
-// It is used to allow legacy MTM/LPM code to compile after the STM refactor.
-// TODO: Refactor all modules using DialoguePage to use CognitiveEvent instead.
-type DialoguePage struct {
-	ID            primitive.ObjectID     `bson:"_id,omitempty"`
-	TenantID      string                 `bson:"tenantId"`
-	UserID        string                 `bson:"userId"`
-	AgentID       string                 `bson:"agentId"`
-	ChainID       string                 `bson:"chainId"`
-	UserMessage   string                 `bson:"userMessage"`
-	AgentResponse string                 `bson:"agentResponse"`
-	TurnIndex     int                    `bson:"turnIndex"`
-	Status        string                 `bson:"status"`
-	Metadata      map[string]interface{} `bson:"metadata,omitempty"`
-	CreatedAt     time.Time              `bson:"createdAt"`
-	UpdatedAt     time.Time              `bson:"updatedAt"`
 }
