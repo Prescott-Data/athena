@@ -126,10 +126,10 @@ func (sm *SessionManager) findRecentCandidates(ctx context.Context, newChain *mo
 
 	cutoffTime := time.Now().Add(-sm.config.MaxChainAge)
 	filter := bson.M{
-		"userid":    newChain.UserID,
+		"userId":    newChain.UserID,
 		"status":    "active",
 		"startedat": bson.M{"$gte": cutoffTime},
-		"chainid":   bson.M{"$ne": newChain.ChainID},
+		"chainId":   bson.M{"$ne": newChain.ChainID},
 	}
 
 	cursor, err := collection.Find(ctx, filter)
@@ -335,8 +335,8 @@ func (sm *SessionManager) mergeChains(ctx context.Context, targetChain *models.C
 	}
 
 	_, err := eventsCollection.UpdateMany(ctx,
-		bson.M{"chainid": newChain.ChainID},
-		bson.M{"$set": bson.M{"chainid": targetChain.ChainID, "updatedAt": now}},
+		bson.M{"chainId": newChain.ChainID},
+		bson.M{"$set": bson.M{"chainId": targetChain.ChainID, "updatedAt": now}},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to re-assign events to target chain: %w", err)
@@ -360,14 +360,14 @@ func (sm *SessionManager) mergeChains(ctx context.Context, targetChain *models.C
 		},
 	}
 
-	filter := bson.M{"chainid": targetChain.ChainID}
+	filter := bson.M{"chainId": targetChain.ChainID}
 	_, err = chainsCollection.UpdateOne(ctx, filter, update)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update target chain: %w", err)
 	}
 
 	// 3. Delete the old, now-merged chain document
-	_, err = chainsCollection.DeleteOne(ctx, bson.M{"chainid": newChain.ChainID})
+	_, err = chainsCollection.DeleteOne(ctx, bson.M{"chainId": newChain.ChainID})
 	if err != nil {
 		log.Printf("WARN: Failed to delete merged chain document %s: %v", newChain.ChainID, err)
 	}
@@ -473,7 +473,7 @@ func (sm *SessionManager) mergeEntities(entities1, entities2 []string) []string 
 func (sm *SessionManager) CleanupOldChains(ctx context.Context, userID string) error {
 	collection := sm.db.Collection(CognitiveChainsCollection)
 
-	filter := bson.M{"userid": userID, "status": "active"}
+	filter := bson.M{"userId": userID, "status": "active"}
 	count, err := collection.CountDocuments(ctx, filter)
 	if err != nil {
 		return fmt.Errorf("failed to count user chains: %w", err)
@@ -501,7 +501,7 @@ func (sm *SessionManager) CleanupOldChains(ctx context.Context, userID string) e
 	}
 
 	if len(chainsToArchive) > 0 {
-		archiveFilter := bson.M{"chainid": bson.M{"$in": chainsToArchive}}
+		archiveFilter := bson.M{"chainId": bson.M{"$in": chainsToArchive}}
 		archiveUpdate := bson.M{"$set": bson.M{"status": "archived", "updatedAt": time.Now()}}
 
 		result, err := collection.UpdateMany(ctx, archiveFilter, archiveUpdate)
