@@ -32,9 +32,17 @@ const (
 	UserIDFieldName = "user_id"
 	// AgentIDFieldName is the agent ID field name
 	AgentIDFieldName = "agent_id"
-	// VectorDimension is the vector dimension (adjust based on your embedding model)
-	VectorDimension = 1536 // Azure OpenAI text-embedding-ada-002 output dimension
+	// DefaultVectorDimension is the default vector dimension for embedding models
+	DefaultVectorDimension = 1536 // Azure OpenAI text-embedding-ada-002 output dimension
 )
+
+// VectorDimension returns the configured vector dimension from env or default.
+// Supports text-embedding-ada-002 (1536) and text-embedding-3-large (3072).
+var VectorDimension = getVectorDimension()
+
+func getVectorDimension() int {
+	return parseIntEnv("MILVUS_VECTOR_DIMENSION", DefaultVectorDimension)
+}
 
 // MilvusClient wraps the Milvus SDK for STM operations
 type MilvusClient struct {
