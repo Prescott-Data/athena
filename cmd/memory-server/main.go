@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	gw "bitbucket.org/dromos/memory-os/api/grpc/gen"
 	"bitbucket.org/dromos/memory-os/api/middleware"
 	"bitbucket.org/dromos/memory-os/internal/config"
+	"bitbucket.org/dromos/memory-os/internal/memory"
 	"bitbucket.org/dromos/memory-os/internal/server"
 )
 
@@ -123,6 +125,42 @@ func main() {
 		}
 	}()
 
+	// Start background worker(s) for cognitive chain processing
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	numWorkers := getEnvInt("MEMORY_OS_NUM_WORKERS", 2)
+	worker := memory.NewWorker(
+		memoryServer.GetTaskQueue(),
+		memoryServer.GetSTMStore(),
+		memoryServer.GetRedisClient(),
+	)
+	for i := 1; i <= numWorkers; i++ {
+		go worker.Start(workerCtx, i)
+	}
+	log.Printf("Started %d background worker(s)", numWorkers)
+
+	// Start promoter scheduler (MTM → LTM promotion)
+	promoterCtx, promoterCancel := context.WithCancel(context.Background())
+	promoterIntervalMin := getEnvInt("MEMORY_OS_PROMOTER_INTERVAL_MIN", 30)
+	promoterThreshold := getEnvFloat("MEMORY_OS_PROMOTER_THRESHOLD", 0.3)
+	mongoDB := memoryServer.GetMongoClient().Database(cfg.Database.MongoDB.Database)
+	promoter := memory.NewPromoter(mongoDB)
+	go func() {
+		ticker := time.NewTicker(time.Duration(promoterIntervalMin) * time.Minute)
+		defer ticker.Stop()
+		log.Printf("Promoter scheduler started (interval: %dm, threshold: %.2f)", promoterIntervalMin, promoterThreshold)
+		for {
+			select {
+			case <-promoterCtx.Done():
+				log.Println("Promoter scheduler stopped")
+				return
+			case <-ticker.C:
+				if err := promoter.RunOnce(promoterCtx, promoterThreshold); err != nil {
+					log.Printf("WARN: Promoter run failed: %v", err)
+				}
+			}
+		}
+	}()
+
 	log.Printf("Memory OS started successfully")
 	log.Printf("HTTP API: http://localhost:%d", cfg.Server.Port)
 	log.Printf("gRPC API: localhost:%d", cfg.Server.GRPCPort)
@@ -134,6 +172,10 @@ func main() {
 	<-quit
 
 	log.Println("Shutting down Memory OS...")
+
+	// Stop background workers and promoter
+	workerCancel()
+	promoterCancel()
 
 	// Graceful shutdown
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -158,6 +200,26 @@ func main() {
 // registerGatewayEndpoints registers the gRPC gateway endpoints
 func registerGatewayEndpoints(ctx context.Context, mux *runtime.ServeMux, grpcEndpoint string, opts []grpc.DialOption) error {
 	return gw.RegisterMemoryServiceHandlerFromEndpoint(ctx, mux, grpcEndpoint, opts)
+}
+
+// getEnvInt reads an integer from env with a default
+func getEnvInt(key string, defaultVal int) int {
+	if v := os.Getenv(key); v != "" {
+		if i, err := strconv.Atoi(v); err == nil {
+			return i
+		}
+	}
+	return defaultVal
+}
+
+// getEnvFloat reads a float from env with a default
+func getEnvFloat(key string, defaultVal float64) float64 {
+	if v := os.Getenv(key); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
+		}
+	}
+	return defaultVal
 }
 
 // corsMiddleware adds CORS headers
