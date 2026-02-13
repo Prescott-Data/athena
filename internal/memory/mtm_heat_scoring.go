@@ -82,8 +82,20 @@ func (h *HeatScorer) ComputeSegmentHeat(ctx context.Context, chain *models.Cogni
 		h.config.Epsilon*topicImportance +
 		h.config.Zeta*cognitiveDepth
 
-	// Normalize using tanh to keep the score in the [0, 1] range
-	normalizedScore := math.Tanh(heatScore)
+	// Normalize by dividing by the theoretical maximum raw score.
+	// This prevents tanh saturation which compressed all scores into [0.86, 1.0].
+	// Max realistic factor values: accessFreq≈4.0, depth≈3.5, recency=1.0,
+	// engagement=1.0, importance=1.0, cognitive=1.0
+	maxRawScore := h.config.Alpha*4.0 +
+		h.config.Beta*3.5 +
+		h.config.Gamma*1.0 +
+		h.config.Delta*1.0 +
+		h.config.Epsilon*1.0 +
+		h.config.Zeta*1.0
+	if maxRawScore <= 0 {
+		maxRawScore = 1.0 // Safety fallback
+	}
+	normalizedScore := math.Min(1.0, heatScore/maxRawScore)
 
 	factors := &models.HeatFactors{
 		AccessFrequency:  accessFrequency,
