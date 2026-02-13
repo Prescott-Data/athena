@@ -78,5 +78,7 @@ MemoryOS
 eval
 
 whitepaper.md
+tests/simulation
+run_simulation_tests.sh
 
-
+memory-server
