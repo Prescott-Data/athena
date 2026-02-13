@@ -118,10 +118,8 @@ func (w *Worker) processNextTask(ctx context.Context, workerID int) error {
 // processCognitiveChainCheck performs the core logic of analyzing the cognitive chain
 func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.CognitiveChainCheckTask) error {
 
-	// Use the correct Redis key generation
-	// This MUST match the key generation logic used in stm_cache.go
-	// (Assuming StmCacheKeyPrefix is available or you import it)
-	key := fmt.Sprintf("stm_cache:user_%s", task.UserID) // Using the key from stm_cache.go
+	// Use the shared key generation function from stm_cache.go
+	key := GenerateSTMKey(task.TenantID, task.UserID, task.AgentID)
 
 	// 1. Get the last two events from the user's STM
 	eventStrings, err := w.redis.LRange(key, 0, 1)

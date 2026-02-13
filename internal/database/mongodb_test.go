@@ -14,10 +14,10 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	// Load the .env.dev file from the project root
-	err := godotenv.Load("/home/dev/projects/dromos-core/memory-os/.env.dev")
+	// Load .env.dev from the project root (two levels up from internal/database/)
+	err := godotenv.Load("../../.env.dev")
 	if err != nil {
-		log.Fatalf("FATAL: Could not find .env.dev file. Make sure you are running tests from the project root. Error: %v", err)
+		log.Fatalf("FATAL: Could not find .env.dev file at project root. Error: %v", err)
 	} else {
 		log.Println("INFO: Loaded .env.dev file for testing")
 	}

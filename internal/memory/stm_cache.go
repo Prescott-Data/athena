@@ -195,13 +195,19 @@ func (s *STMCache) ConvertMessagesToSTMEvents(messages []memmodels.Message) []ST
 	return events
 }
 
-// generateSTMKeyWithScope creates the Redis key for a user's STM cache with tenant/agent scope
-func (s *STMCache) generateSTMKeyWithScope(tenantID, userID, agentID string) string {
+// GenerateSTMKey creates the Redis key for a user's STM cache with tenant/agent scope.
+// This is a package-level function so both STMCache and Worker use the same key format.
+func GenerateSTMKey(tenantID, userID, agentID string) string {
 	StmCacheKeyPrefix := os.Getenv("STM_CACHE_KEY_PREFIX")
 	if StmCacheKeyPrefix == "" {
 		StmCacheKeyPrefix = "stm_cache" // Set default if empty
 	}
 	return fmt.Sprintf("%s:v1:%s:%s:%s:user_%s", StmCacheKeyPrefix, tenantID, userID, agentID, userID)
+}
+
+// generateSTMKeyWithScope delegates to the package-level GenerateSTMKey.
+func (s *STMCache) generateSTMKeyWithScope(tenantID, userID, agentID string) string {
+	return GenerateSTMKey(tenantID, userID, agentID)
 }
 
 // GetCacheStats returns statistics about the STM cache for a user
