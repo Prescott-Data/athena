@@ -18,6 +18,7 @@ import (
 
 	"bitbucket.org/dromos/memory-os/internal/cache"
 	"bitbucket.org/dromos/memory-os/internal/models"
+	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -261,8 +262,12 @@ func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, ag
 		return nil
 	}
 
-	// Note: We assume the 'ChainID' is already set on the events by the worker/caller
+	// Get ChainID from events if set, otherwise generate a new one
 	chainID := events[0].ChainID
+	if chainID == "" {
+		chainID = uuid.New().String()
+		log.Printf("INFO: Generated new ChainID %s for MTM formation", chainID)
+	}
 
 	// Idempotency check: ensure we don't process the same chain twice
 	if !s.acquireProcessingLock(ctx, chainID) {
@@ -311,6 +316,24 @@ func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, ag
 		return nil
 	}
 	log.Printf("INFO: Quality gate passed for chain %s. Score: %.2f", chainID, validationResult.QualityScore)
+
+	// Step 3.5: Persist individual cognitive events to MongoDB
+	eventsCollection := s.db.Collection(CognitiveEventsCollection)
+	eventDocs := make([]interface{}, len(events))
+	for i := range events {
+		events[i].Status = "in_mtm"
+		events[i].EventIndex = i
+		if events[i].ID.IsZero() {
+			events[i].ID = primitive.NewObjectID()
+		}
+		eventDocs[i] = events[i]
+	}
+	if _, err := eventsCollection.InsertMany(ctx, eventDocs); err != nil {
+		log.Printf("WARN: Failed to persist %d cognitive events for chain %s: %v", len(events), chainID, err)
+		// Non-fatal: chain can still be created without individual events
+	} else {
+		log.Printf("INFO: Persisted %d cognitive events for chain %s", len(events), chainID)
+	}
 
 	// Step 4: (Merge/Create)
 	// This function will handle the actual persistence of the Chain and Events
@@ -810,9 +833,9 @@ func (s *STMStore) SearchSimilarChains(ctx context.Context, tenantID, userID, ag
 	// Step B: Fetch the full metadata for those chain IDs from MongoDB
 	collection := s.db.Collection(CognitiveChainsCollection)
 	filter := bson.M{
-		"chainid": bson.M{"$in": chainIDs},
+		"chainId": bson.M{"$in": chainIDs},
 		"status":  "active", // Only consider active chains
-		"userid":  userID,   // Ensure chains belong to the same user
+		"userId":  userID,   // Ensure chains belong to the same user
 	}
 
 	cursor, err := collection.Find(ctx, filter)
