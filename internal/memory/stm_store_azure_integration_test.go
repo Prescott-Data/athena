@@ -36,11 +36,14 @@ func TestAzureEmbedding_Integration(t *testing.T) {
 
 		// Validate no error occurred
 		assert.NoError(err, "CreateEmbedding should not return an error")
-		assert.NotNil(embedding, "Embedding should not be nil")
+		if !assert.NotNil(embedding, "Embedding should not be nil") {
+			return
+		}
 
 		// Validate embedding properties
+		expectedDims := parseIntEnv("EMBEDDING_DIMENSIONS", 3072)
 		assert.NotEmpty(embedding.Vector, "Embedding vector should not be empty")
-		assert.Equal(1536, embedding.Dimensions, "Embedding should have 1536 dimensions")
+		assert.Equal(expectedDims, embedding.Dimensions, "Embedding dimensions should match config")
 		assert.Equal(len(embedding.Vector), embedding.Dimensions, "Vector length should match dimensions")
 		assert.NotEmpty(embedding.Model, "Model should be specified")
 		assert.False(embedding.CreatedAt.IsZero(), "CreatedAt should be set")
@@ -67,8 +70,11 @@ func TestAzureEmbedding_Integration(t *testing.T) {
 
 		// Should still work (OpenAI handles empty input)
 		assert.NoError(err, "CreateEmbedding should handle empty input")
-		assert.NotNil(embedding, "Embedding should not be nil even with empty input")
-		assert.Equal(1536, embedding.Dimensions, "Embedding should still have 1536 dimensions")
+		if !assert.NotNil(embedding, "Embedding should not be nil even with empty input") {
+			return
+		}
+		expectedDims := parseIntEnv("EMBEDDING_DIMENSIONS", 3072)
+		assert.Equal(expectedDims, embedding.Dimensions, "Embedding dimensions should match config")
 	})
 
 	t.Run("CreateEmbedding_LongInput", func(t *testing.T) {
@@ -85,8 +91,11 @@ func TestAzureEmbedding_Integration(t *testing.T) {
 		embedding, err := stmStore.CreateEmbedding(ctx, longText)
 
 		assert.NoError(err, "CreateEmbedding should handle long input")
-		assert.NotNil(embedding, "Embedding should not be nil")
-		assert.Equal(1536, embedding.Dimensions, "Embedding should have 1536 dimensions")
+		if !assert.NotNil(embedding, "Embedding should not be nil") {
+			return
+		}
+		expectedDims := parseIntEnv("EMBEDDING_DIMENSIONS", 3072)
+		assert.Equal(expectedDims, embedding.Dimensions, "Embedding dimensions should match config")
 
 		t.Logf("SUCCESS: Processed long input (%d chars) into embedding", len(longText))
 	})
@@ -108,7 +117,7 @@ func TestGoogleConfiguration_Validation(t *testing.T) {
 			assert.Contains(EmbeddingModelName, "embedding", "EmbeddingModelName should be an embedding model")
 		}
 
-		assert.Equal("1536", EmbeddingDimensions, "EmbeddingDimensions should be 1536")
+		assert.Equal("3072", EmbeddingDimensions, "EmbeddingDimensions should be 3072 for text-embedding-3-large")
 
 		if azureEndpoint == "" {
 			azureEndpoint = "not-configured"
@@ -140,7 +149,9 @@ func TestAzureEmbedding_Performance(t *testing.T) {
 		duration := time.Since(start)
 
 		assert.NoError(err, "CreateEmbedding should succeed")
-		assert.NotNil(embedding, "Embedding should not be nil")
+		if !assert.NotNil(embedding, "Embedding should not be nil") {
+			return
+		}
 
 		// Reasonable latency expectation (adjust based on your requirements)
 		assert.Less(duration, 10*time.Second, "Embedding creation should complete within 10 seconds")
@@ -161,6 +172,10 @@ func createMockSTMStore(t *testing.T) *STMStore {
 		milvus: nil, // Not needed for embedding test
 		llmGuards: &LLMGuardrails{
 			redis: nil, // Not needed for this test
+		},
+		llmConfig: LLMConfig{
+			EmbeddingTimeout: 15 * time.Second,
+			SummaryTimeout:   20 * time.Second,
 		},
 		HTTPClient: &http.Client{},
 	}

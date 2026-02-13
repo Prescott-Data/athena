@@ -2,24 +2,22 @@ package memory
 
 import (
 	"context"
-	"encoding/json"
 	"log"
 	"os"
 	"testing"
 	"time"
 
+	"bitbucket.org/dromos/memory-os/internal/cache"
 	"bitbucket.org/dromos/memory-os/internal/models"
 	"github.com/joho/godotenv"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 )
 
 func TestMain(m *testing.M) {
-	// Explicitly load the .env.dev file from the project root (../)
-	err := godotenv.Load("/home/dev/projects/dromos-core/memory-os/.env.dev")
+	// Load .env.dev from the project root (two levels up from internal/memory/)
+	err := godotenv.Load("../../.env.dev")
 	if err != nil {
-		// This is critical. It stops all tests if the env file is missing.
-		log.Fatalf("FATAL: Could not find .env.dev file. Make sure you are running tests from the project root. Error: %v", err)
+		log.Fatalf("FATAL: Could not find .env.dev file at project root. Error: %v", err)
 	} else {
 		log.Println("INFO: Loaded .env.dev file for testing")
 	}
@@ -28,20 +26,49 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// Test Helpers
-func setupSTMCacheTest() (*STMCache, *MockRedis) {
-	mockRedis := new(MockRedis)
-	stmCache := NewSTMCache(mockRedis)
-	return stmCache, mockRedis
+// setupRealSTMCache creates an STMCache backed by real Redis.
+// Returns the cache and a cleanup function that clears the test key.
+func setupRealSTMCache(t *testing.T, tenantID, userID, agentID string) *STMCache {
+	t.Helper()
+
+	redisClient, err := setupRedisTestClient()
+	if err != nil {
+		t.Skipf("Skipping: real Redis not available: %v", err)
+	}
+
+	stmCache := NewSTMCache(redisClient)
+
+	// Clean up before and after the test
+	ctx := context.Background()
+	_ = stmCache.ClearSTMContext(ctx, tenantID, userID, agentID)
+
+	t.Cleanup(func() {
+		_ = stmCache.ClearSTMContext(ctx, tenantID, userID, agentID)
+		redisClient.Close()
+	})
+
+	return stmCache
+}
+
+// setupRedisTestClient creates a new Redis client for testing.
+// This is shared by all integration tests in this package.
+func setupRedisTestClient() (cache.Interface, error) {
+	client, err := cache.NewRedisClient()
+	if err != nil {
+		return nil, err
+	}
+	if err := client.Health(); err != nil {
+		return nil, err
+	}
+	return client, nil
 }
 
 func TestSTMCache_AddAndRetrieveSTMEvent(t *testing.T) {
-	stmCache, mockRedis := setupSTMCacheTest()
-	ctx := context.Background()
 	tenantID := "test-tenant"
-	userID := "test-user-123"
+	userID := "test-user-add-retrieve"
 	agentID := "test-agent"
-	cacheKey := stmCache.generateSTMKeyWithScope(tenantID, userID, agentID)
+	stmCache := setupRealSTMCache(t, tenantID, userID, agentID)
+	ctx := context.Background()
 
 	// 1. Add a user event
 	userEvent := STMEvent{
@@ -50,12 +77,6 @@ func TestSTMCache_AddAndRetrieveSTMEvent(t *testing.T) {
 		Content:   "Hello, world!",
 		Timestamp: time.Now().UTC(),
 	}
-	userEventJSON, _ := json.Marshal(userEvent)
-
-	mockRedis.On("LPush", cacheKey, []interface{}{string(userEventJSON)}).Return(nil).Once()
-	mockRedis.On("LTrim", cacheKey, int64(0), int64(10-1)).Return(nil).Once()
-	mockRedis.On("Expire", cacheKey, time.Duration(2)*time.Hour).Return(nil).Once()
-
 	err := stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, userEvent)
 	assert.NoError(t, err)
 
@@ -66,124 +87,119 @@ func TestSTMCache_AddAndRetrieveSTMEvent(t *testing.T) {
 		Content:   "Hi there!",
 		Timestamp: time.Now().UTC(),
 	}
-	agentEventJSON, _ := json.Marshal(agentEvent)
-
-	mockRedis.On("LPush", cacheKey, []interface{}{string(agentEventJSON)}).Return(nil).Once()
-	mockRedis.On("LTrim", cacheKey, int64(0), int64(10-1)).Return(nil).Once()
-	mockRedis.On("Expire", cacheKey, time.Duration(2)*time.Hour).Return(nil).Once()
-
 	err = stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, agentEvent)
 	assert.NoError(t, err)
 
 	// 3. Retrieve the context
-	expectedRawEvents := []string{string(agentEventJSON), string(userEventJSON)}
-	mockRedis.On("LRange", cacheKey, int64(0), int64(10-1)).Return(expectedRawEvents, nil).Once()
-
 	events, err := stmCache.GetSTMContext(ctx, tenantID, userID, agentID)
 	assert.NoError(t, err)
 	assert.Len(t, events, 2)
 
-	// Note: LIFO order, so agent event is first
+	// LIFO order: agent event (newest) is first
 	assert.Equal(t, agentEvent.Content, events[0].Content)
+	assert.Equal(t, "agent", events[0].Role)
 	assert.Equal(t, userEvent.Content, events[1].Content)
-
-	mockRedis.AssertExpectations(t)
+	assert.Equal(t, "user", events[1].Role)
 }
 
 func TestSTMCache_Trim(t *testing.T) {
-	stmCache, mockRedis := setupSTMCacheTest()
-	ctx := context.Background()
 	tenantID := "test-tenant"
 	userID := "test-user-trim"
 	agentID := "test-agent"
-	cacheKey := stmCache.generateSTMKeyWithScope(tenantID, userID, agentID)
+	stmCache := setupRealSTMCache(t, tenantID, userID, agentID)
+	ctx := context.Background()
 
-	// --- THIS IS THE FIX ---
-	// Temporarily set the environment variable *for this test only*.
-	// This ensures that parseIntEnv() in the *real code* will read "2".
+	// Set max turns to 2 so the oldest event gets trimmed
 	t.Setenv("STM_CACHE_MAX_TURNS", "2")
 
-	// Now we can set our expected max turns to 2
-	expectedMaxTurns := int64(2)
-	// --- END OF FIX ---
+	// Add 3 events — Redis LPUSH + LTRIM(0,1) keeps only the 2 newest
+	event1 := STMEvent{Role: "user", Type: models.STMEventTypeMessage, Content: "1", Timestamp: time.Now().UTC()}
+	event2 := STMEvent{Role: "agent", Type: models.STMEventTypeMessage, Content: "2", Timestamp: time.Now().UTC()}
+	event3 := STMEvent{Role: "user", Type: models.STMEventTypeMessage, Content: "3", Timestamp: time.Now().UTC()}
 
-	// Add 3 events, expecting the oldest to be trimmed
-	event1 := STMEvent{Role: "user", Type: models.STMEventTypeMessage, Content: "1"}
-	event2 := STMEvent{Role: "agent", Type: models.STMEventTypeMessage, Content: "2"}
-	event3 := STMEvent{Role: "user", Type: models.STMEventTypeMessage, Content: "3"}
+	assert.NoError(t, stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, event1))
+	assert.NoError(t, stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, event2))
+	assert.NoError(t, stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, event3))
 
-	event2JSON, _ := json.Marshal(event2)
-	event3JSON, _ := json.Marshal(event3)
-
-	// Mock calls for all 3 additions
-	mockRedis.On("LPush", cacheKey, mock.Anything).Return(nil)
-	// The mock now correctly expects LTrim(..., 0, 1) because the code will read "2"
-	mockRedis.On("LTrim", cacheKey, int64(0), expectedMaxTurns-1).Return(nil)
-	mockRedis.On("Expire", cacheKey, time.Duration(2)*time.Hour).Return(nil)
-
-	stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, event1)
-	stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, event2)
-	stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, event3)
-
-	// Now, mock the retrieval
-	expectedRawEvents := []string{string(event3JSON), string(event2JSON)}
-	// The mock now correctly expects LRange(..., 0, 1)
-	mockRedis.On("LRange", cacheKey, int64(0), expectedMaxTurns-1).Return(expectedRawEvents, nil).Once()
-
+	// Should only return 2 most recent events
 	events, err := stmCache.GetSTMContext(ctx, tenantID, userID, agentID)
 	assert.NoError(t, err)
 	assert.Len(t, events, 2)
 	assert.Equal(t, "3", events[0].Content) // Newest
 	assert.Equal(t, "2", events[1].Content) // Second newest
-
-	mockRedis.AssertExpectations(t)
 }
 
 func TestSTMCache_EmptyContext(t *testing.T) {
-	stmCache, mockRedis := setupSTMCacheTest()
-	ctx := context.Background()
 	tenantID := "test-tenant"
 	userID := "test-user-empty"
 	agentID := "test-agent"
-	cacheKey := stmCache.generateSTMKeyWithScope(tenantID, userID, agentID)
+	stmCache := setupRealSTMCache(t, tenantID, userID, agentID)
+	ctx := context.Background()
 
-	mockRedis.On("LRange", cacheKey, int64(0), int64(10-1)).Return([]string{}, nil).Once()
-
+	// Retrieve context for a user with no events
 	events, err := stmCache.GetSTMContext(ctx, tenantID, userID, agentID)
 	assert.NoError(t, err)
 	assert.Len(t, events, 0)
-
-	mockRedis.AssertExpectations(t)
 }
 
 func TestSTMCache_UpdateSTMEntries(t *testing.T) {
-	stmCache, mockRedis := setupSTMCacheTest()
-	ctx := context.Background()
 	tenantID := "test-tenant"
 	userID := "test-user-update"
 	agentID := "test-agent"
-	cacheKey := stmCache.generateSTMKeyWithScope(tenantID, userID, agentID)
+	stmCache := setupRealSTMCache(t, tenantID, userID, agentID)
+	ctx := context.Background()
 
+	// First, add some initial events
+	initialEvent := STMEvent{Role: "user", Type: models.STMEventTypeMessage, Content: "initial", Timestamp: time.Now().UTC()}
+	assert.NoError(t, stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, initialEvent))
+
+	// Now replace with a completely new set of events via UpdateSTMEntries
 	eventsToUpdate := []STMEvent{
-		{Role: "user", Type: models.STMEventTypeMessage, Content: "older"},
-		{Role: "agent", Type: models.STMEventTypeMessage, Content: "newer"},
+		{Role: "user", Type: models.STMEventTypeMessage, Content: "older", Timestamp: time.Now().Add(-1 * time.Minute).UTC()},
+		{Role: "agent", Type: models.STMEventTypeMessage, Content: "newer", Timestamp: time.Now().UTC()},
 	}
-
-	// Mock the delete call
-	mockRedis.On("Delete", cacheKey).Return(nil).Once()
-
-	// Mock the LPush calls (in reverse order)
-	newerJSON, _ := json.Marshal(eventsToUpdate[1])
-	olderJSON, _ := json.Marshal(eventsToUpdate[0])
-	mockRedis.On("LPush", cacheKey, []interface{}{string(newerJSON)}).Return(nil).Once()
-	mockRedis.On("LPush", cacheKey, []interface{}{string(olderJSON)}).Return(nil).Once()
-
-	// Mock the final trim and expire
-	mockRedis.On("LTrim", cacheKey, int64(0), int64(10-1)).Return(nil).Once()
-	mockRedis.On("Expire", cacheKey, time.Duration(2)*time.Hour).Return(nil).Once()
 
 	err := stmCache.UpdateSTMEntries(ctx, tenantID, userID, agentID, eventsToUpdate)
 	assert.NoError(t, err)
 
-	mockRedis.AssertExpectations(t)
+	// Verify the cache now contains exactly the updated events in correct order
+	events, err := stmCache.GetSTMContext(ctx, tenantID, userID, agentID)
+	assert.NoError(t, err)
+	assert.Len(t, events, 2)
+
+	// UpdateSTMEntries pushes in reverse order via LPUSH, so newest ends up first
+	assert.Equal(t, "older", events[0].Content)
+	assert.Equal(t, "newer", events[1].Content)
+}
+
+func TestSTMCache_KeyScoping(t *testing.T) {
+	ctx := context.Background()
+	tenantA := "tenant-a"
+	tenantB := "tenant-b"
+	userID := "same-user"
+	agentID := "same-agent"
+
+	// Create two caches for different tenants (sharing the same Redis)
+	stmCacheA := setupRealSTMCache(t, tenantA, userID, agentID)
+	stmCacheB := setupRealSTMCache(t, tenantB, userID, agentID)
+
+	// Add an event to tenant A
+	eventA := STMEvent{Role: "user", Type: models.STMEventTypeMessage, Content: "tenant A message", Timestamp: time.Now().UTC()}
+	assert.NoError(t, stmCacheA.AddSTMEvent(ctx, tenantA, userID, agentID, eventA))
+
+	// Add a different event to tenant B
+	eventB := STMEvent{Role: "user", Type: models.STMEventTypeMessage, Content: "tenant B message", Timestamp: time.Now().UTC()}
+	assert.NoError(t, stmCacheB.AddSTMEvent(ctx, tenantB, userID, agentID, eventB))
+
+	// Retrieve tenant A — should only see tenant A's event
+	eventsA, err := stmCacheA.GetSTMContext(ctx, tenantA, userID, agentID)
+	assert.NoError(t, err)
+	assert.Len(t, eventsA, 1)
+	assert.Equal(t, "tenant A message", eventsA[0].Content)
+
+	// Retrieve tenant B — should only see tenant B's event
+	eventsB, err := stmCacheB.GetSTMContext(ctx, tenantB, userID, agentID)
+	assert.NoError(t, err)
+	assert.Len(t, eventsB, 1)
+	assert.Equal(t, "tenant B message", eventsB[0].Content)
 }
