@@ -63,8 +63,10 @@ func (w *Worker) processNextTask(ctx context.Context, workerID int) error {
 		return fmt.Errorf("failed to dequeue from global work queue: %w", err)
 	}
 
-	if len(result) < 2 {
-		return fmt.Errorf("invalid BRPOP result from global work queue")
+	// BRPop returns nil with no error when the queue is empty (timeout)
+	if result == nil || len(result) < 2 {
+		time.Sleep(1 * time.Second)
+		return nil
 	}
 
 	scopedQueueName := result[1]
@@ -121,63 +123,84 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 	// Use the shared key generation function from stm_cache.go
 	key := GenerateSTMKey(task.TenantID, task.UserID, task.AgentID)
 
-	// 1. Get the last two events from the user's STM
-	eventStrings, err := w.redis.LRange(key, 0, 1)
+	// 1. Get recent events from STM — we need enough to find two different user messages.
+	//    LPUSH means index 0 is newest. A StoreInteraction pushes user then agent,
+	//    so events alternate: [agent_new, user_new, agent_prev, user_prev, ...]
+	//    We need to compare the newest user message against the previous user message
+	//    to detect topic changes across interaction boundaries (not within a single turn).
+	eventStrings, err := w.redis.LRange(key, 0, 9) // get up to 10 most recent
 	if err != nil {
 		return fmt.Errorf("failed to get recent events from STM: %w", err)
 	}
 
-	if len(eventStrings) < 2 {
-		log.Printf("Not enough events for chain analysis for user %s. Assuming new chain.", task.UserID)
-		return nil // Not an error, just not enough data to process
+	// Unmarshal all events and find the two most recent user messages
+	type parsedEvent struct {
+		event models.CognitiveEvent
+		index int
+	}
+	var userMessages []parsedEvent
+	var allEvents []models.CognitiveEvent
+
+	for i, eventStr := range eventStrings {
+		var evt models.CognitiveEvent
+		if err := json.Unmarshal([]byte(eventStr), &evt); err != nil {
+			log.Printf("WARNING: Failed to unmarshal event at index %d: %v", i, err)
+			continue
+		}
+		allEvents = append(allEvents, evt)
+		if evt.Role == "user" {
+			userMessages = append(userMessages, parsedEvent{event: evt, index: i})
+		}
 	}
 
-	// 2. Unmarshal events
-	var event1, event2 models.CognitiveEvent
-	if err := json.Unmarshal([]byte(eventStrings[0]), &event1); err != nil {
-		return fmt.Errorf("failed to unmarshal event 1: %w", err)
-	}
-	if err := json.Unmarshal([]byte(eventStrings[1]), &event2); err != nil {
-		return fmt.Errorf("failed to unmarshal event 2: %w", err)
+	if len(userMessages) < 2 {
+		log.Printf("Not enough user messages for chain analysis for user %s (found %d). Assuming new chain.", task.UserID, len(userMessages))
+		return nil // Not enough data to compare topics
 	}
 
-	// 3. Get embeddings for the content of the last two events
-	embedding1, err := w.stmStore.CreateEmbedding(ctx, event1.Content)
+	// The newest user message vs the previous user message
+	newestUser := userMessages[0].event
+	previousUser := userMessages[1].event
+
+	log.Printf("Comparing user messages for topic detection: newest='%s' vs previous='%s'",
+		truncateLog(newestUser.Content, 60), truncateLog(previousUser.Content, 60))
+
+	// 3. Get embeddings for the two user messages
+	embeddingNew, err := w.stmStore.CreateEmbedding(ctx, newestUser.Content)
 	if err != nil {
-		return fmt.Errorf("failed to create embedding for event 1: %w", err)
+		return fmt.Errorf("failed to create embedding for newest user message: %w", err)
 	}
-	embedding2, err := w.stmStore.CreateEmbedding(ctx, event2.Content)
+	embeddingPrev, err := w.stmStore.CreateEmbedding(ctx, previousUser.Content)
 	if err != nil {
-		return fmt.Errorf("failed to create embedding for event 2: %w", err)
+		return fmt.Errorf("failed to create embedding for previous user message: %w", err)
 	}
 
-	// 4. Calculate cosine similarity
-	// --- THIS IS THE FIX ---
-	// Read variables inside the function
+	// 4. Calculate cosine similarity between user messages across turns
 	chainSimHigh := parseFloatEnv("CHAIN_SIM_HIGH", 0.72)
 	chainSimLow := parseFloatEnv("CHAIN_SIM_LOW", 0.52)
-	// --- END FIX ---
 
-	similarity, err := cosineSimilarity(embedding1.Vector, embedding2.Vector)
+	similarity, err := cosineSimilarity(embeddingNew.Vector, embeddingPrev.Vector)
 	if err != nil {
 		return fmt.Errorf("failed to calculate cosine similarity: %w", err)
 	}
+
+	log.Printf("Topic similarity between user messages: %.4f (low=%.2f, high=%.2f)", similarity, chainSimLow, chainSimHigh)
 
 	// 5. Decide if the chain continues
 	chainBreak := false
 	if similarity >= chainSimHigh {
 		// Chain continues, do nothing
-		log.Printf("Chain continues for user %s.", task.UserID)
+		log.Printf("Chain continues for user %s (similarity %.4f >= %.2f).", task.UserID, similarity, chainSimHigh)
 		return nil
 	} else if similarity < chainSimLow {
 		// Chain breaks
-		log.Printf("Chain break detected for user %s.", task.UserID)
+		log.Printf("Chain break detected for user %s (similarity %.4f < %.2f).", task.UserID, similarity, chainSimLow)
 		chainBreak = true
 	} else {
 		// Gray area, requires LLM to check for continuity
-		log.Printf("Cosine similarity is in the gray area (%f). Using LLM to check for continuity.", similarity)
+		log.Printf("Cosine similarity is in the gray area (%.4f). Using LLM to check for continuity.", similarity)
 
-		llmContinues, err := w.stmStore.analyzeTopicContinuity(ctx, task.UserID, event1.Content, event2.Content)
+		llmContinues, err := w.stmStore.analyzeTopicContinuity(ctx, task.UserID, previousUser.Content, newestUser.Content)
 		if err != nil {
 			return fmt.Errorf("failed to analyze topic continuity with LLM: %w", err)
 		}
@@ -193,8 +216,16 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 	}
 
 	if chainBreak {
-		// 6. If the chain breaks, get the entire old chain (all but the most recent event)
-		oldChainStrings, err := w.redis.LRange(key, 1, -1)
+		// 6. If the chain breaks, partition events into new topic vs old chain.
+		//    The newest user message (index userMessages[0].index) starts the new topic.
+		//    Everything from the previous user message backwards is the old chain.
+		//    Events between index 0 and the newest user message index might include
+		//    an agent response for the new topic (if it was LPUSHed before the worker ran).
+		newTopicBoundary := userMessages[0].index // index of newest user message in allEvents
+		keepCount := newTopicBoundary + 1         // how many events to keep (new topic)
+
+		// Old chain = everything after the new topic boundary, in chronological order
+		oldChainStrings, err := w.redis.LRange(key, int64(keepCount), -1)
 		if err != nil {
 			return fmt.Errorf("failed to get old chain from STM: %w", err)
 		}
@@ -211,15 +242,16 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 		}
 
 		// 7. Trigger MTM formation
-		log.Printf("Processing MTM formation for user %s with %d events.", task.UserID, len(oldChainEvents))
+		log.Printf("Processing MTM formation for user %s with %d events (keeping %d new-topic events).",
+			task.UserID, len(oldChainEvents), keepCount)
 
 		// 8. Implement "Save-Then-Trim" logic
 		if err := w.stmStore.ProcessMTMFormation(ctx, task.TenantID, task.UserID, task.AgentID, oldChainEvents); err != nil {
 			// MTM FAILED! Return the error. DO NOT TRIM.
 			return fmt.Errorf("MTM formation failed: %w", err)
 		} else {
-			// MTM SUCCEEDED! It is now safe to trim the STM.
-			if err := w.redis.LTrim(key, 0, 0); err != nil {
+			// MTM SUCCEEDED! Trim STM to keep only the new topic events.
+			if err := w.redis.LTrim(key, 0, int64(keepCount-1)); err != nil {
 				// The MTM save worked, but the trim failed.
 				log.Printf("WARNING: MTM save succeeded but failed to trim STM for user %s: %v", task.UserID, err)
 			}
@@ -227,5 +259,13 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 	}
 
 	return nil
+}
+
+// truncateLog truncates a string for log output
+func truncateLog(s string, max int) string {
+	if len(s) > max {
+		return s[:max] + "..."
+	}
+	return s
 }
 
