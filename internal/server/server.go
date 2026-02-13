@@ -94,6 +94,26 @@ func (s *MemoryServer) GetConfig() *config.Config {
 	return s.config
 }
 
+// GetSTMStore returns the STM store for worker initialization
+func (s *MemoryServer) GetSTMStore() *memory.STMStore {
+	return s.stmStore
+}
+
+// GetTaskQueue returns the task queue for worker initialization
+func (s *MemoryServer) GetTaskQueue() memory.TaskQueuer {
+	return s.taskQueue
+}
+
+// GetRedisClient returns the Redis client for worker initialization
+func (s *MemoryServer) GetRedisClient() cache.Interface {
+	return s.redisClient
+}
+
+// GetMongoClient returns the MongoDB client
+func (s *MemoryServer) GetMongoClient() *mongo.Client {
+	return s.mongoClient
+}
+
 // StoreInteraction is the main entry point for new events.
 func (s *MemoryServer) StoreInteraction(ctx context.Context, req *gen.StoreInteractionRequest) (*gen.StoreInteractionResponse, error) {
 	sessionID := req.SessionId
@@ -185,7 +205,146 @@ func (s *MemoryServer) getIDsFromSession(ctx context.Context, sessionID string) 
 	return chain.TenantID, chain.UserID, chain.AgentID, nil
 }
 
-// GetContext retrieves the recent conversation context
+// GetContext retrieves the recent conversation context from the STM cache.
 func (s *MemoryServer) GetContext(ctx context.Context, req *gen.GetContextRequest) (*gen.GetContextResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetContext not implemented")
+	sessionID := req.SessionId
+	tenantID, userID, agentID, err := s.getIDsFromSessionFunc(s, ctx, sessionID)
+	if err != nil {
+		return nil, status.Errorf(codes.NotFound, "session not found or invalid: %v", err)
+	}
+
+	limit := int(req.Limit)
+	if limit <= 0 {
+		limit = 10
+	}
+
+	// Retrieve STM events from cache
+	stmCache := memory.NewSTMCache(s.redisClient)
+	events, err := stmCache.GetSTMContext(ctx, tenantID, userID, agentID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to retrieve STM context: %v", err)
+	}
+
+	// STM events are stored individually (user, agent, user, agent...) via LPUSH (newest first).
+	// We pair them into ConversationTurns: each user message + following agent response = 1 turn.
+	// Events are in reverse chronological order (newest first), so we reverse to get chronological.
+	var turns []*gen.ConversationTurn
+	// Walk events in reverse (oldest first) and pair user+agent
+	for i := len(events) - 1; i >= 0; i-- {
+		event := events[i]
+		if event.Role == "user" {
+			turn := &gen.ConversationTurn{
+				UserMessage: event.Content,
+			}
+			// Look for a following agent response
+			if i-1 >= 0 && events[i-1].Role == "agent" {
+				turn.AgentResponse = events[i-1].Content
+				i-- // Skip the agent event
+			}
+			turns = append(turns, turn)
+		}
+	}
+
+	// Apply limit
+	if len(turns) > limit {
+		// Return most recent turns
+		turns = turns[len(turns)-limit:]
+	}
+
+	log.Printf("INFO: GetContext returned %d turns for session %s", len(turns), sessionID)
+
+	return &gen.GetContextResponse{
+		RecentTurns: turns,
+	}, nil
+}
+
+// CreateSession creates a new memory session by inserting a cognitive chain record.
+func (s *MemoryServer) CreateSession(ctx context.Context, req *gen.CreateSessionRequest) (*gen.CreateSessionResponse, error) {
+	tenantID := req.TenantId
+	userID := req.UserId
+	agentID := req.AgentId
+
+	if tenantID == "" || userID == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "tenant_id and user_id are required")
+	}
+	if agentID == "" {
+		agentID = "default"
+	}
+
+	sessionID := uuid.New().String()
+	now := time.Now()
+
+	// Create a cognitive chain record that StoreInteraction can look up
+	chain := models.CognitiveChain{
+		TenantID:    tenantID,
+		UserID:      userID,
+		AgentID:     agentID,
+		ChainID:     sessionID,
+		Topic:       "",
+		Summary:     "",
+		StartedAt:   now,
+		LastEventAt: now,
+		EventCount:  0,
+		Status:      "active",
+	}
+
+	collection := s.mongoClient.Database(s.config.Database.MongoDB.Database).Collection("cognitive_chains")
+	_, err := collection.InsertOne(ctx, chain)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to create session: %v", err)
+	}
+
+	log.Printf("INFO: Created session %s for tenant=%s user=%s agent=%s", sessionID, tenantID, userID, agentID)
+
+	return &gen.CreateSessionResponse{
+		SessionId: sessionID,
+	}, nil
+}
+
+// SearchMemory performs semantic search across MTM cognitive chains.
+func (s *MemoryServer) SearchMemory(ctx context.Context, req *gen.SearchMemoryRequest) (*gen.SearchMemoryResponse, error) {
+	sessionID := req.SessionId
+	tenantID, userID, agentID, err := s.getIDsFromSessionFunc(s, ctx, sessionID)
+	if err != nil {
+		return nil, status.Errorf(codes.NotFound, "session not found or invalid: %v", err)
+	}
+
+	query := req.Query
+	if query == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "query is required")
+	}
+
+	limit := int(req.Limit)
+	if limit <= 0 {
+		limit = 5
+	}
+
+	// Create embedding for the search query
+	queryEmbedding, err := s.stmStore.CreateEmbedding(ctx, query)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to create query embedding: %v", err)
+	}
+
+	// Search for similar chains using the STM store's vector search
+	chains, err := s.stmStore.SearchSimilarChains(ctx, tenantID, userID, agentID, queryEmbedding.Vector, limit)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to search similar chains: %v", err)
+	}
+
+	// Convert to SearchResult protos
+	var results []*gen.SearchResult
+	for _, chain := range chains {
+		result := &gen.SearchResult{
+			Content:    chain.Summary,
+			SourceType: "cognitive_chain",
+			SourceId:   chain.ChainID,
+		}
+		results = append(results, result)
+	}
+
+	log.Printf("INFO: SearchMemory returned %d results for query '%s' in session %s", len(results), query, sessionID)
+
+	return &gen.SearchMemoryResponse{
+		Results: results,
+	}, nil
 }
