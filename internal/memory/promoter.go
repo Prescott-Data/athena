@@ -52,7 +52,7 @@ func (p *Promoter) RunOnce(ctx context.Context, threshold float64) error {
 
 	col := p.db.Collection("cognitive_chains")
 	// In a real scenario, you might filter for chains updated since the last run.
-	cur, err := col.Find(ctx, bson.M{"status": "in_mtm"})
+	cur, err := col.Find(ctx, bson.M{"status": "active", "eventCount": bson.M{"$gt": 0}})
 	if err != nil {
 		return fmt.Errorf("failed to query cognitive_chains: %w", err)
 	}
