@@ -404,15 +404,22 @@ func (s *STMStore) analyzeTopicContinuity(ctx context.Context, userID string, pr
 		return false, fmt.Errorf("llm circuit breaker is open")
 	}
 
-	prompt := fmt.Sprintf(`Analyze whether the following two conversation turns are about the same topic or a continuation of the same conversation.
+	prompt := fmt.Sprintf(`You are a topic boundary detector. Determine if two conversation messages are about the SAME topic or DIFFERENT topics.
 
-Previous turn:
+Rules:
+- "Same topic" means they discuss the same subject, task, or line of inquiry
+- "Different topic" means the user shifted to a new subject, even if loosely related
+- A question about a DIFFERENT technical area (e.g., workflow design → authentication) is a topic change
+- Asking "by the way" or "also" about something new is a topic change
+- Follow-up questions that deepen the SAME subject are NOT a topic change
+
+Previous message:
 %s
 
-New turn:
+New message:
 %s
 
-Respond with only "true" if the conversations are continuous/related or "false" if they represent a topic change or new conversation.`,
+Is the new message about the SAME topic as the previous message? Respond with only "true" or "false".`,
 		previousContent, newContent)
 
 	request := map[string]interface{}{

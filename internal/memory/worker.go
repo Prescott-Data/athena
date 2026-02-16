@@ -158,6 +158,29 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 		return nil // Not enough data to compare topics
 	}
 
+	// Force chain formation if STM has accumulated too many events.
+	// This ensures chains form even for long single-topic conversations
+	// (e.g., automation logs, extended workflow design sessions).
+	maxSTMEvents := parseIntEnv("STM_MAX_EVENTS_BEFORE_FLUSH", 20)
+	totalSTMCount, _ := w.redis.LLen(key)
+	if totalSTMCount >= int64(maxSTMEvents) {
+		log.Printf("STM event count (%d) exceeds threshold (%d) for user %s. Forcing chain formation.", totalSTMCount, maxSTMEvents, task.UserID)
+		// Treat the oldest half of events as a completed chain
+		splitPoint := len(allEvents) / 2
+		oldChainEvents := make([]models.CognitiveEvent, 0)
+		for i := len(allEvents) - 1; i >= splitPoint; i-- {
+			oldChainEvents = append(oldChainEvents, allEvents[i])
+		}
+		if err := w.stmStore.ProcessMTMFormation(ctx, task.TenantID, task.UserID, task.AgentID, oldChainEvents); err != nil {
+			return fmt.Errorf("forced MTM formation failed: %w", err)
+		}
+		if err := w.redis.LTrim(key, 0, int64(splitPoint-1)); err != nil {
+			log.Printf("WARNING: Failed to trim STM after forced formation: %v", err)
+		}
+		log.Printf("Forced chain formation complete for user %s. Kept %d recent events.", task.UserID, splitPoint)
+		return nil
+	}
+
 	// The newest user message vs the previous user message
 	newestUser := userMessages[0].event
 	previousUser := userMessages[1].event
