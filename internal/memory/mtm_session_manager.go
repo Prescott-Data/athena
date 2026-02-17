@@ -347,16 +347,14 @@ func (sm *SessionManager) mergeChains(ctx context.Context, targetChain *models.C
 
 	// 3. Update the target chain
 	combinedSummary := sm.combineSummaries(targetChain.Summary, newChain.Summary)
-	newInteractionSize := targetChain.InteractionSize + newChain.InteractionSize
 
 	update := bson.M{
 		"$set": bson.M{
-			"summary":         combinedSummary,
-			"interactionSize": newInteractionSize,
-			"eventCount":      targetChain.EventCount + newChain.EventCount,
-			"lastEventAt":     newChain.LastEventAt,
-			"entities":        mergedEntities,
-			"updatedAt":       now,
+			"summary":     combinedSummary,
+			"eventCount":  targetChain.EventCount + newChain.EventCount,
+			"lastEventAt": newChain.LastEventAt,
+			"entities":    mergedEntities,
+			"updatedAt":   now,
 		},
 	}
 
@@ -398,10 +396,10 @@ func (sm *SessionManager) createStandaloneChain(ctx context.Context, chain *mode
 	chainsCollection := sm.db.Collection(CognitiveChainsCollection)
 
 	// Initialize chain with proper values
-	chain.InteractionSize = len(events)
 	chain.EventCount = len(events)
-	chain.AccessCount = 0
-	chain.LastAccessTime = nil
+	chain.RecallStrength = 1.0
+	chain.IntrinsicImportance = 0.5
+	chain.LastAccessedAt = nil
 	chain.HeatScore = 0.0
 	chain.HeatFactors = nil
 	chain.Status = "active"

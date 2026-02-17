@@ -69,7 +69,6 @@ type DatabaseConfig struct {
 	Redis      RedisConfig      `yaml:"redis"`
 	MongoDB    MongoDBConfig    `yaml:"mongodb"`
 	Milvus     MilvusConfig     `yaml:"milvus"`
-	JanusGraph JanusGraphConfig `yaml:"janus_graph"`
 }
 
 // RedisConfig holds Redis configuration
@@ -90,12 +89,6 @@ type MongoDBConfig struct {
 
 // MilvusConfig holds Milvus configuration
 type MilvusConfig struct {
-	Host string `yaml:"host"`
-	Port int    `yaml:"port"`
-}
-
-// JanusGraphConfig holds JanusGraph configuration
-type JanusGraphConfig struct {
 	Host string `yaml:"host"`
 	Port int    `yaml:"port"`
 }
@@ -153,10 +146,6 @@ func LoadConfig() (*Config, error) {
 			Milvus: MilvusConfig{
 				Host: getEnv("MEMORY_OS_MILVUS_HOST", "172.190.152.215"),
 				Port: getEnvInt("MEMORY_OS_MILVUS_PORT", 19530),
-			},
-			JanusGraph: JanusGraphConfig{
-				Host: getEnv("MEMORY_OS_JANUS_HOST", "172.190.152.215"),
-				Port: getEnvInt("MEMORY_OS_JANUS_PORT", 8182),
 			},
 		},
 	}

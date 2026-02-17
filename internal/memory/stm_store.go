@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"bitbucket.org/dromos/memory-os/internal/cache"
+	"bitbucket.org/dromos/memory-os/internal/llm"
 	"bitbucket.org/dromos/memory-os/internal/models"
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/bson"
@@ -196,12 +197,13 @@ type LLMConfig struct {
 
 // STMStore manages the Short-Term Memory store operations
 type STMStore struct {
-	db         *mongo.Database
-	redis      cache.Interface
-	milvus     *MilvusClient
-	llmGuards  *LLMGuardrails
-	llmConfig  LLMConfig
-	HTTPClient *http.Client
+	db          *mongo.Database
+	redis       cache.Interface
+	milvus      *MilvusClient
+	llmGuards   *LLMGuardrails
+	llmConfig   LLMConfig
+	HTTPClient  *http.Client
+	llmProvider llm.Provider
 
 	// MTM Components
 	qualityValidator  *QualityValidator
@@ -232,22 +234,32 @@ func NewSTMStore(database *mongo.Database, redisClient cache.Interface) *STMStor
 		SummaryTimeout:   time.Duration(parseIntEnv("LLM_SUMMARY_TIMEOUT_SEC", 20)) * time.Second,
 	}
 
+	providerType := os.Getenv("LLM_PROVIDER")
+	if providerType == "" {
+		providerType = "azure" // Default to azure for backward compatibility
+	}
+
+	factory := &llm.Factory{}
+	llmProvider, err := factory.NewProvider(providerType)
+	if err != nil {
+		log.Printf("WARN: Failed to initialize LLM provider: %v", err)
+	}
+
 	ss := &STMStore{
-		db:        database,
-		redis:     redisClient,
-		milvus:    milvusClient,
-		llmConfig: llmConfig,
+		db:          database,
+		redis:       redisClient,
+		milvus:      milvusClient,
+		llmConfig:   llmConfig,
 		llmGuards: &LLMGuardrails{
 			redis: redisClient,
 		},
-		HTTPClient: &http.Client{},
+		HTTPClient:  &http.Client{},
+		llmProvider: llmProvider,
 	}
 
 	// Initialize MTM components
 	ss.qualityValidator = NewQualityValidator()
-	// --- FIX: Pass 'ss' (the STMStore) as the second argument ---
-	ss.parallelProcessor = NewParallelProcessor(10, ss) // Default concurrency
-	// --- END FIX ---
+	ss.parallelProcessor = NewParallelProcessor(10, ss)
 	ss.topicAnalyzer = NewTopicAnalyzer(ss, ss.parallelProcessor)
 	ss.sessionManager = NewSessionManager(database, ss)
 
@@ -290,17 +302,19 @@ func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, ag
 
 	// Step 2: (Build Candidate)
 	candidateChain := &models.CognitiveChain{
-		ID:          primitive.NewObjectID(), // Generate a temp ID
-		TenantID:    tenantID,
-		UserID:      userID,
-		AgentID:     agentID,
-		ChainID:     chainID,
-		Topic:       "<placeholder>", // Placeholder, TopicAnalyzer can fill this
-		Summary:     summary,
-		StartedAt:   events[0].CreatedAt,
-		LastEventAt: events[len(events)-1].CreatedAt,
-		EventCount:  len(events),
-		Status:      "pending", // Not yet saved
+		ID:                  primitive.NewObjectID(), // Generate a temp ID
+		TenantID:            tenantID,
+		UserID:              userID,
+		AgentID:             agentID,
+		ChainID:             chainID,
+		Topic:               "<placeholder>", // Placeholder, TopicAnalyzer can fill this
+		Summary:             summary,
+		StartedAt:           events[0].CreatedAt,
+		LastEventAt:         events[len(events)-1].CreatedAt,
+		EventCount:          len(events),
+		Status:              "pending", // Not yet saved
+		RecallStrength:      1.0,       // Initialize Ebbinghaus recall strength
+		IntrinsicImportance: 0.5,       // Default importance until LLM extraction is implemented
 	}
 
 	// Step 3: (Quality Gate)

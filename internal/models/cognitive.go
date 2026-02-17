@@ -51,11 +51,12 @@ type CognitiveChain struct {
 	EventCount  int                `json:"eventCount" bson:"eventCount"`
 	Status      string             `json:"status" bson:"status"` // "active", "archived"
 	// --- NEW FIELDS FOR HEAT SCORING ---
-	AccessCount     int          `json:"accessCount" bson:"accessCount,omitempty"`
-	InteractionSize int          `json:"interactionSize" bson:"interactionSize,omitempty"`
-	LastAccessTime  *time.Time   `json:"lastAccessTime" bson:"lastAccessTime,omitempty"`
-	HeatScore       float64      `json:"heatScore" bson:"heatScore,omitempty"`
-	HeatFactors     *HeatFactors `json:"heatFactors" bson:"heatFactors,omitempty"`
+	IntrinsicImportance float64      `json:"intrinsicImportance" bson:"intrinsicImportance"` // Semantic score from LLM (0.0 - 1.0)
+	RecallStrength      float64      `json:"recallStrength" bson:"recallStrength"`           // Starts at 1.0, grows with recall
+	LastAccessedAt      *time.Time   `json:"lastAccessedAt" bson:"lastAccessedAt,omitempty"` // Timestamp of last recall
+	CognitiveScore      float64      `json:"cognitiveScore" bson:"cognitiveScore"`           // Score for tool usage/reasoning
+	HeatScore           float64      `json:"heatScore" bson:"heatScore,omitempty"`
+	HeatFactors         *HeatFactors `json:"heatFactors" bson:"heatFactors,omitempty"`
 	// --- END NEW FIELDS ---
 }
 
