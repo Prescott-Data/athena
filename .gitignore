@@ -81,4 +81,5 @@ whitepaper.md
 tests/simulation
 run_simulation_tests.sh
 
-memory-server
+# Go module path artifacts
+bitbucket.org/
