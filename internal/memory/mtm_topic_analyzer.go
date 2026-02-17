@@ -113,8 +113,10 @@ func (ta *TopicAnalyzer) analyzeLLMTopics(ctx context.Context, events []models.C
 	prompt := ta.buildMultiTopicPrompt(conversationText)
 
 	request := map[string]interface{}{
-		"prompt":      prompt,
-		"max_tokens":  500,
+		"messages": []map[string]string{
+			{"role": "user", "content": prompt},
+		},
+		"max_tokens":  1000,
 		"temperature": 0.3,
 	}
 
@@ -207,7 +209,9 @@ Topics (JSON format):`, ta.config.MaxTopicsPerSegment, conversationText)
 func (ta *TopicAnalyzer) parseLLMTopicResponse(responseBody []byte) ([]*TopicSummary, error) {
 	var llmResponse struct {
 		Choices []struct {
-			Text string `json:"text"`
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(responseBody, &llmResponse); err != nil {
@@ -217,7 +221,7 @@ func (ta *TopicAnalyzer) parseLLMTopicResponse(responseBody []byte) ([]*TopicSum
 		return nil, fmt.Errorf("no choices in LLM response")
 	}
 
-	topicsText := strings.TrimSpace(llmResponse.Choices[0].Text)
+	topicsText := strings.TrimSpace(llmResponse.Choices[0].Message.Content)
 	if strings.HasPrefix(topicsText, "```json") {
 		topicsText = strings.TrimPrefix(topicsText, "```json")
 		topicsText = strings.TrimSuffix(topicsText, "```")
