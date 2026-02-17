@@ -194,6 +194,88 @@ func (s *MemoryServer) StoreInteraction(ctx context.Context, req *gen.StoreInter
 	}, nil
 }
 
+// StoreEvent stores a single cognitive event with explicit type control.
+// Services use this for automation logs (observation), agent scratch pads (thought),
+// tool calls (action), and any event that isn't a simple user↔agent message pair.
+func (s *MemoryServer) StoreEvent(ctx context.Context, req *gen.StoreEventRequest) (*gen.StoreEventResponse, error) {
+	sessionID := req.SessionId
+	tenantID, userID, agentID, err := s.getIDsFromSessionFunc(s, ctx, sessionID)
+	if err != nil {
+		return nil, status.Errorf(codes.NotFound, "session not found or invalid: %v", err)
+	}
+
+	eventType := models.STMEventType(req.Type)
+	switch eventType {
+	case models.STMEventTypeMessage, models.STMEventTypeThought,
+		models.STMEventTypeAction, models.STMEventTypeObservation:
+	default:
+		return nil, status.Errorf(codes.InvalidArgument,
+			"invalid event type: %s (must be message, thought, action, or observation)", req.Type)
+	}
+
+	role := req.Role
+	if role == "" {
+		role = "system"
+	}
+
+	event := memory.STMEvent{
+		Role:      role,
+		Type:      eventType,
+		Content:   req.Content,
+		Timestamp: time.Now(),
+		Metadata:  req.Metadata,
+	}
+
+	if err := s.stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, event); err != nil {
+		log.Printf("ERROR: Failed to add event to STM cache: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to store event: %v", err)
+	}
+
+	s.enqueueChainCheck(tenantID, userID, agentID)
+
+	log.Printf("INFO: Event stored (type=%s, role=%s) for session %s", req.Type, role, sessionID)
+
+	return &gen.StoreEventResponse{
+		Success: true,
+	}, nil
+}
+
+// enqueueChainCheck pushes a cognitive chain check task to the worker queue.
+func (s *MemoryServer) enqueueChainCheck(tenantID, userID, agentID string) {
+	taskPayload := models.CognitiveChainCheckTask{
+		ID:        uuid.New().String(),
+		Type:      memory.TaskTypeCognitiveChainCheck,
+		TenantID:  tenantID,
+		UserID:    userID,
+		AgentID:   agentID,
+		Timestamp: time.Now(),
+	}
+	payloadJSON, err := json.Marshal(taskPayload)
+	if err != nil {
+		log.Printf("ERROR: Failed to marshal chain check task: %v", err)
+		return
+	}
+	envelope := memory.TaskEnvelope{
+		ID:         taskPayload.ID,
+		Type:       taskPayload.Type,
+		Payload:    payloadJSON,
+		EnqueuedAt: time.Now(),
+	}
+	envelopeJSON, err := json.Marshal(envelope)
+	if err != nil {
+		log.Printf("ERROR: Failed to marshal task envelope: %v", err)
+		return
+	}
+	scopedQueueName := memory.GenerateScopedQueueName(tenantID, userID, agentID)
+	if err := s.redisClient.LPush(scopedQueueName, string(envelopeJSON)); err != nil {
+		log.Printf("ERROR: Failed to enqueue chain check: %v", err)
+		return
+	}
+	if err := s.redisClient.LPush(memory.GlobalWorkQueueName, scopedQueueName); err != nil {
+		log.Printf("ERROR: Failed to push to global work queue: %v", err)
+	}
+}
+
 // getIDsFromSession retrieves tenant, user, and agent IDs from a session ID.
 func (s *MemoryServer) getIDsFromSession(ctx context.Context, sessionID string) (string, string, string, error) {
 	collection := s.mongoClient.Database(s.config.Database.MongoDB.Database).Collection("cognitive_chains")
@@ -228,12 +310,12 @@ func (s *MemoryServer) GetContext(ctx context.Context, req *gen.GetContextReques
 	// STM events are stored individually (user, agent, user, agent...) via LPUSH (newest first).
 	// We pair them into ConversationTurns: each user message + following agent response = 1 turn.
 	// Events are in reverse chronological order (newest first), so we reverse to get chronological.
-	var turns []*gen.ConversationTurn
+	var turns []*gen.STMEvent
 	// Walk events in reverse (oldest first) and pair user+agent
 	for i := len(events) - 1; i >= 0; i-- {
 		event := events[i]
 		if event.Role == "user" {
-			turn := &gen.ConversationTurn{
+			turn := &gen.STMEvent{
 				UserMessage: event.Content,
 			}
 			// Look for a following agent response

@@ -36,6 +36,13 @@ service MemoryService {
       body: "*"
     };
   }
+
+  rpc StoreEvent(StoreEventRequest) returns (StoreEventResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/sessions/{session_id}/events"
+      body: "*"
+    };
+  }
   
   rpc GetContext(GetContextRequest) returns (GetContextResponse) {
     option (google.api.http) = {
@@ -118,6 +125,20 @@ message StoreInteractionRequest {
 message StoreInteractionResponse {
   bool success = 1;
   string interaction_id = 2;
+}
+
+message StoreEventRequest {
+  string session_id = 1;
+  string role = 2;        // "user", "agent", "system"
+  string type = 3;        // "message", "thought", "action", "observation"
+  string content = 4;
+  map<string, string> metadata = 5;
+  google.protobuf.Timestamp timestamp = 6;
+}
+
+message StoreEventResponse {
+  bool success = 1;
+  string event_id = 2;
 }
 
 message GetContextRequest {

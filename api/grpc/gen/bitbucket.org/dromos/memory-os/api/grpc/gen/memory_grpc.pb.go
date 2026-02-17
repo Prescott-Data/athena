@@ -28,6 +28,7 @@ type MemoryServiceClient interface {
 	DeleteSession(ctx context.Context, in *DeleteSessionRequest, opts ...grpc.CallOption) (*DeleteSessionResponse, error)
 	// Memory Operations
 	StoreInteraction(ctx context.Context, in *StoreInteractionRequest, opts ...grpc.CallOption) (*StoreInteractionResponse, error)
+	StoreEvent(ctx context.Context, in *StoreEventRequest, opts ...grpc.CallOption) (*StoreEventResponse, error)
 	GetContext(ctx context.Context, in *GetContextRequest, opts ...grpc.CallOption) (*GetContextResponse, error)
 	SearchMemory(ctx context.Context, in *SearchMemoryRequest, opts ...grpc.CallOption) (*SearchMemoryResponse, error)
 	// Analysis & Intelligence
@@ -76,6 +77,15 @@ func (c *memoryServiceClient) DeleteSession(ctx context.Context, in *DeleteSessi
 func (c *memoryServiceClient) StoreInteraction(ctx context.Context, in *StoreInteractionRequest, opts ...grpc.CallOption) (*StoreInteractionResponse, error) {
 	out := new(StoreInteractionResponse)
 	err := c.cc.Invoke(ctx, "/memory.v1.MemoryService/StoreInteraction", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *memoryServiceClient) StoreEvent(ctx context.Context, in *StoreEventRequest, opts ...grpc.CallOption) (*StoreEventResponse, error) {
+	out := new(StoreEventResponse)
+	err := c.cc.Invoke(ctx, "/memory.v1.MemoryService/StoreEvent", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -146,6 +156,7 @@ type MemoryServiceServer interface {
 	DeleteSession(context.Context, *DeleteSessionRequest) (*DeleteSessionResponse, error)
 	// Memory Operations
 	StoreInteraction(context.Context, *StoreInteractionRequest) (*StoreInteractionResponse, error)
+	StoreEvent(context.Context, *StoreEventRequest) (*StoreEventResponse, error)
 	GetContext(context.Context, *GetContextRequest) (*GetContextResponse, error)
 	SearchMemory(context.Context, *SearchMemoryRequest) (*SearchMemoryResponse, error)
 	// Analysis & Intelligence
@@ -172,6 +183,9 @@ func (UnimplementedMemoryServiceServer) DeleteSession(context.Context, *DeleteSe
 }
 func (UnimplementedMemoryServiceServer) StoreInteraction(context.Context, *StoreInteractionRequest) (*StoreInteractionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method StoreInteraction not implemented")
+}
+func (UnimplementedMemoryServiceServer) StoreEvent(context.Context, *StoreEventRequest) (*StoreEventResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method StoreEvent not implemented")
 }
 func (UnimplementedMemoryServiceServer) GetContext(context.Context, *GetContextRequest) (*GetContextResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetContext not implemented")
@@ -272,6 +286,24 @@ func _MemoryService_StoreInteraction_Handler(srv interface{}, ctx context.Contex
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(MemoryServiceServer).StoreInteraction(ctx, req.(*StoreInteractionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MemoryService_StoreEvent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StoreEventRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MemoryServiceServer).StoreEvent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/memory.v1.MemoryService/StoreEvent",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MemoryServiceServer).StoreEvent(ctx, req.(*StoreEventRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -406,6 +438,10 @@ var MemoryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "StoreInteraction",
 			Handler:    _MemoryService_StoreInteraction_Handler,
+		},
+		{
+			MethodName: "StoreEvent",
+			Handler:    _MemoryService_StoreEvent_Handler,
 		},
 		{
 			MethodName: "GetContext",

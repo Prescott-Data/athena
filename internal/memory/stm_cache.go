@@ -33,10 +33,11 @@ func parseDurationEnv(key string, defHours int) time.Duration {
 // STMEvent represents a single event in the short-term memory cache.
 // This can be a conversation turn, an agent's thought, an action, or an observation.
 type STMEvent struct {
-	Role      string              `json:"role"`      // Who the event belongs to (e.g., "user", "agent")
-	Type      models.STMEventType `json:"type"`      // Type of the event (e.g., "message", "thought")
-	Content   string              `json:"content"`   // The content of the event
-	Timestamp time.Time           `json:"timestamp"` // When the event occurred
+	Role      string              `json:"role"`                // Who the event belongs to (e.g., "user", "agent")
+	Type      models.STMEventType `json:"type"`                // Type of the event (e.g., "message", "thought")
+	Content   string              `json:"content"`             // The content of the event
+	Timestamp time.Time           `json:"timestamp"`           // When the event occurred
+	Metadata  map[string]string   `json:"metadata,omitempty"`  // Optional metadata (origin_service, context_type, etc.)
 }
 
 // STMCache provides Short-Term Memory caching for conversations and agent events.
