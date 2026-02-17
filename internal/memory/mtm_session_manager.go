@@ -349,9 +349,16 @@ func (sm *SessionManager) mergeChains(ctx context.Context, targetChain *models.C
 	combinedSummary := sm.combineSummaries(targetChain.Summary, newChain.Summary)
 	newInteractionSize := targetChain.InteractionSize + newChain.InteractionSize
 
+	// Inherit the topic from the new chain if the target chain has none
+	mergedTopic := targetChain.Topic
+	if mergedTopic == "" && newChain.Topic != "" {
+		mergedTopic = newChain.Topic
+	}
+
 	update := bson.M{
 		"$set": bson.M{
 			"summary":         combinedSummary,
+			"topic":           mergedTopic,
 			"interactionSize": newInteractionSize,
 			"eventCount":      targetChain.EventCount + newChain.EventCount,
 			"lastEventAt":     newChain.LastEventAt,

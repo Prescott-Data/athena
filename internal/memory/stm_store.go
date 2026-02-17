@@ -286,7 +286,26 @@ func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, ag
 		log.Printf("WARN: Failed to create segment summary for chain %s: %v", chainID, err)
 		summary = "Conversation segment."
 	}
-	log.Printf("INFO: Topic analysis complete. Main topic: %s", summary)
+
+	// Extract the main topic using the TopicAnalyzer
+	topic := ""
+	topicResult, err := s.topicAnalyzer.AnalyzeTopics(ctx, events)
+	if err != nil {
+		log.Printf("WARN: Failed to analyze topics for chain %s: %v", chainID, err)
+	} else if topicResult != nil && topicResult.MainTopic != nil && topicResult.MainTopic.Theme != "" {
+		topic = topicResult.MainTopic.Theme
+	}
+	// Fallback: derive topic from first sentence of summary
+	if topic == "" && summary != "" {
+		if idx := strings.IndexAny(summary, ".!?"); idx > 0 && idx < 80 {
+			topic = strings.TrimSpace(summary[:idx])
+		} else if len(summary) > 80 {
+			topic = strings.TrimSpace(summary[:80])
+		} else {
+			topic = summary
+		}
+	}
+	log.Printf("INFO: Topic analysis complete. Topic: %s | Summary: %s", topic, summary)
 
 	// Step 2: (Build Candidate)
 	candidateChain := &models.CognitiveChain{
@@ -295,7 +314,7 @@ func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, ag
 		UserID:      userID,
 		AgentID:     agentID,
 		ChainID:     chainID,
-		Topic:       "<placeholder>", // Placeholder, TopicAnalyzer can fill this
+		Topic:       topic,
 		Summary:     summary,
 		StartedAt:   events[0].CreatedAt,
 		LastEventAt: events[len(events)-1].CreatedAt,
