@@ -227,6 +227,13 @@
             "in": "query",
             "required": false,
             "type": "boolean"
+          },
+          {
+            "name": "query",
+            "description": "When set, MTM chains are retrieved via semantic vector search instead of\nrecency sort. Pass the current user message for per-message (Phase 2) retrieval.",
+            "in": "query",
+            "required": false,
+            "type": "string"
           }
         ],
         "tags": [
@@ -275,6 +282,13 @@
                 "similarityThreshold": {
                   "type": "number",
                   "format": "double"
+                },
+                "filter": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "description": "Optional metadata filters — only chains whose metadata matches all provided\nkey/value pairs are returned (e.g. {\"origin_service\": \"colabra\"})."
                 }
               }
             }
@@ -527,11 +541,13 @@
         "sessionId": {
           "type": "string"
         },
-        "userMessage": {
-          "type": "string"
+        "topic": {
+          "type": "string",
+          "description": "The topic/title of this cognitive chain."
         },
-        "agentResponse": {
-          "type": "string"
+        "summary": {
+          "type": "string",
+          "description": "LLM-generated summary of the chain."
         },
         "timestamp": {
           "type": "string",
@@ -555,11 +571,12 @@
     "v1GetContextResponse": {
       "type": "object",
       "properties": {
-        "recentTurns": {
+        "stmEvents": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/v1STMEvent"
-          }
+          },
+          "description": "Recent STM events (all types: message, thought, action, observation)."
         },
         "relevantPages": {
           "type": "array",
@@ -575,6 +592,10 @@
         },
         "userPersona": {
           "$ref": "#/definitions/v1UserPersona"
+        },
+        "ltpm": {
+          "$ref": "#/definitions/v1LTPMContext",
+          "description": "LTPM context — placeholder for Long-Term Persistent Memory (JanusGraph/ArangoDB)."
         }
       }
     },
@@ -668,21 +689,41 @@
         }
       }
     },
+    "v1LTPMContext": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string"
+        }
+      },
+      "description": "LTPMContext is a placeholder for Long-Term Persistent Memory retrieval results.\nReserved for a future Athena phase that integrates JanusGraph/ArangoDB."
+    },
     "v1STMEvent": {
       "type": "object",
       "properties": {
-        "userMessage": {
+        "role": {
           "type": "string",
-          "description": "The user message content."
+          "description": "Who generated this event (user, agent, system)."
         },
-        "agentResponse": {
+        "type": {
           "type": "string",
-          "description": "The agent response content."
+          "description": "Event type (message, thought, action, observation)."
+        },
+        "content": {
+          "type": "string",
+          "description": "The event content."
         },
         "timestamp": {
           "type": "string",
           "format": "date-time",
-          "description": "When the turn occurred."
+          "description": "When the event occurred."
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Optional metadata (origin_service, workflow_id, etc.)."
         }
       }
     },

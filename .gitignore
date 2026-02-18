@@ -68,7 +68,7 @@ temp/
 # Build outputs
 dist/
 build/
-memory-server
+/memory-server
 
 Paper-MemoryOS.pdf
 Paper-MemoryOS.pdf:Zone.Identifier

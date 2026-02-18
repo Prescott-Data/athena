@@ -34,7 +34,7 @@ type STMStorer interface {
 	analyzeTopicContinuity(ctx context.Context, userID string, previousContent string, newContent string) (bool, error)
 	ProcessMTMFormation(ctx context.Context, tenantID, userID, agentID string, events []models.CognitiveEvent) error
 	StoreCognitiveEvent(ctx context.Context, event *models.CognitiveEvent) (primitive.ObjectID, error)
-	SearchSimilarChains(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int) ([]*models.CognitiveChain, error)
+	SearchSimilarChains(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int, metadataFilter map[string]string) ([]*models.CognitiveChain, error)
 }
 
 const (
@@ -299,21 +299,57 @@ func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, ag
 		summary = "Conversation segment."
 		intrinsicImportance = 0.5
 	}
-	log.Printf("INFO: Topic analysis complete. Main topic: %s (Importance: %.2f)", summary, intrinsicImportance)
+
+	// Extract the main topic using the TopicAnalyzer
+	topic := ""
+	topicResult, err := s.topicAnalyzer.AnalyzeTopics(ctx, events)
+	if err != nil {
+		log.Printf("WARN: Failed to analyze topics for chain %s: %v", chainID, err)
+	} else if topicResult != nil && topicResult.MainTopic != nil && topicResult.MainTopic.Theme != "" {
+		topic = topicResult.MainTopic.Theme
+	}
+	// Fallback: derive topic from first sentence of summary
+	if topic == "" && summary != "" {
+		if idx := strings.IndexAny(summary, ".!?"); idx > 0 && idx < 80 {
+			topic = strings.TrimSpace(summary[:idx])
+		} else if len(summary) > 80 {
+			topic = strings.TrimSpace(summary[:80])
+		} else {
+			topic = summary
+		}
+	}
+	log.Printf("INFO: Topic analysis complete. Topic: %s | Importance: %.2f", topic, intrinsicImportance)
+
+	// Extract named entities for structured LTM triple writing
+	entities, err := s.ExtractEntities(ctx, events)
+	if err != nil {
+		log.Printf("WARN: Failed to extract entities for chain %s: %v", chainID, err)
+		entities = []string{}
+	}
+	log.Printf("INFO: Extracted %d entities for chain %s: %v", len(entities), chainID, entities)
 
 	// Step 2: (Build Candidate)
+	// Inherit service metadata (origin_service, context_type, etc.) from the session chain.
+	var sessionMetadata map[string]string
+	var sessionChain models.CognitiveChain
+	if err := s.db.Collection(CognitiveChainsCollection).FindOne(ctx, bson.M{"chainId": chainID}).Decode(&sessionChain); err == nil {
+		sessionMetadata = sessionChain.Metadata
+	}
+
 	candidateChain := &models.CognitiveChain{
-		ID:                  primitive.NewObjectID(), // Generate a temp ID
+		ID:                  primitive.NewObjectID(),
 		TenantID:            tenantID,
 		UserID:              userID,
 		AgentID:             agentID,
 		ChainID:             chainID,
-		Topic:               "<placeholder>", // Placeholder, TopicAnalyzer can fill this
+		Topic:               topic,
 		Summary:             summary,
+		Entities:            entities,
 		StartedAt:           events[0].CreatedAt,
 		LastEventAt:         events[len(events)-1].CreatedAt,
 		EventCount:          len(events),
-		Status:              "pending",           // Not yet saved
+		Status:              "pending",
+		Metadata:            sessionMetadata,
 		RecallStrength:      1.0,                 // Initialize Ebbinghaus recall strength
 		IntrinsicImportance: intrinsicImportance, // From LLM analysis
 	}
@@ -332,22 +368,36 @@ func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, ag
 	}
 	log.Printf("INFO: Quality gate passed for chain %s. Score: %.2f", chainID, validationResult.QualityScore)
 
-	// Step 3.5: Persist individual cognitive events to MongoDB
+	// Step 3.5: Promote cognitive events from in_stm → in_mtm.
+	// P5 already wrote these to MongoDB on store, so update status rather than re-inserting.
+	// Fall back to insert only if no existing in_stm events are found (pre-P5 path).
 	eventsCollection := s.db.Collection(CognitiveEventsCollection)
-	eventDocs := make([]interface{}, len(events))
-	for i := range events {
-		events[i].Status = "in_mtm"
-		events[i].EventIndex = i
-		if events[i].ID.IsZero() {
-			events[i].ID = primitive.NewObjectID()
-		}
-		eventDocs[i] = events[i]
+	updateResult, updateErr := eventsCollection.UpdateMany(ctx,
+		bson.M{"chainId": chainID, "status": "in_stm"},
+		bson.M{"$set": bson.M{"status": "in_mtm"}},
+	)
+	if updateErr != nil {
+		log.Printf("WARN: Failed to update cognitive events status for chain %s: %v", chainID, updateErr)
 	}
-	if _, err := eventsCollection.InsertMany(ctx, eventDocs); err != nil {
-		log.Printf("WARN: Failed to persist %d cognitive events for chain %s: %v", len(events), chainID, err)
-		// Non-fatal: chain can still be created without individual events
+
+	if updateErr != nil || updateResult.MatchedCount == 0 {
+		// No existing in_stm events found — insert them (pre-P5 path or recovery)
+		eventDocs := make([]interface{}, len(events))
+		for i := range events {
+			events[i].Status = "in_mtm"
+			events[i].EventIndex = i
+			if events[i].ID.IsZero() {
+				events[i].ID = primitive.NewObjectID()
+			}
+			eventDocs[i] = events[i]
+		}
+		if _, err := eventsCollection.InsertMany(ctx, eventDocs); err != nil {
+			log.Printf("WARN: Failed to persist %d cognitive events for chain %s: %v", len(events), chainID, err)
+		} else {
+			log.Printf("INFO: Persisted %d cognitive events for chain %s", len(events), chainID)
+		}
 	} else {
-		log.Printf("INFO: Persisted %d cognitive events for chain %s", len(events), chainID)
+		log.Printf("INFO: Promoted %d cognitive events to in_mtm for chain %s", updateResult.ModifiedCount, chainID)
 	}
 
 	// Step 4: (Merge/Create)
@@ -810,6 +860,91 @@ func (s *STMStore) CreateSegmentSummary(ctx context.Context, events []models.Cog
 	return summaryResp.Summary, summaryResp.IntrinsicImportance, nil
 }
 
+// ExtractEntities extracts named entities from a cognitive event chain using the LLM.
+// Returns a list of short entity strings (people, projects, technologies, topics, etc.)
+// that the promoter will use to write structured knowledge graph triples.
+func (s *STMStore) ExtractEntities(ctx context.Context, events []models.CognitiveEvent) ([]string, error) {
+	LLMBaseURL := os.Getenv("LLM_BASE_URL")
+	apiKey := os.Getenv("AZURE_OPENAI_API_KEY")
+
+	if LLMBaseURL == "" {
+		return nil, fmt.Errorf("llm_base_url not configured")
+	}
+	if apiKey == "" {
+		return nil, fmt.Errorf("azure_openai_api_key not configured")
+	}
+
+	if !s.llmGuards.checkRateLimit(ctx, "entity_extraction") {
+		return nil, fmt.Errorf("llm entity extraction rate limit exceeded")
+	}
+	if !s.llmGuards.checkCircuitBreaker() {
+		return nil, fmt.Errorf("llm entity extraction circuit breaker is open")
+	}
+
+	var b strings.Builder
+	b.WriteString("Extract the key named entities from the following conversation. Return ONLY a JSON array of short entity strings (max 3 words each). Include people, projects, technologies, topics, and organisations. Example: [\"Authentication\", \"Project X\", \"OAuth2\"]\n\nConversation:\n---\n")
+	for _, event := range events {
+		b.WriteString(fmt.Sprintf("%s: %s\n", event.Role, event.Content))
+	}
+	b.WriteString("---\n\nJSON array:")
+
+	reqBody := map[string]interface{}{
+		"messages": []map[string]string{
+			{"role": "user", "content": b.String()},
+		},
+		"max_tokens":  200,
+		"temperature": 0.1,
+	}
+	body, _ := json.Marshal(reqBody)
+	httpCtx, cancel := context.WithTimeout(ctx, s.llmConfig.SummaryTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(httpCtx, "POST", LLMBaseURL, bytes.NewBuffer(body))
+	if err != nil {
+		s.llmGuards.recordLLMResult(false)
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("api-key", apiKey)
+
+	resp, err := s.HTTPClient.Do(req)
+	if err != nil {
+		s.llmGuards.recordLLMResult(false)
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		s.llmGuards.recordLLMResult(false)
+		return nil, fmt.Errorf("llm entity extraction API returned %d", resp.StatusCode)
+	}
+
+	raw, _ := io.ReadAll(resp.Body)
+	var llmResp struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(raw, &llmResp); err != nil {
+		s.llmGuards.recordLLMResult(false)
+		return nil, err
+	}
+	if len(llmResp.Choices) == 0 {
+		s.llmGuards.recordLLMResult(false)
+		return nil, fmt.Errorf("empty entity extraction response")
+	}
+	s.llmGuards.recordLLMResult(true)
+
+	content := strings.TrimSpace(llmResp.Choices[0].Message.Content)
+	var entities []string
+	if err := json.Unmarshal([]byte(content), &entities); err != nil {
+		// LLM returned non-JSON — log and return empty rather than fail MTM formation
+		log.Printf("WARN: Could not parse entity extraction response as JSON for chain (raw: %s): %v", content, err)
+		return []string{}, nil
+	}
+	return entities, nil
+}
+
 // StoreChainEmbedding stores an embedding for a cognitive chain summary in Milvus
 func (s *STMStore) StoreChainEmbedding(ctx context.Context, chain *models.CognitiveChain, embedding *models.EmbeddingData) error {
 	if s.milvus == nil {
@@ -874,7 +1009,9 @@ func (s *STMStore) IndexCognitiveEvents(ctx context.Context, chainID string, eve
 }
 
 // SearchSimilarChains finds cognitive chains that are semantically similar to a query vector.
-func (s *STMStore) SearchSimilarChains(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int) ([]*models.CognitiveChain, error) {
+// metadataFilter is optional — when non-empty, only chains whose metadata matches all
+// provided key/value pairs are returned (e.g. {"origin_service": "colabra"}).
+func (s *STMStore) SearchSimilarChains(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int, metadataFilter map[string]string) ([]*models.CognitiveChain, error) {
 	if s.milvus == nil {
 		log.Println("WARN: Milvus client not configured, cannot search for similar chains.")
 		return nil, nil // Return empty slice, not an error
@@ -892,12 +1029,16 @@ func (s *STMStore) SearchSimilarChains(ctx context.Context, tenantID, userID, ag
 
 	log.Printf("INFO: Vector search found %d candidate chain IDs.", len(chainIDs))
 
-	// Step B: Fetch the full metadata for those chain IDs from MongoDB
+	// Step B: Fetch the full metadata for those chain IDs from MongoDB.
+	// Apply metadata filters (e.g. origin_service, context_type) if provided.
 	collection := s.db.Collection(CognitiveChainsCollection)
 	filter := bson.M{
 		"chainId": bson.M{"$in": chainIDs},
-		"status":  "active", // Only consider active chains
-		"userId":  userID,   // Ensure chains belong to the same user
+		"status":  "active",
+		"userId":  userID,
+	}
+	for k, v := range metadataFilter {
+		filter["metadata."+k] = v
 	}
 
 	cursor, err := collection.Find(ctx, filter)

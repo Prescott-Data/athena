@@ -38,6 +38,9 @@ type STMEvent struct {
 	Content   string              `json:"content"`             // The content of the event
 	Timestamp time.Time           `json:"timestamp"`           // When the event occurred
 	Metadata  map[string]string   `json:"metadata,omitempty"`  // Optional metadata (origin_service, context_type, etc.)
+	// ChainID ties this event to its session chain so the worker can associate
+	// events with the correct chain without generating a new random ID.
+	ChainID   string              `json:"chainId,omitempty"`
 }
 
 // STMCache provides Short-Term Memory caching for conversations and agent events.
