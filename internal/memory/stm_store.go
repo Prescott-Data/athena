@@ -915,3 +915,94 @@ func (s *STMStore) SearchSimilarChains(ctx context.Context, tenantID, userID, ag
 
 	return chains, nil
 }
+
+// ArchiveColdChains scans for cold chains (low heat score) and archives them.
+// Archiving involves deleting the vector embedding from Milvus and updating the status in MongoDB.
+func (s *STMStore) ArchiveColdChains(ctx context.Context) (int, error) {
+	if s.db == nil {
+		return 0, fmt.Errorf("database not initialized")
+	}
+
+	// 1. Define criteria for "potentially cold" chains to scan.
+	// We look for active chains that haven't been accessed in a while (e.g., 7 days).
+	// This optimization avoids scanning the entire database every time.
+	archiveScanDays := parseIntEnv("MTM_ARCHIVE_SCAN_DAYS", 7)
+	scanThreshold := time.Now().AddDate(0, 0, -archiveScanDays)
+
+	filter := bson.M{
+		"status": "active",
+		"$or": []bson.M{
+			{"lastAccessedAt": bson.M{"$lt": scanThreshold}},
+			{"lastAccessedAt": bson.M{"$exists": false}, "lastEventAt": bson.M{"$lt": scanThreshold}},
+		},
+	}
+
+	collection := s.db.Collection(CognitiveChainsCollection)
+	cursor, err := collection.Find(ctx, filter)
+	if err != nil {
+		return 0, fmt.Errorf("failed to query potential cold chains: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	var chains []models.CognitiveChain
+	if err := cursor.All(ctx, &chains); err != nil {
+		return 0, fmt.Errorf("failed to decode potential cold chains: %w", err)
+	}
+
+	if len(chains) == 0 {
+		return 0, nil
+	}
+
+	log.Printf("INFO: ArchiveColdChains found %d candidates for analysis.", len(chains))
+
+	// 2. Initialize HeatScorer to calculate current heat
+	heatScorer := NewHeatScorer(s.db)
+	freezingPoint := parseFloatEnv("MTM_FREEZING_POINT", 0.1)
+
+	archivedCount := 0
+
+	for _, chain := range chains {
+		// Calculate current heat score
+		currentHeat, _, err := heatScorer.ComputeSegmentHeat(ctx, &chain)
+		if err != nil {
+			log.Printf("WARN: Failed to compute heat for chain %s: %v", chain.ChainID, err)
+			continue
+		}
+
+		// Check if below freezing point
+		if currentHeat < freezingPoint {
+			log.Printf("INFO: Archiving cold chain %s (Heat: %.3f < %.3f)", chain.ChainID, currentHeat, freezingPoint)
+
+			// A. Delete vector from Milvus
+			if s.milvus != nil {
+				if err := s.milvus.DeleteSegmentEmbedding(ctx, chain.TenantID, chain.UserID, chain.AgentID, chain.ChainID); err != nil {
+					log.Printf("ERROR: Failed to delete vector for chain %s: %v", chain.ChainID, err)
+					// We continue to mark as archived in Mongo, assuming Milvus might be down or data inconsistent.
+					// Alternatively, we could skip archiving in Mongo to retry later.
+					// For now, let's proceed to ensure Mongo state reflects "archived" status.
+				}
+			} else {
+				log.Println("WARN: Milvus client not available, skipping vector deletion.")
+			}
+
+			// B. Update status in MongoDB
+			now := time.Now()
+			update := bson.M{
+				"$set": bson.M{
+					"status":     "archived",
+					"archivedAt": now,
+					"heatScore":  currentHeat, // Persist the final low score
+				},
+			}
+			_, err := collection.UpdateOne(ctx, bson.M{"_id": chain.ID}, update)
+			if err != nil {
+				log.Printf("ERROR: Failed to update status for chain %s in MongoDB: %v", chain.ChainID, err)
+			} else {
+				archivedCount++
+			}
+		}
+	}
+
+	log.Printf("INFO: ArchiveColdChains completed. Archived %d/%d candidates.", archivedCount, len(chains))
+	return archivedCount, nil
+}
