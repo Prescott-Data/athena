@@ -29,15 +29,22 @@ GOPATH=$(go env GOPATH)
 mkdir -p $OUTPUT_DIR
 mkdir -p $DOCS_DIR
 
-# Generate Go code
+# Generate Go code into a temp directory, then promote to OUTPUT_DIR.
+# protoc without paths=source_relative writes into the full go_package path;
+# we flatten that back to OUTPUT_DIR so callers import the same package path.
+TEMP_GEN=$(mktemp -d)
 protoc -I/usr/local/include -I. -I./third_party/googleapis \
   --plugin=protoc-gen-go=$GOPATH/bin/protoc-gen-go \
   --plugin=protoc-gen-go-grpc=$GOPATH/bin/protoc-gen-go-grpc \
   --plugin=protoc-gen-grpc-gateway=$GOPATH/bin/protoc-gen-grpc-gateway \
-  --go_out=$OUTPUT_DIR --go_opt=paths=source_relative \
-  --go-grpc_out=$OUTPUT_DIR --go-grpc_opt=paths=source_relative \
-  --grpc-gateway_out=$OUTPUT_DIR --grpc-gateway_opt=paths=source_relative \
+  --go_out=$TEMP_GEN \
+  --go-grpc_out=$TEMP_GEN \
+  --grpc-gateway_out=$TEMP_GEN \
   $PROTO_FILE
+
+# Flatten the generated files to OUTPUT_DIR
+find $TEMP_GEN -name "*.go" -exec cp {} $OUTPUT_DIR/ \;
+rm -rf $TEMP_GEN
 
 echo "Successfully generated Go code from $PROTO_FILE"
 

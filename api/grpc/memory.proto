@@ -171,6 +171,9 @@ message SearchMemoryRequest {
   string query = 2;
   int32 limit = 3;
   double similarity_threshold = 4;
+  // Optional metadata filters — only chains whose metadata matches all provided
+  // key/value pairs are returned (e.g. {"origin_service": "colabra"}).
+  map<string, string> filter = 5;
 }
 
 message SearchMemoryResponse {

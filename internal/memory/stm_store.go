@@ -33,7 +33,7 @@ type STMStorer interface {
 	analyzeTopicContinuity(ctx context.Context, userID string, previousContent string, newContent string) (bool, error)
 	ProcessMTMFormation(ctx context.Context, tenantID, userID, agentID string, events []models.CognitiveEvent) error
 	StoreCognitiveEvent(ctx context.Context, event *models.CognitiveEvent) (primitive.ObjectID, error)
-	SearchSimilarChains(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int) ([]*models.CognitiveChain, error)
+	SearchSimilarChains(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int, metadataFilter map[string]string) ([]*models.CognitiveChain, error)
 }
 
 const (
@@ -308,6 +308,13 @@ func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, ag
 	log.Printf("INFO: Topic analysis complete. Topic: %s | Summary: %s", topic, summary)
 
 	// Step 2: (Build Candidate)
+	// Inherit service metadata (origin_service, context_type, etc.) from the session chain.
+	var sessionMetadata map[string]string
+	var sessionChain models.CognitiveChain
+	if err := s.db.Collection(CognitiveChainsCollection).FindOne(ctx, bson.M{"chainId": chainID}).Decode(&sessionChain); err == nil {
+		sessionMetadata = sessionChain.Metadata
+	}
+
 	candidateChain := &models.CognitiveChain{
 		ID:          primitive.NewObjectID(), // Generate a temp ID
 		TenantID:    tenantID,
@@ -320,6 +327,7 @@ func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, ag
 		LastEventAt: events[len(events)-1].CreatedAt,
 		EventCount:  len(events),
 		Status:      "pending", // Not yet saved
+		Metadata:    sessionMetadata,
 	}
 
 	// Step 3: (Quality Gate)
@@ -838,7 +846,9 @@ func (s *STMStore) IndexCognitiveEvents(ctx context.Context, chainID string, eve
 }
 
 // SearchSimilarChains finds cognitive chains that are semantically similar to a query vector.
-func (s *STMStore) SearchSimilarChains(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int) ([]*models.CognitiveChain, error) {
+// metadataFilter is optional — when non-empty, only chains whose metadata matches all
+// provided key/value pairs are returned (e.g. {"origin_service": "colabra"}).
+func (s *STMStore) SearchSimilarChains(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int, metadataFilter map[string]string) ([]*models.CognitiveChain, error) {
 	if s.milvus == nil {
 		log.Println("WARN: Milvus client not configured, cannot search for similar chains.")
 		return nil, nil // Return empty slice, not an error
@@ -856,12 +866,16 @@ func (s *STMStore) SearchSimilarChains(ctx context.Context, tenantID, userID, ag
 
 	log.Printf("INFO: Vector search found %d candidate chain IDs.", len(chainIDs))
 
-	// Step B: Fetch the full metadata for those chain IDs from MongoDB
+	// Step B: Fetch the full metadata for those chain IDs from MongoDB.
+	// Apply metadata filters (e.g. origin_service, context_type) if provided.
 	collection := s.db.Collection(CognitiveChainsCollection)
 	filter := bson.M{
 		"chainId": bson.M{"$in": chainIDs},
-		"status":  "active", // Only consider active chains
-		"userId":  userID,   // Ensure chains belong to the same user
+		"status":  "active",
+		"userId":  userID,
+	}
+	for k, v := range metadataFilter {
+		filter["metadata."+k] = v
 	}
 
 	cursor, err := collection.Find(ctx, filter)
