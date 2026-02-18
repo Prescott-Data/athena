@@ -307,6 +307,14 @@ func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, ag
 	}
 	log.Printf("INFO: Topic analysis complete. Topic: %s | Summary: %s", topic, summary)
 
+	// Extract named entities for structured LTM triple writing
+	entities, err := s.ExtractEntities(ctx, events)
+	if err != nil {
+		log.Printf("WARN: Failed to extract entities for chain %s: %v", chainID, err)
+		entities = []string{}
+	}
+	log.Printf("INFO: Extracted %d entities for chain %s: %v", len(entities), chainID, entities)
+
 	// Step 2: (Build Candidate)
 	// Inherit service metadata (origin_service, context_type, etc.) from the session chain.
 	var sessionMetadata map[string]string
@@ -323,6 +331,7 @@ func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, ag
 		ChainID:     chainID,
 		Topic:       topic,
 		Summary:     summary,
+		Entities:    entities,
 		StartedAt:   events[0].CreatedAt,
 		LastEventAt: events[len(events)-1].CreatedAt,
 		EventCount:  len(events),
@@ -794,6 +803,91 @@ func (s *STMStore) CreateSegmentSummary(ctx context.Context, events []models.Cog
 	}
 	s.llmGuards.recordLLMResult(true) // Record success
 	return strings.TrimSpace(llmResp.Choices[0].Message.Content), nil
+}
+
+// ExtractEntities extracts named entities from a cognitive event chain using the LLM.
+// Returns a list of short entity strings (people, projects, technologies, topics, etc.)
+// that the promoter will use to write structured knowledge graph triples.
+func (s *STMStore) ExtractEntities(ctx context.Context, events []models.CognitiveEvent) ([]string, error) {
+	LLMBaseURL := os.Getenv("LLM_BASE_URL")
+	apiKey := os.Getenv("AZURE_OPENAI_API_KEY")
+
+	if LLMBaseURL == "" {
+		return nil, fmt.Errorf("llm_base_url not configured")
+	}
+	if apiKey == "" {
+		return nil, fmt.Errorf("azure_openai_api_key not configured")
+	}
+
+	if !s.llmGuards.checkRateLimit(ctx, "entity_extraction") {
+		return nil, fmt.Errorf("llm entity extraction rate limit exceeded")
+	}
+	if !s.llmGuards.checkCircuitBreaker() {
+		return nil, fmt.Errorf("llm entity extraction circuit breaker is open")
+	}
+
+	var b strings.Builder
+	b.WriteString("Extract the key named entities from the following conversation. Return ONLY a JSON array of short entity strings (max 3 words each). Include people, projects, technologies, topics, and organisations. Example: [\"Authentication\", \"Project X\", \"OAuth2\"]\n\nConversation:\n---\n")
+	for _, event := range events {
+		b.WriteString(fmt.Sprintf("%s: %s\n", event.Role, event.Content))
+	}
+	b.WriteString("---\n\nJSON array:")
+
+	reqBody := map[string]interface{}{
+		"messages": []map[string]string{
+			{"role": "user", "content": b.String()},
+		},
+		"max_tokens":  200,
+		"temperature": 0.1,
+	}
+	body, _ := json.Marshal(reqBody)
+	httpCtx, cancel := context.WithTimeout(ctx, s.llmConfig.SummaryTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(httpCtx, "POST", LLMBaseURL, bytes.NewBuffer(body))
+	if err != nil {
+		s.llmGuards.recordLLMResult(false)
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("api-key", apiKey)
+
+	resp, err := s.HTTPClient.Do(req)
+	if err != nil {
+		s.llmGuards.recordLLMResult(false)
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		s.llmGuards.recordLLMResult(false)
+		return nil, fmt.Errorf("llm entity extraction API returned %d", resp.StatusCode)
+	}
+
+	raw, _ := io.ReadAll(resp.Body)
+	var llmResp struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(raw, &llmResp); err != nil {
+		s.llmGuards.recordLLMResult(false)
+		return nil, err
+	}
+	if len(llmResp.Choices) == 0 {
+		s.llmGuards.recordLLMResult(false)
+		return nil, fmt.Errorf("empty entity extraction response")
+	}
+	s.llmGuards.recordLLMResult(true)
+
+	content := strings.TrimSpace(llmResp.Choices[0].Message.Content)
+	var entities []string
+	if err := json.Unmarshal([]byte(content), &entities); err != nil {
+		// LLM returned non-JSON — log and return empty rather than fail MTM formation
+		log.Printf("WARN: Could not parse entity extraction response as JSON for chain (raw: %s): %v", content, err)
+		return []string{}, nil
+	}
+	return entities, nil
 }
 
 // StoreChainEmbedding stores an embedding for a cognitive chain summary in Milvus

@@ -114,14 +114,35 @@ func (p *Promoter) updateChainHeat(ctx context.Context, chainID string, heatScor
 	return err
 }
 
-// promoteChainToLPM promotes a "hot" cognitive chain to the Long-Term Personal Memory (LPM)
+// promoteChainToLPM promotes a "hot" cognitive chain to the Long-Term Personal Memory (LPM).
+// When the chain has extracted entities, it writes one structured triple per entity
+// (e.g. User → interested_in → "OAuth2"). Falls back to a single topic-based triple
+// for older chains that pre-date entity extraction.
 func (p *Promoter) promoteChainToLPM(ctx context.Context, chain *models.CognitiveChain, heatScore float64) error {
-	// For now, we create a simple triple based on the chain's summary
-	triples := []janus.Triple{{
-		Subject:   chain.UserID,
-		Predicate: "interested_in_topic",
-		Object:    chain.Summary,
-	}}
+	var triples []janus.Triple
+
+	if len(chain.Entities) > 0 {
+		for _, entity := range chain.Entities {
+			triples = append(triples, janus.Triple{
+				Subject:   chain.UserID,
+				Predicate: "interested_in",
+				Object:    entity,
+			})
+		}
+		log.Printf("INFO: Promoting %d entity triples for chain %s", len(triples), chain.ChainID)
+	} else {
+		// Fallback: use topic (concise) rather than full summary (a paragraph)
+		object := chain.Topic
+		if object == "" {
+			object = chain.Summary
+		}
+		triples = []janus.Triple{{
+			Subject:   chain.UserID,
+			Predicate: "interested_in_topic",
+			Object:    object,
+		}}
+		log.Printf("INFO: Promoting 1 fallback topic triple for chain %s (no entities extracted)", chain.ChainID)
+	}
 
 	conf := math.Min(0.99, heatScore)
 
