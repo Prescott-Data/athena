@@ -145,13 +145,25 @@ message GetContextRequest {
   string session_id = 1;
   int32 limit = 2;
   bool include_segments = 3;
+  // When set, MTM chains are retrieved via semantic vector search instead of
+  // recency sort. Pass the current user message for per-message (Phase 2) retrieval.
+  string query = 4;
 }
 
 message GetContextResponse {
-  repeated STMEvent recent_turns = 1;
+  // Recent STM events (all types: message, thought, action, observation).
+  repeated STMEvent stm_events = 1;
   repeated DialoguePage relevant_pages = 2;
   repeated Segment segments = 3;
   UserPersona user_persona = 4;
+  // LTPM context — placeholder for Long-Term Persistent Memory (JanusGraph/ArangoDB).
+  LTPMContext ltpm = 5;
+}
+
+// LTPMContext is a placeholder for Long-Term Persistent Memory retrieval results.
+// Reserved for a future Athena phase that integrates JanusGraph/ArangoDB.
+message LTPMContext {
+  string status = 1;
 }
 
 message SearchMemoryRequest {
@@ -210,19 +222,25 @@ message Session {
 }
 
 message STMEvent {
-  // The user message content.
-  string user_message = 1;
-  // The agent response content.
-  string agent_response = 2;
-  // When the turn occurred.
-  google.protobuf.Timestamp timestamp = 3;
+  // Who generated this event (user, agent, system).
+  string role = 1;
+  // Event type (message, thought, action, observation).
+  string type = 2;
+  // The event content.
+  string content = 3;
+  // When the event occurred.
+  google.protobuf.Timestamp timestamp = 4;
+  // Optional metadata (origin_service, workflow_id, etc.).
+  map<string, string> metadata = 5;
 }
 
 message DialoguePage {
   string id = 1;
   string session_id = 2;
-  string user_message = 3;
-  string agent_response = 4;
+  // The topic/title of this cognitive chain.
+  string topic = 3;
+  // LLM-generated summary of the chain.
+  string summary = 4;
   google.protobuf.Timestamp timestamp = 5;
   repeated double embedding = 6;
   map<string, string> metadata = 7;

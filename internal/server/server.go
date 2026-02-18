@@ -16,8 +16,10 @@ import (
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // stmCache defines the interface for the short-term memory cache.
@@ -307,37 +309,97 @@ func (s *MemoryServer) GetContext(ctx context.Context, req *gen.GetContextReques
 		return nil, status.Errorf(codes.Internal, "failed to retrieve STM context: %v", err)
 	}
 
-	// STM events are stored individually (user, agent, user, agent...) via LPUSH (newest first).
-	// We pair them into ConversationTurns: each user message + following agent response = 1 turn.
-	// Events are in reverse chronological order (newest first), so we reverse to get chronological.
-	var turns []*gen.STMEvent
-	// Walk events in reverse (oldest first) and pair user+agent
+	// Return ALL STM events in chronological order (oldest first).
+	// This includes messages, thoughts, actions, and observations.
+	var stmEvents []*gen.STMEvent
 	for i := len(events) - 1; i >= 0; i-- {
-		event := events[i]
-		if event.Role == "user" {
-			turn := &gen.STMEvent{
-				UserMessage: event.Content,
-			}
-			// Look for a following agent response
-			if i-1 >= 0 && events[i-1].Role == "agent" {
-				turn.AgentResponse = events[i-1].Content
-				i-- // Skip the agent event
-			}
-			turns = append(turns, turn)
+		e := events[i]
+		stmEvents = append(stmEvents, &gen.STMEvent{
+			Role:      e.Role,
+			Type:      string(e.Type),
+			Content:   e.Content,
+			Timestamp: timestamppb.New(e.Timestamp),
+			Metadata:  e.Metadata,
+		})
+	}
+
+	// Apply limit — keep most recent events
+	if len(stmEvents) > limit {
+		stmEvents = stmEvents[len(stmEvents)-limit:]
+	}
+
+	// Retrieve MTM cognitive chains.
+	// Phase 2 (per-message): query provided — semantic vector search ranked by similarity.
+	// Phase 1 (session init): no query — recency sort from MongoDB.
+	var pages []*gen.DialoguePage
+	if req.Query != "" {
+		queryEmbedding, err := s.stmStore.CreateEmbedding(ctx, req.Query)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to create query embedding: %v", err)
 		}
+		chains, err := s.stmStore.SearchSimilarChains(ctx, tenantID, userID, agentID, queryEmbedding.Vector, limit)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to search similar chains: %v", err)
+		}
+		for _, chain := range chains {
+			if chain.Summary == "" {
+				continue // skip session placeholder chains
+			}
+			pages = append(pages, &gen.DialoguePage{
+				Id:        chain.ChainID,
+				SessionId: chain.ChainID,
+				Topic:     chain.Topic,
+				Summary:   chain.Summary,
+				Timestamp: timestamppb.New(chain.LastEventAt),
+			})
+		}
+	} else {
+		pages = s.getMTMByRecency(ctx, tenantID, userID, limit)
 	}
 
-	// Apply limit
-	if len(turns) > limit {
-		// Return most recent turns
-		turns = turns[len(turns)-limit:]
-	}
-
-	log.Printf("INFO: GetContext returned %d turns for session %s", len(turns), sessionID)
+	log.Printf("INFO: GetContext returned %d STM events + %d MTM chains for session %s (query=%q)",
+		len(stmEvents), len(pages), sessionID, req.Query)
 
 	return &gen.GetContextResponse{
-		RecentTurns: turns,
+		StmEvents:     stmEvents,
+		RelevantPages: pages,
+		Ltpm:          &gen.LTPMContext{Status: "not_implemented"},
 	}, nil
+}
+
+// getMTMByRecency retrieves active MTM chains sorted by most recent activity.
+// Chains with an empty summary (session placeholder chains) are excluded.
+func (s *MemoryServer) getMTMByRecency(ctx context.Context, tenantID, userID string, limit int) []*gen.DialoguePage {
+	collection := s.mongoClient.Database(s.config.Database.MongoDB.Database).Collection("cognitive_chains")
+	chainFilter := bson.M{
+		"userId":   userID,
+		"tenantId": tenantID,
+		"status":   "active",
+		"summary":  bson.M{"$ne": ""},
+	}
+	chainOpts := options.Find().SetSort(bson.D{{Key: "lastEventAt", Value: -1}}).SetLimit(int64(limit))
+
+	var pages []*gen.DialoguePage
+	cursor, err := collection.Find(ctx, chainFilter, chainOpts)
+	if err != nil {
+		log.Printf("WARN: getMTMByRecency query failed: %v", err)
+		return pages
+	}
+	defer cursor.Close(ctx)
+	for cursor.Next(ctx) {
+		var chain models.CognitiveChain
+		if err := cursor.Decode(&chain); err != nil {
+			continue
+		}
+		pages = append(pages, &gen.DialoguePage{
+			Id:        chain.ChainID,
+			SessionId: chain.ChainID,
+			Topic:     chain.Topic,
+			Summary:   chain.Summary,
+			Timestamp: timestamppb.New(chain.LastEventAt),
+		})
+	}
+	return pages
 }
 
 // CreateSession creates a new memory session by inserting a cognitive chain record.
