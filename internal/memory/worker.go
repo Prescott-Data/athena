@@ -107,13 +107,61 @@ func (w *Worker) processNextTask(ctx context.Context, workerID int) error {
 	duration := time.Since(startTime)
 	if processingErr != nil {
 		log.Printf("Worker %d task %s failed after %v: %v", workerID, task.ID, duration, processingErr)
-		// Optionally mark the task as failed in the queue
-		w.taskQueue.MarkTaskResult(ctx, payload.TenantID, payload.UserID, payload.AgentID, task.ID, false, processingErr.Error())
+
+		// Retry logic
+		const MaxRetries = 3
+		if payload.RetryCount < MaxRetries {
+			payload.RetryCount++
+			log.Printf("Retrying task %s (Attempt %d/%d)", task.ID, payload.RetryCount, MaxRetries)
+			if err := w.reEnqueueTask(ctx, scopedQueueName, &task, &payload); err != nil {
+				log.Printf("ERROR: Failed to re-enqueue task %s: %v", task.ID, err)
+			}
+		} else {
+			log.Printf("Task %s exceeded max retries (%d). Marking as failed.", task.ID, MaxRetries)
+			// Optionally mark the task as failed in the queue
+			w.taskQueue.MarkTaskResult(ctx, payload.TenantID, payload.UserID, payload.AgentID, task.ID, false, processingErr.Error())
+		}
 		return processingErr
 	}
 
 	log.Printf("Worker %d task %s completed successfully in %v", workerID, task.ID, duration)
 	w.taskQueue.MarkTaskResult(ctx, payload.TenantID, payload.UserID, payload.AgentID, task.ID, true, "success")
+	return nil
+}
+
+// reEnqueueTask puts the failed task back into the queue system
+func (w *Worker) reEnqueueTask(ctx context.Context, scopedQueueName string, task *TaskEnvelope, payload *models.CognitiveChainCheckTask) error {
+	// Update payload in task envelope
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal payload for retry: %w", err)
+	}
+	task.Payload = payloadBytes
+
+	taskJSON, err := json.Marshal(task)
+	if err != nil {
+		return fmt.Errorf("failed to marshal task envelope for retry: %w", err)
+	}
+
+	// 1. Push to scoped queue (Right Push to put it at the back, giving time for transient errors to clear?)
+	// Original logic uses LPUSH (LIFO/Stack for hot path?).
+	// If we use RPush, it goes to the "oldest" end.
+	// If we want immediate retry, LPUSH. If we want backoff-like behavior in a busy queue, RPUSH.
+	// Given "Hot Path" architecture, usually we want newest first.
+	// If we LPUSH, it retries immediately. This might be bad if the error is persistent (e.g. API down).
+	// But we don't have a delayed queue.
+	// Let's stick to LPUSH to maintain the "Stack" semantics of the hot path, but maybe sleep briefly in the worker loop before next pop?
+	// No, the worker loop handles popping.
+	// Let's use LPUSH to be consistent with `server.go` producer logic.
+	if err := w.redis.LPush(scopedQueueName, string(taskJSON)); err != nil {
+		return fmt.Errorf("failed to push to scoped queue: %w", err)
+	}
+
+	// 2. Notify global queue
+	if err := w.redis.LPush(GlobalWorkQueueName, scopedQueueName); err != nil {
+		return fmt.Errorf("failed to push to global queue: %w", err)
+	}
+
 	return nil
 }
 

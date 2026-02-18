@@ -65,12 +65,13 @@ type CognitiveChain struct {
 
 // CognitiveChainCheckTask represents a lightweight task for background processing.
 type CognitiveChainCheckTask struct {
-	ID        string    `json:"id"`
-	Type      string    `json:"type"` // e.g., "cognitive_chain_check"
-	TenantID  string    `json:"tenantId"`
-	UserID    string    `json:"userId"`
-	AgentID   string    `json:"agentId"`
-	Timestamp time.Time `json:"timestamp"`
+	ID         string    `json:"id"`
+	Type       string    `json:"type"` // e.g., "cognitive_chain_check"
+	TenantID   string    `json:"tenantId"`
+	UserID     string    `json:"userId"`
+	AgentID    string    `json:"agentId"`
+	Timestamp  time.Time `json:"timestamp"`
+	RetryCount int       `json:"retryCount,omitempty"`
 }
 
 // EmbeddingData represents vector embedding information.
