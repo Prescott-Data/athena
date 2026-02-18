@@ -356,10 +356,9 @@ func (sm *SessionManager) mergeChains(ctx context.Context, targetChain *models.C
 
 	update := bson.M{
 		"$set": bson.M{
-			"summary":         combinedSummary,
-			"topic":           mergedTopic,
-			"interactionSize": newInteractionSize,
-			"eventCount":      targetChain.EventCount + newChain.EventCount,
+			"summary":    combinedSummary,
+			"topic":      mergedTopic,
+			"eventCount": targetChain.EventCount + newChain.EventCount,
 			"lastEventAt":     newChain.LastEventAt,
 			"entities":        mergedEntities,
 			"updatedAt":       now,
