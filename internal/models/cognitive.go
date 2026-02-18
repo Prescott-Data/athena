@@ -50,6 +50,7 @@ type CognitiveChain struct {
 	LastEventAt time.Time          `json:"lastEventAt" bson:"lastEventAt"`
 	EventCount  int                `json:"eventCount" bson:"eventCount"`
 	Status      string             `json:"status" bson:"status"` // "active", "archived"
+	ArchivedAt  *time.Time         `json:"archivedAt,omitempty" bson:"archivedAt,omitempty"`
 	// --- NEW FIELDS FOR HEAT SCORING ---
 	IntrinsicImportance float64      `json:"intrinsicImportance" bson:"intrinsicImportance"` // Semantic score from LLM (0.0 - 1.0)
 	RecallStrength      float64      `json:"recallStrength" bson:"recallStrength"`           // Starts at 1.0, grows with recall
