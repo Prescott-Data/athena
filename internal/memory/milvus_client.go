@@ -44,10 +44,24 @@ func getVectorDimension() int {
 	return parseIntEnv("MILVUS_VECTOR_DIMENSION", DefaultVectorDimension)
 }
 
+// MilvusClientInterface defines the interface for Milvus client operations
+type MilvusClientInterface interface {
+	InsertEmbedding(ctx context.Context, tenantID, userID, agentID, pageID string, embedding *models.EmbeddingData) error
+	InsertSegmentEmbedding(ctx context.Context, tenantID, userID, agentID, segmentID string, embedding *models.EmbeddingData) error
+	GetEmbeddingByPageID(ctx context.Context, tenantID, userID, agentID, pageID string) (*models.EmbeddingData, error)
+	SearchSimilarEmbeddings(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int) ([]string, []float32, error)
+	SearchSimilarSegments(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int) ([]string, []float32, error)
+	DeleteSegmentEmbedding(ctx context.Context, tenantID, userID, agentID, segmentID string) error
+	Close() error
+}
+
 // MilvusClient wraps the Milvus SDK for STM operations
 type MilvusClient struct {
 	client client.Client
 }
+
+// Ensure MilvusClient implements MilvusClientInterface
+var _ MilvusClientInterface = (*MilvusClient)(nil)
 
 // NewMilvusClient creates a new Milvus client connection
 func NewMilvusClient(host, port string) (*MilvusClient, error) {
@@ -544,6 +558,21 @@ func (mc *MilvusClient) SearchSimilarSegments(ctx context.Context, tenantID, use
 		scores = append(scores, res.Scores[i])
 	}
 	return ids, scores, nil
+}
+
+// DeleteSegmentEmbedding removes a segment embedding from Milvus with tenant/user/agent scope
+func (mc *MilvusClient) DeleteSegmentEmbedding(ctx context.Context, tenantID, userID, agentID, segmentID string) error {
+	// Filter expression for tenant/user/agent scope and segment ID
+	expr := fmt.Sprintf(`%s == "%s" && %s == "%s" && %s == "%s" && %s == "%s"`,
+		TenantIDFieldName, tenantID,
+		UserIDFieldName, userID,
+		AgentIDFieldName, agentID,
+		SegmentIDFieldName, segmentID)
+
+	if err := mc.client.Delete(ctx, SegmentCollectionName, "", expr); err != nil {
+		return fmt.Errorf("failed to delete segment embedding: %w", err)
+	}
+	return nil
 }
 
 // Close closes the Milvus client connection

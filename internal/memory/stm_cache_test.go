@@ -203,3 +203,112 @@ func TestSTMCache_KeyScoping(t *testing.T) {
 	assert.Len(t, eventsB, 1)
 	assert.Equal(t, "tenant B message", eventsB[0].Content)
 }
+
+func TestSTMCache_EventCoalescing(t *testing.T) {
+	tenantID := "test-tenant"
+	userID := "test-user-coalesce"
+	agentID := "test-agent"
+	stmCache := setupRealSTMCache(t, tenantID, userID, agentID)
+	ctx := context.Background()
+
+	// 1. Add first observation event
+	event1 := STMEvent{
+		Role:      "agent",
+		Type:      models.STMEventTypeObservation,
+		Content:   "Step 1: Starting",
+		Timestamp: time.Now().UTC(),
+		Metadata:  map[string]string{"execution_id": "exec-1"},
+	}
+	assert.NoError(t, stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, event1))
+
+	// 2. Add second observation event with SAME execution_id
+	event2 := STMEvent{
+		Role:      "agent",
+		Type:      models.STMEventTypeObservation,
+		Content:   "Step 2: Processing",
+		Timestamp: time.Now().UTC(),
+		Metadata:  map[string]string{"execution_id": "exec-1", "extra": "data"},
+	}
+	assert.NoError(t, stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, event2))
+
+	// 3. Add third observation event with SAME execution_id
+	event3 := STMEvent{
+		Role:      "agent",
+		Type:      models.STMEventTypeObservation,
+		Content:   "Step 3: Finishing",
+		Timestamp: time.Now().UTC(),
+		Metadata:  map[string]string{"execution_id": "exec-1", "final": "true"},
+	}
+	assert.NoError(t, stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, event3))
+
+	// Verify coalescing: Should only have 1 event in cache
+	events, err := stmCache.GetSTMContext(ctx, tenantID, userID, agentID)
+	assert.NoError(t, err)
+	assert.Len(t, events, 1, "Expected exactly 1 event due to coalescing")
+
+	if len(events) == 1 {
+		coalescedEvent := events[0]
+		assert.Equal(t, "Step 3: Finishing", coalescedEvent.Content)
+		assert.Equal(t, "exec-1", coalescedEvent.Metadata["execution_id"])
+		assert.Equal(t, "data", coalescedEvent.Metadata["extra"])
+		assert.Equal(t, "true", coalescedEvent.Metadata["final"])
+		assert.Equal(t, "3", coalescedEvent.Metadata["coalesced_count"])
+	}
+
+	// 4. Fire a standard message event
+	messageEvent := STMEvent{
+		Role:      "user",
+		Type:      models.STMEventTypeMessage,
+		Content:   "Hello",
+		Timestamp: time.Now().UTC(),
+	}
+	assert.NoError(t, stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, messageEvent))
+
+	// Verify list length is 2
+	events, err = stmCache.GetSTMContext(ctx, tenantID, userID, agentID)
+	assert.NoError(t, err)
+	assert.Len(t, events, 2)
+	assert.Equal(t, "Hello", events[0].Content)             // Newest (Message)
+	assert.Equal(t, "Step 3: Finishing", events[1].Content) // Older (Coalesced Observation)
+
+	// 5. Fire a new observation with DIFFERENT execution_id
+	event4 := STMEvent{
+		Role:      "agent",
+		Type:      models.STMEventTypeObservation,
+		Content:   "New Exec Step 1",
+		Timestamp: time.Now().UTC(),
+		Metadata:  map[string]string{"execution_id": "exec-2"},
+	}
+	assert.NoError(t, stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, event4))
+
+	// Verify list length is 3 (Message, Coalesced1, NewObs) -> wait, add pushes to head.
+	// Order: NewObs, Message, Coalesced1
+	events, err = stmCache.GetSTMContext(ctx, tenantID, userID, agentID)
+	assert.NoError(t, err)
+	assert.Len(t, events, 3)
+	assert.Equal(t, "New Exec Step 1", events[0].Content)
+	assert.Equal(t, "exec-2", events[0].Metadata["execution_id"])
+	// coalesced_count might not be present or "1" depending on logic?
+	// Logic: "Increment coalesced_count ... if countStr != '' ... else count=1 ... strconv.Itoa(count)".
+	// If it's a new event (not coalesced), we don't set coalesced_count explicitly in AddSTMEvent unless we modify it before LPush.
+	// The implementation only sets it when coalescing. So it shouldn't exist for new uncoalesced events unless passed in.
+	_, hasCount := events[0].Metadata["coalesced_count"]
+	assert.False(t, hasCount, "New uncoalesced event should not have coalesced_count yet")
+
+	// 6. Fire another observation with exec-2
+	event5 := STMEvent{
+		Role:      "agent",
+		Type:      models.STMEventTypeObservation,
+		Content:   "New Exec Step 2",
+		Timestamp: time.Now().UTC(),
+		Metadata:  map[string]string{"execution_id": "exec-2"},
+	}
+	assert.NoError(t, stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, event5))
+
+	// Verify length is still 3 (coalesced exec-2)
+	events, err = stmCache.GetSTMContext(ctx, tenantID, userID, agentID)
+	assert.NoError(t, err)
+	assert.Len(t, events, 3)
+	assert.Equal(t, "New Exec Step 2", events[0].Content)
+	assert.Equal(t, "2", events[0].Metadata["coalesced_count"])
+}

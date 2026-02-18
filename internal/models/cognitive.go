@@ -50,12 +50,14 @@ type CognitiveChain struct {
 	LastEventAt time.Time          `json:"lastEventAt" bson:"lastEventAt"`
 	EventCount  int                `json:"eventCount" bson:"eventCount"`
 	Status      string             `json:"status" bson:"status"` // "active", "archived"
+	ArchivedAt  *time.Time         `json:"archivedAt,omitempty" bson:"archivedAt,omitempty"`
 	// --- NEW FIELDS FOR HEAT SCORING ---
-	AccessCount     int          `json:"accessCount" bson:"accessCount,omitempty"`
-	InteractionSize int          `json:"interactionSize" bson:"interactionSize,omitempty"`
-	LastAccessTime  *time.Time   `json:"lastAccessTime" bson:"lastAccessTime,omitempty"`
-	HeatScore       float64      `json:"heatScore" bson:"heatScore,omitempty"`
-	HeatFactors     *HeatFactors `json:"heatFactors" bson:"heatFactors,omitempty"`
+	IntrinsicImportance float64      `json:"intrinsicImportance" bson:"intrinsicImportance"` // Semantic score from LLM (0.0 - 1.0)
+	RecallStrength      float64      `json:"recallStrength" bson:"recallStrength"`           // Starts at 1.0, grows with recall
+	LastAccessedAt      *time.Time   `json:"lastAccessedAt" bson:"lastAccessedAt,omitempty"` // Timestamp of last recall
+	DensityScore        float64      `json:"densityScore" bson:"densityScore"`               // Score for contextual density/system events
+	HeatScore           float64      `json:"heatScore" bson:"heatScore,omitempty"`
+	HeatFactors         *HeatFactors `json:"heatFactors" bson:"heatFactors,omitempty"`
 	// --- END NEW FIELDS ---
 	// Service-level metadata (e.g. origin_service, context_type) set at session creation.
 	Metadata map[string]string `json:"metadata" bson:"metadata,omitempty"`

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"bitbucket.org/dromos/memory-os/internal/cache"
+	"bitbucket.org/dromos/memory-os/internal/llm"
 	"bitbucket.org/dromos/memory-os/internal/models"
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/bson"
@@ -196,12 +197,13 @@ type LLMConfig struct {
 
 // STMStore manages the Short-Term Memory store operations
 type STMStore struct {
-	db         *mongo.Database
-	redis      cache.Interface
-	milvus     *MilvusClient
-	llmGuards  *LLMGuardrails
-	llmConfig  LLMConfig
-	HTTPClient *http.Client
+	db          *mongo.Database
+	redis       cache.Interface
+	milvus      *MilvusClient
+	llmGuards   *LLMGuardrails
+	llmConfig   LLMConfig
+	HTTPClient  *http.Client
+	llmProvider llm.Provider
 
 	// MTM Components
 	qualityValidator  *QualityValidator
@@ -232,22 +234,32 @@ func NewSTMStore(database *mongo.Database, redisClient cache.Interface) *STMStor
 		SummaryTimeout:   time.Duration(parseIntEnv("LLM_SUMMARY_TIMEOUT_SEC", 20)) * time.Second,
 	}
 
+	providerType := os.Getenv("LLM_PROVIDER")
+	if providerType == "" {
+		providerType = "azure" // Default to azure for backward compatibility
+	}
+
+	factory := &llm.Factory{}
+	llmProvider, err := factory.NewProvider(providerType)
+	if err != nil {
+		log.Printf("WARN: Failed to initialize LLM provider: %v", err)
+	}
+
 	ss := &STMStore{
-		db:        database,
-		redis:     redisClient,
-		milvus:    milvusClient,
-		llmConfig: llmConfig,
+		db:          database,
+		redis:       redisClient,
+		milvus:      milvusClient,
+		llmConfig:   llmConfig,
 		llmGuards: &LLMGuardrails{
 			redis: redisClient,
 		},
-		HTTPClient: &http.Client{},
+		HTTPClient:  &http.Client{},
+		llmProvider: llmProvider,
 	}
 
 	// Initialize MTM components
 	ss.qualityValidator = NewQualityValidator()
-	// --- FIX: Pass 'ss' (the STMStore) as the second argument ---
-	ss.parallelProcessor = NewParallelProcessor(10, ss) // Default concurrency
-	// --- END FIX ---
+	ss.parallelProcessor = NewParallelProcessor(10, ss)
 	ss.topicAnalyzer = NewTopicAnalyzer(ss, ss.parallelProcessor)
 	ss.sessionManager = NewSessionManager(database, ss)
 
@@ -280,11 +292,12 @@ func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, ag
 
 	// Step 1: (Analysis)
 	// We create the summary *first* to build the candidate.
-	summary, err := s.CreateSegmentSummary(ctx, events)
+	summary, intrinsicImportance, err := s.CreateSegmentSummary(ctx, events)
 	if err != nil {
 		// Log but don't fail, we can use a placeholder
 		log.Printf("WARN: Failed to create segment summary for chain %s: %v", chainID, err)
 		summary = "Conversation segment."
+		intrinsicImportance = 0.5
 	}
 
 	// Extract the main topic using the TopicAnalyzer
@@ -305,7 +318,7 @@ func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, ag
 			topic = summary
 		}
 	}
-	log.Printf("INFO: Topic analysis complete. Topic: %s | Summary: %s", topic, summary)
+	log.Printf("INFO: Topic analysis complete. Topic: %s | Importance: %.2f", topic, intrinsicImportance)
 
 	// Extract named entities for structured LTM triple writing
 	entities, err := s.ExtractEntities(ctx, events)
@@ -324,19 +337,21 @@ func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, ag
 	}
 
 	candidateChain := &models.CognitiveChain{
-		ID:          primitive.NewObjectID(), // Generate a temp ID
-		TenantID:    tenantID,
-		UserID:      userID,
-		AgentID:     agentID,
-		ChainID:     chainID,
-		Topic:       topic,
-		Summary:     summary,
-		Entities:    entities,
-		StartedAt:   events[0].CreatedAt,
-		LastEventAt: events[len(events)-1].CreatedAt,
-		EventCount:  len(events),
-		Status:      "pending", // Not yet saved
-		Metadata:    sessionMetadata,
+		ID:                  primitive.NewObjectID(),
+		TenantID:            tenantID,
+		UserID:              userID,
+		AgentID:             agentID,
+		ChainID:             chainID,
+		Topic:               topic,
+		Summary:             summary,
+		Entities:            entities,
+		StartedAt:           events[0].CreatedAt,
+		LastEventAt:         events[len(events)-1].CreatedAt,
+		EventCount:          len(events),
+		Status:              "pending",
+		Metadata:            sessionMetadata,
+		RecallStrength:      1.0,                 // Initialize Ebbinghaus recall strength
+		IntrinsicImportance: intrinsicImportance, // From LLM analysis
 	}
 
 	// Step 3: (Quality Gate)
@@ -727,42 +742,70 @@ func (s *STMStore) releaseProcessingLock(ctx context.Context, chainID string) {
 	}
 }
 
-// CreateSegmentSummary generates a one-sentence summary for a segment using the LLM
-func (s *STMStore) CreateSegmentSummary(ctx context.Context, events []models.CognitiveEvent) (string, error) {
+// CreateSegmentSummary generates a detailed summary and importance score for a segment using the LLM with Structured Outputs
+func (s *STMStore) CreateSegmentSummary(ctx context.Context, events []models.CognitiveEvent) (string, float64, error) {
 	LLMBaseURL := os.Getenv("LLM_BASE_URL")
 	apiKey := os.Getenv("AZURE_OPENAI_API_KEY")
 
 	if LLMBaseURL == "" {
-		return "", fmt.Errorf("llm_base_url not configured")
+		return "", 0, fmt.Errorf("llm_base_url not configured")
 	}
 
 	if apiKey == "" {
-		return "", fmt.Errorf("azure_openai_api_key not configured")
+		return "", 0, fmt.Errorf("azure_openai_api_key not configured")
 	}
 
 	if !s.llmGuards.checkRateLimit(ctx, "summary_user") {
-		return "", fmt.Errorf("llm summary rate limit exceeded")
+		return "", 0, fmt.Errorf("llm summary rate limit exceeded")
 	}
 	if !s.llmGuards.checkCircuitBreaker() {
-		return "", fmt.Errorf("llm summary circuit breaker is open")
+		return "", 0, fmt.Errorf("llm summary circuit breaker is open")
+	}
+
+	// Define strict JSON Schema for the response
+	jsonSchema := map[string]interface{}{
+		"name":   "mtm_summary_schema",
+		"strict": true,
+		"schema": map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"summary": map[string]interface{}{
+					"type":        "string",
+					"description": "A concise, detailed summary of the conversation segment.",
+				},
+				"intrinsic_importance": map[string]interface{}{
+					"type":        "number",
+					"description": "A float between 0.0 and 1.0 indicating the core value or permanence of this memory. 0.1 is trivial chitchat, 0.5 is standard context, 0.9+ is a critical system fact, core user preference, or hard constraint.",
+				},
+			},
+			"required":             []string{"summary", "intrinsic_importance"},
+			"additionalProperties": false,
+		},
 	}
 
 	var b strings.Builder
-	b.WriteString("You are a memory analysis agent. Your task is to create a concise, one-sentence summary of the following cognitive event chain. The summary should capture the core topic, key facts, and the agent's reasoning process.\n\nHere is the event chain:\n---")
+	b.WriteString("You are a memory analysis agent. Analyze the following conversation segment.\n")
+	b.WriteString("1. Generate a concise, detailed summary of the core topic, key facts, and reasoning.\n")
+	b.WriteString("2. Evaluate the 'intrinsic_importance' of this segment based on its long-term value.\n")
+	b.WriteString("\nEvent Chain:\n---")
 	for _, event := range events {
 		b.WriteString(fmt.Sprintf("%s: [%s] %s\n", event.Role, event.Type, event.Content))
 	}
-	b.WriteString("---\n\nFocus on the \"why\" behind the agent's actions, as revealed in its thoughts. The summary should be from the perspective of the agent.\n\nOne-sentence summary:")
+	b.WriteString("---\n\nRespond with the required JSON object.")
 
 	prompt := b.String()
 
 	reqBody := map[string]interface{}{
 		"messages": []map[string]string{
+			{"role": "system", "content": "You are a helpful assistant designed to output JSON."},
 			{"role": "user", "content": prompt},
 		},
-		"max_tokens":  64,
+		"max_tokens":  256,
 		"temperature": 0.3,
-		"stop":        []string{"\n"},
+		"response_format": map[string]interface{}{
+			"type":        "json_schema",
+			"json_schema": jsonSchema,
+		},
 	}
 	body, _ := json.Marshal(reqBody)
 	httpCtx, cancel := context.WithTimeout(ctx, s.llmConfig.SummaryTimeout)
@@ -770,7 +813,7 @@ func (s *STMStore) CreateSegmentSummary(ctx context.Context, events []models.Cog
 	req, err := http.NewRequestWithContext(httpCtx, "POST", LLMBaseURL, bytes.NewBuffer(body))
 	if err != nil {
 		s.llmGuards.recordLLMResult(false) // Record failure
-		return "", err
+		return "", 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("api-key", apiKey)
@@ -778,12 +821,12 @@ func (s *STMStore) CreateSegmentSummary(ctx context.Context, events []models.Cog
 	resp, err := s.HTTPClient.Do(req)
 	if err != nil {
 		s.llmGuards.recordLLMResult(false) // Record failure
-		return "", err
+		return "", 0, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		s.llmGuards.recordLLMResult(false) // Record failure
-		return "", fmt.Errorf("llm summary API returned %d", resp.StatusCode)
+		return "", 0, fmt.Errorf("llm summary API returned %d", resp.StatusCode)
 	}
 	raw, _ := io.ReadAll(resp.Body)
 	var llmResp struct {
@@ -795,14 +838,26 @@ func (s *STMStore) CreateSegmentSummary(ctx context.Context, events []models.Cog
 	}
 	if err := json.Unmarshal(raw, &llmResp); err != nil {
 		s.llmGuards.recordLLMResult(false) // Record failure
-		return "", err
+		return "", 0, err
 	}
 	if len(llmResp.Choices) == 0 {
 		s.llmGuards.recordLLMResult(false) // Record failure
-		return "", fmt.Errorf("empty summary choices")
+		return "", 0, fmt.Errorf("empty summary choices")
 	}
+
+	// Parse the structured output
+	type MTMSummaryResponse struct {
+		Summary             string  `json:"summary"`
+		IntrinsicImportance float64 `json:"intrinsic_importance"`
+	}
+	var summaryResp MTMSummaryResponse
+	if err := json.Unmarshal([]byte(llmResp.Choices[0].Message.Content), &summaryResp); err != nil {
+		s.llmGuards.recordLLMResult(false)
+		return "", 0, fmt.Errorf("failed to parse structured output: %w", err)
+	}
+
 	s.llmGuards.recordLLMResult(true) // Record success
-	return strings.TrimSpace(llmResp.Choices[0].Message.Content), nil
+	return summaryResp.Summary, summaryResp.IntrinsicImportance, nil
 }
 
 // ExtractEntities extracts named entities from a cognitive event chain using the LLM.
@@ -1000,4 +1055,95 @@ func (s *STMStore) SearchSimilarChains(ctx context.Context, tenantID, userID, ag
 	log.Printf("INFO: Fetched %d full cognitive chain documents from MongoDB.", len(chains))
 
 	return chains, nil
+}
+
+// ArchiveColdChains scans for cold chains (low heat score) and archives them.
+// Archiving involves deleting the vector embedding from Milvus and updating the status in MongoDB.
+func (s *STMStore) ArchiveColdChains(ctx context.Context) (int, error) {
+	if s.db == nil {
+		return 0, fmt.Errorf("database not initialized")
+	}
+
+	// 1. Define criteria for "potentially cold" chains to scan.
+	// We look for active chains that haven't been accessed in a while (e.g., 7 days).
+	// This optimization avoids scanning the entire database every time.
+	archiveScanDays := parseIntEnv("MTM_ARCHIVE_SCAN_DAYS", 7)
+	scanThreshold := time.Now().AddDate(0, 0, -archiveScanDays)
+
+	filter := bson.M{
+		"status": "active",
+		"$or": []bson.M{
+			{"lastAccessedAt": bson.M{"$lt": scanThreshold}},
+			{"lastAccessedAt": bson.M{"$exists": false}, "lastEventAt": bson.M{"$lt": scanThreshold}},
+		},
+	}
+
+	collection := s.db.Collection(CognitiveChainsCollection)
+	cursor, err := collection.Find(ctx, filter)
+	if err != nil {
+		return 0, fmt.Errorf("failed to query potential cold chains: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	var chains []models.CognitiveChain
+	if err := cursor.All(ctx, &chains); err != nil {
+		return 0, fmt.Errorf("failed to decode potential cold chains: %w", err)
+	}
+
+	if len(chains) == 0 {
+		return 0, nil
+	}
+
+	log.Printf("INFO: ArchiveColdChains found %d candidates for analysis.", len(chains))
+
+	// 2. Initialize HeatScorer to calculate current heat
+	heatScorer := NewHeatScorer(s.db)
+	freezingPoint := parseFloatEnv("MTM_FREEZING_POINT", 0.1)
+
+	archivedCount := 0
+
+	for _, chain := range chains {
+		// Calculate current heat score
+		currentHeat, _, err := heatScorer.ComputeSegmentHeat(ctx, &chain)
+		if err != nil {
+			log.Printf("WARN: Failed to compute heat for chain %s: %v", chain.ChainID, err)
+			continue
+		}
+
+		// Check if below freezing point
+		if currentHeat < freezingPoint {
+			log.Printf("INFO: Archiving cold chain %s (Heat: %.3f < %.3f)", chain.ChainID, currentHeat, freezingPoint)
+
+			// A. Delete vector from Milvus
+			if s.milvus != nil {
+				if err := s.milvus.DeleteSegmentEmbedding(ctx, chain.TenantID, chain.UserID, chain.AgentID, chain.ChainID); err != nil {
+					log.Printf("ERROR: Failed to delete vector for chain %s: %v", chain.ChainID, err)
+					// We continue to mark as archived in Mongo, assuming Milvus might be down or data inconsistent.
+					// Alternatively, we could skip archiving in Mongo to retry later.
+					// For now, let's proceed to ensure Mongo state reflects "archived" status.
+				}
+			} else {
+				log.Println("WARN: Milvus client not available, skipping vector deletion.")
+			}
+
+			// B. Update status in MongoDB
+			now := time.Now()
+			update := bson.M{
+				"$set": bson.M{
+					"status":     "archived",
+					"archivedAt": now,
+					"heatScore":  currentHeat, // Persist the final low score
+				},
+			}
+			_, err := collection.UpdateOne(ctx, bson.M{"_id": chain.ID}, update)
+			if err != nil {
+				log.Printf("ERROR: Failed to update status for chain %s in MongoDB: %v", chain.ChainID, err)
+			} else {
+				archivedCount++
+			}
+		}
+	}
+
+	log.Printf("INFO: ArchiveColdChains completed. Archived %d/%d candidates.", archivedCount, len(chains))
+	return archivedCount, nil
 }

@@ -347,7 +347,6 @@ func (sm *SessionManager) mergeChains(ctx context.Context, targetChain *models.C
 
 	// 3. Update the target chain
 	combinedSummary := sm.combineSummaries(targetChain.Summary, newChain.Summary)
-	newInteractionSize := targetChain.InteractionSize + newChain.InteractionSize
 
 	// Inherit the topic from the new chain if the target chain has none
 	mergedTopic := targetChain.Topic
@@ -405,10 +404,10 @@ func (sm *SessionManager) createStandaloneChain(ctx context.Context, chain *mode
 	chainsCollection := sm.db.Collection(CognitiveChainsCollection)
 
 	// Initialize chain with proper values
-	chain.InteractionSize = len(events)
 	chain.EventCount = len(events)
-	chain.AccessCount = 0
-	chain.LastAccessTime = nil
+	chain.RecallStrength = 1.0
+	chain.IntrinsicImportance = 0.5
+	chain.LastAccessedAt = nil
 	chain.HeatScore = 0.0
 	chain.HeatFactors = nil
 	chain.Status = "active"
