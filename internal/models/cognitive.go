@@ -57,6 +57,8 @@ type CognitiveChain struct {
 	HeatScore       float64      `json:"heatScore" bson:"heatScore,omitempty"`
 	HeatFactors     *HeatFactors `json:"heatFactors" bson:"heatFactors,omitempty"`
 	// --- END NEW FIELDS ---
+	// Service-level metadata (e.g. origin_service, context_type) set at session creation.
+	Metadata map[string]string `json:"metadata" bson:"metadata,omitempty"`
 }
 
 // CognitiveChainCheckTask represents a lightweight task for background processing.

@@ -193,8 +193,8 @@ func CreateTenantIndexes(ctx context.Context, db *mongo.Database) error {
 		},
 	}
 
-	// Dialogue Chains collection indexes
-	chainsCollection := db.Collection("dialogue_chains")
+	// Cognitive Chains collection indexes
+	chainsCollection := db.Collection("cognitive_chains")
 	chainIndexes := []mongo.IndexModel{
 		{
 			Keys: map[string]interface{}{
@@ -211,6 +211,16 @@ func CreateTenantIndexes(ctx context.Context, db *mongo.Database) error {
 				"agentId":   1,
 				"status":    1,
 				"startedAt": -1,
+			},
+		},
+		{
+			Keys: map[string]interface{}{
+				"metadata.origin_service": 1,
+			},
+		},
+		{
+			Keys: map[string]interface{}{
+				"metadata.context_type": 1,
 			},
 		},
 	}

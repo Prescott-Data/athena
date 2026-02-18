@@ -282,6 +282,13 @@
                 "similarityThreshold": {
                   "type": "number",
                   "format": "double"
+                },
+                "filter": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "description": "Optional metadata filters — only chains whose metadata matches all provided\nkey/value pairs are returned (e.g. {\"origin_service\": \"colabra\"})."
                 }
               }
             }

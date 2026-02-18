@@ -337,7 +337,7 @@ func (s *MemoryServer) GetContext(ctx context.Context, req *gen.GetContextReques
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to create query embedding: %v", err)
 		}
-		chains, err := s.stmStore.SearchSimilarChains(ctx, tenantID, userID, agentID, queryEmbedding.Vector, limit)
+		chains, err := s.stmStore.SearchSimilarChains(ctx, tenantID, userID, agentID, queryEmbedding.Vector, limit, nil)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to search similar chains: %v", err)
 		}
@@ -430,6 +430,7 @@ func (s *MemoryServer) CreateSession(ctx context.Context, req *gen.CreateSession
 		LastEventAt: now,
 		EventCount:  0,
 		Status:      "active",
+		Metadata:    req.Metadata,
 	}
 
 	collection := s.mongoClient.Database(s.config.Database.MongoDB.Database).Collection("cognitive_chains")
@@ -470,7 +471,7 @@ func (s *MemoryServer) SearchMemory(ctx context.Context, req *gen.SearchMemoryRe
 	}
 
 	// Search for similar chains using the STM store's vector search
-	chains, err := s.stmStore.SearchSimilarChains(ctx, tenantID, userID, agentID, queryEmbedding.Vector, limit)
+	chains, err := s.stmStore.SearchSimilarChains(ctx, tenantID, userID, agentID, queryEmbedding.Vector, limit, req.Filter)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to search similar chains: %v", err)
 	}
