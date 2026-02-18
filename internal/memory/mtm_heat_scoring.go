@@ -18,10 +18,11 @@ type HeatScorer struct {
 
 // HeatScoringConfig holds configuration for the Ebbinghaus heat scoring algorithm
 type HeatScoringConfig struct {
-	WeightIntrinsic  float64 // Weight for LLM-provided importance (0.0-1.0)
-	WeightCognitive  float64 // Weight for cognitive depth (0.0-1.0)
-	DecayTauHours    float64 // Base decay constant in hours
+	WeightIntrinsic    float64 // Weight for LLM-provided importance (0.0-1.0)
+	WeightDensity      float64 // Weight for contextual density (0.0-1.0)
+	DecayTauHours      float64 // Base decay constant in hours
 	RecallGrowthFactor float64 // Multiplier for RecallStrength on successful recall
+	CooldownHours      float64 // Minimum hours between recall strength boosts
 }
 
 // NewHeatScorer creates a new heat scorer and initializes configuration from environment variables
@@ -29,10 +30,11 @@ func NewHeatScorer(db *mongo.Database) *HeatScorer {
 	return &HeatScorer{
 		db: db,
 		config: HeatScoringConfig{
-			WeightIntrinsic:    parseFloatEnv("HEAT_WEIGHT_INTRINSIC", 0.8),
-			WeightCognitive:    parseFloatEnv("HEAT_WEIGHT_COGNITIVE", 0.2),
+			WeightIntrinsic:    parseFloatEnv("HEAT_WEIGHT_INTRINSIC", 0.7),
+			WeightDensity:      parseFloatEnv("HEAT_WEIGHT_DENSITY", 0.3),
 			DecayTauHours:      parseFloatEnv("HEAT_DECAY_TAU_HOURS", 24.0),
 			RecallGrowthFactor: parseFloatEnv("HEAT_RECALL_GROWTH", 1.5),
+			CooldownHours:      parseFloatEnv("HEAT_COOLDOWN_HOURS", 12.0),
 		},
 	}
 }
@@ -42,17 +44,23 @@ func NewHeatScorer(db *mongo.Database) *HeatScorer {
 func (h *HeatScorer) ComputeSegmentHeat(ctx context.Context, chain *models.CognitiveChain) (float64, *models.HeatFactors, error) {
 	now := time.Now()
 
-	// 1. Calculate Cognitive Score if not already set (or if we want to refresh it)
+	// 1. Calculate Density Score if not already set (or if we want to refresh it)
 	// For efficiency, we only calculate if it's 0.0, assuming 0.0 means uninitialized.
-	// In a real system, we might want to be more robust.
-	if chain.CognitiveScore == 0.0 {
-		chain.CognitiveScore = h.calculateCognitiveScore(ctx, chain)
+	if chain.DensityScore == 0.0 {
+		// Fetch events to calculate density
+		events, err := h.fetchEventsForChain(ctx, chain.ChainID)
+		if err == nil {
+			chain.DensityScore = h.CalculateDensity(chain, events)
+		} else {
+			// If failed to fetch, default to 0.0 or keep as is?
+			// CalculateDensity with nil events might be safe if implemented defensively
+			chain.DensityScore = h.CalculateDensity(chain, nil)
+		}
 	}
 
 	// 2. Calculate Base Importance (I_base)
-	// I_base = min(1.0, w1 * Intrinsic + w2 * Cognitive)
-	// If IntrinsicImportance is 0 (e.g., legacy data), we might default it or let it be 0.
-	iBase := math.Min(1.0, (h.config.WeightIntrinsic*chain.IntrinsicImportance)+(h.config.WeightCognitive*chain.CognitiveScore))
+	// I_base = min(1.0, w1 * Intrinsic + w2 * Density)
+	iBase := math.Min(1.0, (h.config.WeightIntrinsic*chain.IntrinsicImportance)+(h.config.WeightDensity*chain.DensityScore))
 
 	// 3. Calculate Time Delta (DeltaT)
 	var lastAccess time.Time
@@ -94,17 +102,57 @@ func (h *HeatScorer) ComputeSegmentHeat(ctx context.Context, chain *models.Cogni
 // RecordAccess updates a cognitive chain when it is retrieved/recalled.
 // It implements Spaced Repetition by increasing RecallStrength and resetting the forgetting curve.
 func (h *HeatScorer) RecordAccess(ctx context.Context, chain *models.CognitiveChain) error {
+	// Apply the logic (Cooldown, Growth, Recalculation)
+	if err := h.ApplyAccessUpdate(ctx, chain); err != nil {
+		return err
+	}
+
+	// Persist changes to MongoDB
+	if h.db != nil {
+		collection := h.db.Collection("cognitive_chains")
+		filter := bson.M{"chainId": chain.ChainID}
+		update := bson.M{
+			"$set": bson.M{
+				"lastAccessedAt": chain.LastAccessedAt,
+				"recallStrength": chain.RecallStrength,
+				"heatScore":      chain.HeatScore,
+				"heatFactors":    chain.HeatFactors,
+				"densityScore":   chain.DensityScore,
+				"updatedAt":      time.Now(),
+			},
+		}
+		_, err := collection.UpdateOne(ctx, filter, update)
+		return err
+	}
+	return nil
+}
+
+// ApplyAccessUpdate applies the spaced repetition and cooldown logic to the chain object.
+// It does NOT persist to the database.
+func (h *HeatScorer) ApplyAccessUpdate(ctx context.Context, chain *models.CognitiveChain) error {
 	now := time.Now()
+
+	// Initialize RecallStrength if needed
+	if chain.RecallStrength < 1.0 {
+		chain.RecallStrength = 1.0
+	}
+
+	// Determine if RecallStrength should grow (Spaced Repetition Cooldown)
+	shouldGrow := true
+	if chain.LastAccessedAt != nil {
+		elapsed := now.Sub(*chain.LastAccessedAt).Hours()
+		if elapsed < h.config.CooldownHours {
+			shouldGrow = false
+		}
+	}
 
 	// 1. Update LastAccessedAt
 	chain.LastAccessedAt = &now
 
-	// 2. Increase RecallStrength
-	// S_new = S_old * GrowthFactor
-	if chain.RecallStrength < 1.0 {
-		chain.RecallStrength = 1.0
+	// 2. Increase RecallStrength only if cooldown passed
+	if shouldGrow {
+		chain.RecallStrength *= h.config.RecallGrowthFactor
 	}
-	chain.RecallStrength *= h.config.RecallGrowthFactor
 
 	// 3. Recalculate Heat Score immediately to reflect the "refresh"
 	// (DeltaT is now 0, so Heat should jump to I_base)
@@ -115,89 +163,81 @@ func (h *HeatScorer) RecordAccess(ctx context.Context, chain *models.CognitiveCh
 	chain.HeatScore = newHeat
 	chain.HeatFactors = factors
 
-	// 4. Persist changes to MongoDB
-	collection := h.db.Collection("cognitive_chains")
-	filter := bson.M{"chainId": chain.ChainID}
-	update := bson.M{
-		"$set": bson.M{
-			"lastAccessedAt": chain.LastAccessedAt,
-			"recallStrength": chain.RecallStrength,
-			"heatScore":      chain.HeatScore,
-			"heatFactors":    chain.HeatFactors,
-			"cognitiveScore": chain.CognitiveScore, // Save this too in case it was computed
-			"updatedAt":      now,
-		},
-	}
-
-	_, err = collection.UpdateOne(ctx, filter, update)
-	return err
+	return nil
 }
 
-// calculateCognitiveScore assesses cognitive processing depth from events.
-// Formerly calculateCognitiveDepth.
-func (h *HeatScorer) calculateCognitiveScore(ctx context.Context, chain *models.CognitiveChain) float64 {
-	// If database is not available, return a default moderate score
-	if h.db == nil {
-		return 0.5
+// CalculateDensity computes the Contextual Density score for a chain.
+func (h *HeatScorer) CalculateDensity(chain *models.CognitiveChain, events []models.CognitiveEvent) float64 {
+	density := 0.0
+
+	// 1. Entity Presence
+	if len(chain.Entities) > 0 {
+		density += 0.15
 	}
 
-	// Fetch events for this chain from the database
+	hasThoughtOrAction := false
+	hasWorkflowMetadata := false
+	uniqueOriginServices := make(map[string]bool)
+
+	for _, event := range events {
+		// 2. Event Types
+		if !hasThoughtOrAction && (event.Type == models.STMEventTypeThought || event.Type == models.STMEventTypeAction) {
+			density += 0.20
+			hasThoughtOrAction = true
+		}
+
+		// 3. Workflow Metadata
+		if !hasWorkflowMetadata && event.Type == models.STMEventTypeObservation {
+			if event.Metadata != nil {
+				_, hasWf := event.Metadata["workflow_id"]
+				_, hasExec := event.Metadata["execution_id"]
+				_, hasBlob := event.Metadata["blob_url"]
+				if hasWf || hasExec || hasBlob {
+					density += 0.25
+					hasWorkflowMetadata = true
+				}
+			}
+		}
+
+		// 4. Origin Service Tracking
+		if event.Metadata != nil {
+			if svc, ok := event.Metadata["origin_service"]; ok {
+				if svcStr, valid := svc.(string); valid && svcStr != "" {
+					uniqueOriginServices[svcStr] = true
+				}
+			}
+		}
+	}
+
+	// 5. Multi-Service Context
+	if len(uniqueOriginServices) > 1 {
+		density += 0.20
+	}
+
+	// Cap at 1.0
+	return math.Min(1.0, density)
+}
+
+// fetchEventsForChain retrieves events for a given chain ID
+func (h *HeatScorer) fetchEventsForChain(ctx context.Context, chainID string) ([]models.CognitiveEvent, error) {
+	if h.db == nil {
+		return nil, mongo.ErrNoDocuments
+	}
+
 	eventsCollection := h.db.Collection(CognitiveEventsCollection)
-	filter := bson.M{"chainid": chain.ChainID}
+	filter := bson.M{"chainId": chainID}
 
 	cursor, err := eventsCollection.Find(ctx, filter)
 	if err != nil {
-		return 0.5
+		return nil, err
 	}
 	defer cursor.Close(ctx)
 
 	var events []models.CognitiveEvent
 	if err := cursor.All(ctx, &events); err != nil {
-		return 0.5
+		return nil, err
 	}
-
-	if len(events) == 0 {
-		return 0.5
-	}
-
-	// Count thought and action events
-	thoughtCount := 0
-	actionCount := 0
-	for _, event := range events {
-		switch event.Type {
-		case models.STMEventTypeThought:
-			thoughtCount++
-		case models.STMEventTypeAction:
-			actionCount++
-		}
-	}
-
-	// Base score
-	score := 0.5
-
-	// Bonus for thoughts (indicates reasoning)
-	if thoughtCount > 0 {
-		thoughtRatio := float64(thoughtCount) / float64(len(events))
-		score += 0.25 * thoughtRatio // Up to +0.25
-	}
-
-	// Bonus for actions (indicates tool use/execution)
-	if actionCount > 0 {
-		actionRatio := float64(actionCount) / float64(len(events))
-		score += 0.2 * actionRatio // Up to +0.2
-	}
-
-	// Bonus for balanced cognitive processing
-	if thoughtCount > 0 && actionCount > 0 {
-		score += 0.15
-	}
-
-	// Cap at 1.0
-	if score > 1.0 {
-		score = 1.0
-	}
-
-	return score
+	return events, nil
 }
 
 // UpdateSegmentAccess is deprecated but kept for compatibility. Use RecordAccess instead.
@@ -235,7 +275,7 @@ func (h *HeatScorer) BatchRecalculateHeat(ctx context.Context, chainIDs []string
 			"$set": bson.M{
 				"heatScore":      heatScore,
 				"heatFactors":    heatFactors,
-				"cognitiveScore": chain.CognitiveScore, // Ensure this is saved
+				"densityScore":   chain.DensityScore, // Ensure this is saved
 				"updatedAt":      time.Now(),
 			},
 		}

@@ -98,15 +98,18 @@ func Test_CreateSegmentSummary_BuildsRichPrompt(t *testing.T) {
 		{Role: "agent", Type: models.STMEventTypeAction, Content: "Calling tool: echo"},
 	}
 
-	// Mock the HTTP response
+	// Mock the HTTP response with structured JSON
+	mockJSON := `{"choices":[{"message":{"content":"{\"summary\": \"Summary\", \"intrinsic_importance\": 0.8}"}}]}`
 	mockResp := &http.Response{
 		StatusCode: http.StatusOK,
-		Body:       io.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"Summary"}}]}`)),
+		Body:       io.NopCloser(strings.NewReader(mockJSON)),
 	}
 	mockTripper.On("RoundTrip", mock.Anything).Return(mockResp, nil).Once()
 
-	_, err := stmStore.CreateSegmentSummary(ctx, testEvents)
+	summary, importance, err := stmStore.CreateSegmentSummary(ctx, testEvents)
 	assert.NoError(t, err)
+	assert.Equal(t, "Summary", summary)
+	assert.Equal(t, 0.8, importance)
 
 	// Assert that the prompt was correct
 	mockTripper.AssertCalled(t, "RoundTrip", mock.Anything)
@@ -118,10 +121,11 @@ func Test_ProcessMTMFormation_CallsPipelineInOrder(t *testing.T) {
 	stmStore, mockTripper := setupSTMStoreTest()
 	ctx := context.Background()
 
-	// Mock the HTTP response for CreateSegmentSummary
+	// Mock the HTTP response for CreateSegmentSummary with structured JSON
+	mockJSON := `{"choices":[{"message":{"content":"{\"summary\": \"Summary\", \"intrinsic_importance\": 0.8}"}}]}`
 	mockRespSummary := &http.Response{
 		StatusCode: http.StatusOK,
-		Body:       io.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"Summary"}}]}`)),
+		Body:       io.NopCloser(strings.NewReader(mockJSON)),
 	}
 	// Mock the HTTP response for CreateEmbedding
 	mockRespEmbedding := &http.Response{
@@ -230,6 +234,16 @@ func (m *MockRedisCache) BRPop(timeout time.Duration, keys ...string) ([]string,
 
 func (m *MockRedisCache) RPop(key string) (string, error) {
 	return "", nil
+}
+
+func (m *MockRedisCache) LIndex(key string, index int64) (string, error) {
+	args := m.Called(key, index)
+	return args.String(0), args.Error(1)
+}
+
+func (m *MockRedisCache) LSet(key string, index int64, value interface{}) error {
+	args := m.Called(key, index, value)
+	return args.Error(0)
 }
 
 func TestSTMStore_EmbeddingCache_HitAndMiss(t *testing.T) {

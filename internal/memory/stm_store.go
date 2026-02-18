@@ -292,13 +292,14 @@ func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, ag
 
 	// Step 1: (Analysis)
 	// We create the summary *first* to build the candidate.
-	summary, err := s.CreateSegmentSummary(ctx, events)
+	summary, intrinsicImportance, err := s.CreateSegmentSummary(ctx, events)
 	if err != nil {
 		// Log but don't fail, we can use a placeholder
 		log.Printf("WARN: Failed to create segment summary for chain %s: %v", chainID, err)
 		summary = "Conversation segment."
+		intrinsicImportance = 0.5
 	}
-	log.Printf("INFO: Topic analysis complete. Main topic: %s", summary)
+	log.Printf("INFO: Topic analysis complete. Main topic: %s (Importance: %.2f)", summary, intrinsicImportance)
 
 	// Step 2: (Build Candidate)
 	candidateChain := &models.CognitiveChain{
@@ -312,9 +313,9 @@ func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, ag
 		StartedAt:           events[0].CreatedAt,
 		LastEventAt:         events[len(events)-1].CreatedAt,
 		EventCount:          len(events),
-		Status:              "pending", // Not yet saved
-		RecallStrength:      1.0,       // Initialize Ebbinghaus recall strength
-		IntrinsicImportance: 0.5,       // Default importance until LLM extraction is implemented
+		Status:              "pending",           // Not yet saved
+		RecallStrength:      1.0,                 // Initialize Ebbinghaus recall strength
+		IntrinsicImportance: intrinsicImportance, // From LLM analysis
 	}
 
 	// Step 3: (Quality Gate)
@@ -691,42 +692,70 @@ func (s *STMStore) releaseProcessingLock(ctx context.Context, chainID string) {
 	}
 }
 
-// CreateSegmentSummary generates a one-sentence summary for a segment using the LLM
-func (s *STMStore) CreateSegmentSummary(ctx context.Context, events []models.CognitiveEvent) (string, error) {
+// CreateSegmentSummary generates a detailed summary and importance score for a segment using the LLM with Structured Outputs
+func (s *STMStore) CreateSegmentSummary(ctx context.Context, events []models.CognitiveEvent) (string, float64, error) {
 	LLMBaseURL := os.Getenv("LLM_BASE_URL")
 	apiKey := os.Getenv("AZURE_OPENAI_API_KEY")
 
 	if LLMBaseURL == "" {
-		return "", fmt.Errorf("llm_base_url not configured")
+		return "", 0, fmt.Errorf("llm_base_url not configured")
 	}
 
 	if apiKey == "" {
-		return "", fmt.Errorf("azure_openai_api_key not configured")
+		return "", 0, fmt.Errorf("azure_openai_api_key not configured")
 	}
 
 	if !s.llmGuards.checkRateLimit(ctx, "summary_user") {
-		return "", fmt.Errorf("llm summary rate limit exceeded")
+		return "", 0, fmt.Errorf("llm summary rate limit exceeded")
 	}
 	if !s.llmGuards.checkCircuitBreaker() {
-		return "", fmt.Errorf("llm summary circuit breaker is open")
+		return "", 0, fmt.Errorf("llm summary circuit breaker is open")
+	}
+
+	// Define strict JSON Schema for the response
+	jsonSchema := map[string]interface{}{
+		"name":   "mtm_summary_schema",
+		"strict": true,
+		"schema": map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"summary": map[string]interface{}{
+					"type":        "string",
+					"description": "A concise, detailed summary of the conversation segment.",
+				},
+				"intrinsic_importance": map[string]interface{}{
+					"type":        "number",
+					"description": "A float between 0.0 and 1.0 indicating the core value or permanence of this memory. 0.1 is trivial chitchat, 0.5 is standard context, 0.9+ is a critical system fact, core user preference, or hard constraint.",
+				},
+			},
+			"required":             []string{"summary", "intrinsic_importance"},
+			"additionalProperties": false,
+		},
 	}
 
 	var b strings.Builder
-	b.WriteString("You are a memory analysis agent. Your task is to create a concise, one-sentence summary of the following cognitive event chain. The summary should capture the core topic, key facts, and the agent's reasoning process.\n\nHere is the event chain:\n---")
+	b.WriteString("You are a memory analysis agent. Analyze the following conversation segment.\n")
+	b.WriteString("1. Generate a concise, detailed summary of the core topic, key facts, and reasoning.\n")
+	b.WriteString("2. Evaluate the 'intrinsic_importance' of this segment based on its long-term value.\n")
+	b.WriteString("\nEvent Chain:\n---")
 	for _, event := range events {
 		b.WriteString(fmt.Sprintf("%s: [%s] %s\n", event.Role, event.Type, event.Content))
 	}
-	b.WriteString("---\n\nFocus on the \"why\" behind the agent's actions, as revealed in its thoughts. The summary should be from the perspective of the agent.\n\nOne-sentence summary:")
+	b.WriteString("---\n\nRespond with the required JSON object.")
 
 	prompt := b.String()
 
 	reqBody := map[string]interface{}{
 		"messages": []map[string]string{
+			{"role": "system", "content": "You are a helpful assistant designed to output JSON."},
 			{"role": "user", "content": prompt},
 		},
-		"max_tokens":  64,
+		"max_tokens":  256,
 		"temperature": 0.3,
-		"stop":        []string{"\n"},
+		"response_format": map[string]interface{}{
+			"type":        "json_schema",
+			"json_schema": jsonSchema,
+		},
 	}
 	body, _ := json.Marshal(reqBody)
 	httpCtx, cancel := context.WithTimeout(ctx, s.llmConfig.SummaryTimeout)
@@ -734,7 +763,7 @@ func (s *STMStore) CreateSegmentSummary(ctx context.Context, events []models.Cog
 	req, err := http.NewRequestWithContext(httpCtx, "POST", LLMBaseURL, bytes.NewBuffer(body))
 	if err != nil {
 		s.llmGuards.recordLLMResult(false) // Record failure
-		return "", err
+		return "", 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("api-key", apiKey)
@@ -742,12 +771,12 @@ func (s *STMStore) CreateSegmentSummary(ctx context.Context, events []models.Cog
 	resp, err := s.HTTPClient.Do(req)
 	if err != nil {
 		s.llmGuards.recordLLMResult(false) // Record failure
-		return "", err
+		return "", 0, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		s.llmGuards.recordLLMResult(false) // Record failure
-		return "", fmt.Errorf("llm summary API returned %d", resp.StatusCode)
+		return "", 0, fmt.Errorf("llm summary API returned %d", resp.StatusCode)
 	}
 	raw, _ := io.ReadAll(resp.Body)
 	var llmResp struct {
@@ -759,14 +788,26 @@ func (s *STMStore) CreateSegmentSummary(ctx context.Context, events []models.Cog
 	}
 	if err := json.Unmarshal(raw, &llmResp); err != nil {
 		s.llmGuards.recordLLMResult(false) // Record failure
-		return "", err
+		return "", 0, err
 	}
 	if len(llmResp.Choices) == 0 {
 		s.llmGuards.recordLLMResult(false) // Record failure
-		return "", fmt.Errorf("empty summary choices")
+		return "", 0, fmt.Errorf("empty summary choices")
 	}
+
+	// Parse the structured output
+	type MTMSummaryResponse struct {
+		Summary             string  `json:"summary"`
+		IntrinsicImportance float64 `json:"intrinsic_importance"`
+	}
+	var summaryResp MTMSummaryResponse
+	if err := json.Unmarshal([]byte(llmResp.Choices[0].Message.Content), &summaryResp); err != nil {
+		s.llmGuards.recordLLMResult(false)
+		return "", 0, fmt.Errorf("failed to parse structured output: %w", err)
+	}
+
 	s.llmGuards.recordLLMResult(true) // Record success
-	return strings.TrimSpace(llmResp.Choices[0].Message.Content), nil
+	return summaryResp.Summary, summaryResp.IntrinsicImportance, nil
 }
 
 // StoreChainEmbedding stores an embedding for a cognitive chain summary in Milvus
