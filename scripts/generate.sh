@@ -34,9 +34,9 @@ protoc -I/usr/local/include -I. -I./third_party/googleapis \
   --plugin=protoc-gen-go=$GOPATH/bin/protoc-gen-go \
   --plugin=protoc-gen-go-grpc=$GOPATH/bin/protoc-gen-go-grpc \
   --plugin=protoc-gen-grpc-gateway=$GOPATH/bin/protoc-gen-grpc-gateway \
-  --go_out=$OUTPUT_DIR \
-  --go-grpc_out=$OUTPUT_DIR \
-  --grpc-gateway_out=$OUTPUT_DIR \
+  --go_out=$OUTPUT_DIR --go_opt=paths=source_relative \
+  --go-grpc_out=$OUTPUT_DIR --go-grpc_opt=paths=source_relative \
+  --grpc-gateway_out=$OUTPUT_DIR --grpc-gateway_opt=paths=source_relative \
   $PROTO_FILE
 
 echo "Successfully generated Go code from $PROTO_FILE"
