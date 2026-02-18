@@ -100,3 +100,13 @@ func (m *MockRedis) Close() error {
 	args := m.Called()
 	return args.Error(0)
 }
+
+func (m *MockRedis) LIndex(key string, index int64) (string, error) {
+	args := m.Called(key, index)
+	return args.String(0), args.Error(1)
+}
+
+func (m *MockRedis) LSet(key string, index int64, value interface{}) error {
+	args := m.Called(key, index, value)
+	return args.Error(0)
+}

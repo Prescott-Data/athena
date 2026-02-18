@@ -21,4 +21,6 @@ type Interface interface {
 	Keys(pattern string) ([]string, error)
 	BRPop(timeout time.Duration, keys ...string) ([]string, error)
 	RPop(key string) (string, error)
+	LIndex(key string, index int64) (string, error)
+	LSet(key string, index int64, value interface{}) error
 }

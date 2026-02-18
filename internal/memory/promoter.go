@@ -4,47 +4,30 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"math"
-	"os"
 	"time"
 
-	"bitbucket.org/dromos/memory-os/internal/kg/janus"
 	"bitbucket.org/dromos/memory-os/internal/models"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
-// JanusClient defines the interface for interacting with the JanusGraph client.
-// This allows for mocking in tests.
-type JanusClient interface {
-	CreateUserNode(ctx context.Context, tenantID, userID string) error
-	AddUserPersonalityTriple(ctx context.Context, tenantID, userID, predicate, object string, confidence float64) error
-}
-
 // Promoter computes heat scores and promotes canonical triples to the LPM Knowledge Graph
 type Promoter struct {
 	db         *mongo.Database
-	janus      JanusClient
 	heatScorer *HeatScorer
 }
 
 // NewPromoter creates a new Promoter service
 func NewPromoter(db *mongo.Database) *Promoter {
-	endpoint := os.Getenv("JANUS_ENDPOINT")
-	if endpoint == "" {
-		endpoint = "http://janusgraph:8182" // Default for local dev
-	}
-	// The concrete janus.Client is created here and assigned to the interface field.
 	return &Promoter{
 		db:         db,
-		janus:      janus.New(endpoint),
 		heatScorer: NewHeatScorer(db),
 	}
 }
 
 // RunOnce scans recent cognitive chains, computes their heat scores, and promotes them if they are above a given threshold
 func (p *Promoter) RunOnce(ctx context.Context, threshold float64) error {
-	if p.db == nil || p.janus == nil || p.heatScorer == nil {
+	if p.db == nil || p.heatScorer == nil {
 		return fmt.Errorf("promoter dependencies not ready")
 	}
 
@@ -79,10 +62,9 @@ func (p *Promoter) RunOnce(ctx context.Context, threshold float64) error {
 			log.Printf("WARN: Failed to update heat for chain %s: %v", chain.ChainID, err)
 		}
 
-		log.Printf("DEBUG: Chain %s heat: %.3f (access: %.2f, depth: %.2f, recency: %.2f, engagement: %.2f, importance: %.2f)",
+		log.Printf("DEBUG: Chain %s heat: %.3f (base: %.2f, decay: %.2f, recall: %.2f)",
 			chain.ChainID, heatScore,
-			heatFactors.AccessFrequency, heatFactors.InteractionDepth, heatFactors.RecencyScore,
-			heatFactors.UserEngagement, heatFactors.TopicImportance)
+			heatFactors.BaseImportance, heatFactors.TimeDecay, heatFactors.RecallStrength)
 
 		if heatScore >= threshold {
 			if err := p.promoteChainToLPM(ctx, &chain, heatScore); err != nil {
@@ -119,42 +101,12 @@ func (p *Promoter) updateChainHeat(ctx context.Context, chainID string, heatScor
 // (e.g. User → interested_in → "OAuth2"). Falls back to a single topic-based triple
 // for older chains that pre-date entity extraction.
 func (p *Promoter) promoteChainToLPM(ctx context.Context, chain *models.CognitiveChain, heatScore float64) error {
-	var triples []janus.Triple
-
+	// LTM write (JanusGraph/ArangoDB) is disabled — handled by colleague's Odin integration.
+	// Entities are stored on the chain in MongoDB and ready for future graph writing.
 	if len(chain.Entities) > 0 {
-		for _, entity := range chain.Entities {
-			triples = append(triples, janus.Triple{
-				Subject:   chain.UserID,
-				Predicate: "interested_in",
-				Object:    entity,
-			})
-		}
-		log.Printf("INFO: Promoting %d entity triples for chain %s", len(triples), chain.ChainID)
+		log.Printf("INFO: Chain %s qualified for LTM promotion (heat=%.3f). Entities ready: %v. LTM write skipped (pending Odin integration).", chain.ChainID, heatScore, chain.Entities)
 	} else {
-		// Fallback: use topic (concise) rather than full summary (a paragraph)
-		object := chain.Topic
-		if object == "" {
-			object = chain.Summary
-		}
-		triples = []janus.Triple{{
-			Subject:   chain.UserID,
-			Predicate: "interested_in_topic",
-			Object:    object,
-		}}
-		log.Printf("INFO: Promoting 1 fallback topic triple for chain %s (no entities extracted)", chain.ChainID)
+		log.Printf("INFO: Chain %s qualified for LTM promotion (heat=%.3f). LTM write skipped (pending Odin integration).", chain.ChainID, heatScore)
 	}
-
-	conf := math.Min(0.99, heatScore)
-
-	if err := p.janus.CreateUserNode(ctx, chain.TenantID, chain.UserID); err != nil {
-		return fmt.Errorf("failed to ensure user exists in KG: %w", err)
-	}
-
-	for _, triple := range triples {
-		if err := p.janus.AddUserPersonalityTriple(ctx, chain.TenantID, chain.UserID, triple.Predicate, triple.Object, conf); err != nil {
-			return fmt.Errorf("failed to write user triple (%s -> %s): %w", triple.Predicate, triple.Object, err)
-		}
-	}
-
 	return nil
 }
