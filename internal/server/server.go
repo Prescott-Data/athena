@@ -116,6 +116,26 @@ func (s *MemoryServer) GetMongoClient() *mongo.Client {
 	return s.mongoClient
 }
 
+// stmEventToCognitiveEvent converts an STMEvent to a CognitiveEvent for MongoDB persistence.
+func stmEventToCognitiveEvent(tenantID, userID, agentID, chainID string, event memory.STMEvent) *models.CognitiveEvent {
+	metadata := make(map[string]interface{})
+	for k, v := range event.Metadata {
+		metadata[k] = v
+	}
+	return &models.CognitiveEvent{
+		TenantID:  tenantID,
+		UserID:    userID,
+		AgentID:   agentID,
+		ChainID:   chainID,
+		Role:      event.Role,
+		Type:      event.Type,
+		Content:   event.Content,
+		Status:    "in_stm",
+		Metadata:  metadata,
+		CreatedAt: event.Timestamp,
+	}
+}
+
 // StoreInteraction is the main entry point for new events.
 func (s *MemoryServer) StoreInteraction(ctx context.Context, req *gen.StoreInteractionRequest) (*gen.StoreInteractionResponse, error) {
 	sessionID := req.SessionId
@@ -126,15 +146,22 @@ func (s *MemoryServer) StoreInteraction(ctx context.Context, req *gen.StoreInter
 
 	// Create and process the user event
 	userEvent := memory.STMEvent{
-		Role: "user",
-		Type: models.STMEventTypeMessage,
-		Content: req.UserMessage,
+		Role:      "user",
+		Type:      models.STMEventTypeMessage,
+		Content:   req.UserMessage,
 		Timestamp: time.Now(),
+		ChainID:   sessionID,
 	}
 
 	// Always save the user event to the STM cache
 	if err := s.stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, userEvent); err != nil {
 		log.Printf("ERROR: Failed to add user event to STM cache: %v", err)
+	}
+
+	// Persist user event to MongoDB immediately for durability (P5)
+	cogEvent := stmEventToCognitiveEvent(tenantID, userID, agentID, sessionID, userEvent)
+	if _, err := s.stmStore.StoreCognitiveEvent(ctx, cogEvent); err != nil {
+		log.Printf("WARN: Failed to persist user event to MongoDB for session %s: %v", sessionID, err)
 	}
 
 	// Conditionally trigger the worker only for user messages
@@ -178,13 +205,20 @@ func (s *MemoryServer) StoreInteraction(ctx context.Context, req *gen.StoreInter
 	// Create and process the agent event if it exists
 	if req.AgentResponse != "" {
 		agentEvent := memory.STMEvent{
-			Role: "agent",
-			Type: models.STMEventTypeMessage,
-			Content: req.AgentResponse,
+			Role:      "agent",
+			Type:      models.STMEventTypeMessage,
+			Content:   req.AgentResponse,
 			Timestamp: time.Now(),
+			ChainID:   sessionID,
 		}
 		if err := s.stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, agentEvent); err != nil {
 			log.Printf("ERROR: Failed to add agent event to STM cache: %v", err)
+		}
+
+		// Persist agent event to MongoDB immediately for durability (P5)
+		agentCogEvent := stmEventToCognitiveEvent(tenantID, userID, agentID, sessionID, agentEvent)
+		if _, err := s.stmStore.StoreCognitiveEvent(ctx, agentCogEvent); err != nil {
+			log.Printf("WARN: Failed to persist agent event to MongoDB for session %s: %v", sessionID, err)
 		}
 	}
 
@@ -231,6 +265,12 @@ func (s *MemoryServer) StoreEvent(ctx context.Context, req *gen.StoreEventReques
 	if err := s.stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, event); err != nil {
 		log.Printf("ERROR: Failed to add event to STM cache: %v", err)
 		return nil, status.Errorf(codes.Internal, "failed to store event: %v", err)
+	}
+
+	// Persist event to MongoDB immediately for durability (P5)
+	cogEvent := stmEventToCognitiveEvent(tenantID, userID, agentID, sessionID, event)
+	if _, err := s.stmStore.StoreCognitiveEvent(ctx, cogEvent); err != nil {
+		log.Printf("WARN: Failed to persist event to MongoDB for session %s: %v", sessionID, err)
 	}
 
 	s.enqueueChainCheck(tenantID, userID, agentID)

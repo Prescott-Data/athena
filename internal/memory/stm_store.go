@@ -344,22 +344,36 @@ func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, ag
 	}
 	log.Printf("INFO: Quality gate passed for chain %s. Score: %.2f", chainID, validationResult.QualityScore)
 
-	// Step 3.5: Persist individual cognitive events to MongoDB
+	// Step 3.5: Promote cognitive events from in_stm → in_mtm.
+	// P5 already wrote these to MongoDB on store, so update status rather than re-inserting.
+	// Fall back to insert only if no existing in_stm events are found (pre-P5 path).
 	eventsCollection := s.db.Collection(CognitiveEventsCollection)
-	eventDocs := make([]interface{}, len(events))
-	for i := range events {
-		events[i].Status = "in_mtm"
-		events[i].EventIndex = i
-		if events[i].ID.IsZero() {
-			events[i].ID = primitive.NewObjectID()
-		}
-		eventDocs[i] = events[i]
+	updateResult, updateErr := eventsCollection.UpdateMany(ctx,
+		bson.M{"chainId": chainID, "status": "in_stm"},
+		bson.M{"$set": bson.M{"status": "in_mtm"}},
+	)
+	if updateErr != nil {
+		log.Printf("WARN: Failed to update cognitive events status for chain %s: %v", chainID, updateErr)
 	}
-	if _, err := eventsCollection.InsertMany(ctx, eventDocs); err != nil {
-		log.Printf("WARN: Failed to persist %d cognitive events for chain %s: %v", len(events), chainID, err)
-		// Non-fatal: chain can still be created without individual events
+
+	if updateErr != nil || updateResult.MatchedCount == 0 {
+		// No existing in_stm events found — insert them (pre-P5 path or recovery)
+		eventDocs := make([]interface{}, len(events))
+		for i := range events {
+			events[i].Status = "in_mtm"
+			events[i].EventIndex = i
+			if events[i].ID.IsZero() {
+				events[i].ID = primitive.NewObjectID()
+			}
+			eventDocs[i] = events[i]
+		}
+		if _, err := eventsCollection.InsertMany(ctx, eventDocs); err != nil {
+			log.Printf("WARN: Failed to persist %d cognitive events for chain %s: %v", len(events), chainID, err)
+		} else {
+			log.Printf("INFO: Persisted %d cognitive events for chain %s", len(events), chainID)
+		}
 	} else {
-		log.Printf("INFO: Persisted %d cognitive events for chain %s", len(events), chainID)
+		log.Printf("INFO: Promoted %d cognitive events to in_mtm for chain %s", updateResult.ModifiedCount, chainID)
 	}
 
 	// Step 4: (Merge/Create)
