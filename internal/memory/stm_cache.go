@@ -101,6 +101,59 @@ func (s *STMCache) AddSTMEvent(ctx context.Context, tenantID, userID, agentID st
 		return fmt.Errorf("failed to marshal STM event: %w", err)
 	}
 
+	// Coalescing Logic: Prevent high-frequency automation logs from flooding the cache
+	if event.Type == models.STMEventTypeObservation {
+		if execID, ok := event.Metadata["execution_id"]; ok && execID != "" {
+			// Retrieve the most recent event
+			lastEventJSON, err := s.redis.LIndex(cacheKey, 0)
+			if err == nil && lastEventJSON != "" {
+				var lastEvent STMEvent
+				if err := json.Unmarshal([]byte(lastEventJSON), &lastEvent); err == nil {
+					// Check if the recent event is also an observation with the same execution_id
+					if lastEvent.Type == models.STMEventTypeObservation {
+						if lastExecID, ok := lastEvent.Metadata["execution_id"]; ok && lastExecID == execID {
+							// Coalesce: Update content and merge metadata
+							lastEvent.Content = event.Content
+							lastEvent.Timestamp = event.Timestamp
+
+							if lastEvent.Metadata == nil {
+								lastEvent.Metadata = make(map[string]string)
+							}
+							for k, v := range event.Metadata {
+								lastEvent.Metadata[k] = v
+							}
+
+							// Increment coalesced_count
+							currentCount := 1
+							if countStr, exists := lastEvent.Metadata["coalesced_count"]; exists {
+								if c, err := strconv.Atoi(countStr); err == nil {
+									currentCount = c
+								}
+							}
+							newCount := currentCount + 1
+							lastEvent.Metadata["coalesced_count"] = strconv.Itoa(newCount)
+
+							// Save the modified event back to the head of the list
+							updatedJSON, err := json.Marshal(lastEvent)
+							if err == nil {
+								if err := s.redis.LSet(cacheKey, 0, string(updatedJSON)); err == nil {
+									// Extend expiration
+									_ = s.redis.Expire(cacheKey, StmCacheTTL)
+
+									duration := time.Since(start)
+									log.Printf("INFO: STM cache event coalesced - UserID: %s, Duration: %v, Count: %d",
+										userID, duration, newCount)
+									MetricSTMCacheOps.WithLabelValues("append", "coalesced").Inc()
+									return nil
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// LPUSH the new event to the front of the list
 	if err := s.redis.LPush(cacheKey, string(eventJSON)); err != nil {
 		MetricSTMCacheOps.WithLabelValues("append", "error").Inc()

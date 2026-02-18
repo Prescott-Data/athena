@@ -54,7 +54,7 @@ type CognitiveChain struct {
 	IntrinsicImportance float64      `json:"intrinsicImportance" bson:"intrinsicImportance"` // Semantic score from LLM (0.0 - 1.0)
 	RecallStrength      float64      `json:"recallStrength" bson:"recallStrength"`           // Starts at 1.0, grows with recall
 	LastAccessedAt      *time.Time   `json:"lastAccessedAt" bson:"lastAccessedAt,omitempty"` // Timestamp of last recall
-	CognitiveScore      float64      `json:"cognitiveScore" bson:"cognitiveScore"`           // Score for tool usage/reasoning
+	DensityScore        float64      `json:"densityScore" bson:"densityScore"`               // Score for contextual density/system events
 	HeatScore           float64      `json:"heatScore" bson:"heatScore,omitempty"`
 	HeatFactors         *HeatFactors `json:"heatFactors" bson:"heatFactors,omitempty"`
 	// --- END NEW FIELDS ---
