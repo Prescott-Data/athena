@@ -84,12 +84,11 @@ type STMBenchmark struct {
 	cacheMutex sync.RWMutex
 }
 
-// MockConversationTurn represents a conversation turn for testing
-type MockConversationTurn struct {
-	UserMessage   string                 `json:"user_message"`
-	AgentResponse string                 `json:"agent_response"`
-	Timestamp     time.Time              `json:"timestamp"`
-	Metadata      map[string]interface{} `json:"metadata"`
+// MockSTMEvent represents a mock event for testing
+type MockSTMEvent struct {
+	Type      string    `json:"type"`
+	Content   string    `json:"content"`
+	Timestamp time.Time `json:"timestamp"`
 }
 
 // MockSegment represents a segment for testing

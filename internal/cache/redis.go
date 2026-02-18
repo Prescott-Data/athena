@@ -211,3 +211,38 @@ func (r *RedisClient) BRPop(timeout time.Duration, keys ...string) ([]string, er
 	}
 	return result, nil
 }
+
+// RPop pops an element from the right of a list
+func (r *RedisClient) RPop(key string) (string, error) {
+	result, err := r.client.RPop(r.ctx, key).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return "", err // Return error for cache miss
+		}
+		return "", err
+	}
+	return result, nil
+}
+
+// LIndex returns the element at index in the list stored at key
+func (r *RedisClient) LIndex(key string, index int64) (string, error) {
+	result, err := r.client.LIndex(r.ctx, key, index).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return "", nil // Return empty string if index out of range or key doesn't exist
+		}
+		return "", err
+	}
+	return result, nil
+}
+
+// LSet sets the list element at index to value
+func (r *RedisClient) LSet(key string, index int64, value interface{}) error {
+	// Value needs to be serialized if it's not a string/byte slice
+	// but standard redis.LSet expects value.
+	// If interface{} is used, we should probably marshal it if it's a struct,
+	// but standard go-redis handles basic types.
+	// However, STMEvent is a struct, so AddSTMEvent marshals it before calling LPush.
+	// If we pass a string (JSON) to LSet, go-redis handles it.
+	return r.client.LSet(r.ctx, key, index, value).Err()
+}

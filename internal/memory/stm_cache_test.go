@@ -2,233 +2,313 @@ package memory
 
 import (
 	"context"
+	"log"
+	"os"
 	"testing"
 	"time"
 
-	memmodels "bitbucket.org/dromos/memory-os/models/memory"
+	"bitbucket.org/dromos/memory-os/internal/cache"
+	"bitbucket.org/dromos/memory-os/internal/models"
+	"github.com/joho/godotenv"
+	"github.com/stretchr/testify/assert"
 )
 
-// MockCache implements the cache.Interface for testing
-type MockCache struct {
-	data map[string][]string
-}
-
-func NewMockCache() *MockCache {
-	return &MockCache{
-		data: make(map[string][]string),
-	}
-}
-
-func (m *MockCache) Set(key string, value interface{}) error                           { return nil }
-func (m *MockCache) SetWithTTL(key string, value interface{}, ttl time.Duration) error { return nil }
-func (m *MockCache) Get(key string, dest interface{}) error                            { return nil }
-func (m *MockCache) Delete(key string) error {
-	delete(m.data, key)
-	return nil
-}
-func (m *MockCache) DeletePattern(pattern string) error { return nil }
-func (m *MockCache) Exists(key string) (bool, error) {
-	_, exists := m.data[key]
-	return exists, nil
-}
-func (m *MockCache) Health() error { return nil }
-func (m *MockCache) Close() error  { return nil }
-
-// Implement Redis list operations for MockCache
-func (m *MockCache) LRange(key string, start, stop int64) ([]string, error) {
-	if data, exists := m.data[key]; exists {
-		if start == 0 && stop >= int64(len(data)-1) {
-			return data, nil
-		}
-		if stop >= int64(len(data)) {
-			stop = int64(len(data)) - 1
-		}
-		if start <= stop && start >= 0 {
-			return data[start : stop+1], nil
-		}
-	}
-	return []string{}, nil
-}
-
-func (m *MockCache) LPush(key string, values ...interface{}) error {
-	strValues := make([]string, len(values))
-	for i, v := range values {
-		strValues[i] = v.(string)
+func TestMain(m *testing.M) {
+	// Load .env.dev from the project root (two levels up from internal/memory/)
+	err := godotenv.Load("../../.env.dev")
+	if err != nil {
+		log.Fatalf("FATAL: Could not find .env.dev file at project root. Error: %v", err)
+	} else {
+		log.Println("INFO: Loaded .env.dev file for testing")
 	}
 
-	if _, exists := m.data[key]; !exists {
-		m.data[key] = []string{}
+	// Run all the tests in the package
+	os.Exit(m.Run())
+}
+
+// setupRealSTMCache creates an STMCache backed by real Redis.
+// Returns the cache and a cleanup function that clears the test key.
+func setupRealSTMCache(t *testing.T, tenantID, userID, agentID string) *STMCache {
+	t.Helper()
+
+	redisClient, err := setupRedisTestClient()
+	if err != nil {
+		t.Skipf("Skipping: real Redis not available: %v", err)
 	}
 
-	// Prepend values (LPUSH behavior)
-	m.data[key] = append(strValues, m.data[key]...)
-	return nil
-}
+	stmCache := NewSTMCache(redisClient)
 
-func (m *MockCache) LTrim(key string, start, stop int64) error {
-	if data, exists := m.data[key]; exists {
-		if stop >= int64(len(data)) {
-			stop = int64(len(data)) - 1
-		}
-		if start <= stop && start >= 0 {
-			m.data[key] = data[start : stop+1]
-		}
-	}
-	return nil
-}
-
-func (m *MockCache) LLen(key string) (int64, error) {
-	if data, exists := m.data[key]; exists {
-		return int64(len(data)), nil
-	}
-	return 0, nil
-}
-
-func (m *MockCache) Expire(key string, expiration time.Duration) error { return nil }
-func (m *MockCache) SetEX(key string, value string, expiration time.Duration) error {
-	m.data[key] = []string{value}
-	return nil
-}
-func (m *MockCache) Keys(pattern string) ([]string, error) {
-	var keys []string
-	for key := range m.data {
-		keys = append(keys, key)
-	}
-	return keys, nil
-}
-func (m *MockCache) BRPop(timeout time.Duration, keys ...string) ([]string, error) {
-	return []string{}, nil
-}
-
-func TestSTMCache_AddAndRetrieveConversationTurn(t *testing.T) {
-	mockCache := NewMockCache()
-	stmCache := NewSTMCache(mockCache)
+	// Clean up before and after the test
 	ctx := context.Background()
-	userID := "test_user_123"
+	_ = stmCache.ClearSTMContext(ctx, tenantID, userID, agentID)
 
-	// Add a user turn
-	userTurn := ConversationTurn{
-		Type:      "user",
-		Content:   "What about our Tokyo office policy?",
-		Timestamp: time.Now(),
-	}
+	t.Cleanup(func() {
+		_ = stmCache.ClearSTMContext(ctx, tenantID, userID, agentID)
+		redisClient.Close()
+	})
 
-	err := stmCache.AddConversationTurn(ctx, userID, userTurn)
-	if err != nil {
-		t.Fatalf("Failed to add conversation turn: %v", err)
-	}
-
-	// Add an agent turn
-	agentTurn := ConversationTurn{
-		Type:      "agent",
-		Content:   "For Tokyo office, same policy applies but reports go to APAC regional manager",
-		Timestamp: time.Now(),
-	}
-
-	err = stmCache.AddConversationTurn(ctx, userID, agentTurn)
-	if err != nil {
-		t.Fatalf("Failed to add agent turn: %v", err)
-	}
-
-	// Retrieve conversation context
-	turns, err := stmCache.GetConversationContext(ctx, userID)
-	if err != nil {
-		t.Fatalf("Failed to get conversation context: %v", err)
-	}
-
-	// Verify we got the turns back (should be in reverse order - newest first)
-	if len(turns) != 2 {
-		t.Fatalf("Expected 2 turns, got %d", len(turns))
-	}
-
-	// First turn should be the agent (most recent)
-	if turns[0].Type != "agent" {
-		t.Errorf("Expected first turn to be agent, got %s", turns[0].Type)
-	}
-
-	// Second turn should be the user
-	if turns[1].Type != "user" {
-		t.Errorf("Expected second turn to be user, got %s", turns[1].Type)
-	}
-
-	if turns[1].Content != "What about our Tokyo office policy?" {
-		t.Errorf("Expected user content to match, got %s", turns[1].Content)
-	}
+	return stmCache
 }
 
-func TestSTMCache_ConvertMessagesToTurns(t *testing.T) {
-	mockCache := NewMockCache()
-	stmCache := NewSTMCache(mockCache)
-
-	// Create test messages
-	messages := []memmodels.Message{
-		{
-			Type:      "user",
-			Content:   "Hello, how are you?",
-			CreatedAt: time.Now().Add(-2 * time.Minute),
-		},
-		{
-			Type:      "agent",
-			Content:   "I'm doing well, thank you!",
-			CreatedAt: time.Now().Add(-1 * time.Minute),
-		},
+// setupRedisTestClient creates a new Redis client for testing.
+// This is shared by all integration tests in this package.
+func setupRedisTestClient() (cache.Interface, error) {
+	client, err := cache.NewRedisClient()
+	if err != nil {
+		return nil, err
 	}
-
-	// Convert messages to turns
-	turns := stmCache.ConvertMessagesToTurns(messages)
-
-	// Verify conversion
-	if len(turns) != 2 {
-		t.Fatalf("Expected 2 turns, got %d", len(turns))
+	if err := client.Health(); err != nil {
+		return nil, err
 	}
-
-	if turns[0].Type != "user" {
-		t.Errorf("Expected first turn to be user, got %s", turns[0].Type)
-	}
-
-	if turns[0].Content != "Hello, how are you?" {
-		t.Errorf("Expected user content to match, got %s", turns[0].Content)
-	}
-
-	if turns[1].Type != "agent" {
-		t.Errorf("Expected second turn to be agent, got %s", turns[1].Type)
-	}
+	return client, nil
 }
 
-func TestSTMCache_HotPathPerformance(t *testing.T) {
-	mockCache := NewMockCache()
-	stmCache := NewSTMCache(mockCache)
+func TestSTMCache_AddAndRetrieveSTMEvent(t *testing.T) {
+	tenantID := "test-tenant"
+	userID := "test-user-add-retrieve"
+	agentID := "test-agent"
+	stmCache := setupRealSTMCache(t, tenantID, userID, agentID)
 	ctx := context.Background()
-	userID := "perf_test_user"
 
-	// Add multiple turns to simulate a conversation
-	for i := 0; i < 20; i++ {
-		turn := ConversationTurn{
-			Type:      "user",
-			Content:   "Test message",
-			Timestamp: time.Now().Add(time.Duration(-i) * time.Second),
-		}
-		stmCache.AddConversationTurn(ctx, userID, turn)
+	// 1. Add a user event
+	userEvent := STMEvent{
+		Role:      "user",
+		Type:      models.STMEventTypeMessage,
+		Content:   "Hello, world!",
+		Timestamp: time.Now().UTC(),
+	}
+	err := stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, userEvent)
+	assert.NoError(t, err)
+
+	// 2. Add an agent event
+	agentEvent := STMEvent{
+		Role:      "agent",
+		Type:      models.STMEventTypeMessage,
+		Content:   "Hi there!",
+		Timestamp: time.Now().UTC(),
+	}
+	err = stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, agentEvent)
+	assert.NoError(t, err)
+
+	// 3. Retrieve the context
+	events, err := stmCache.GetSTMContext(ctx, tenantID, userID, agentID)
+	assert.NoError(t, err)
+	assert.Len(t, events, 2)
+
+	// LIFO order: agent event (newest) is first
+	assert.Equal(t, agentEvent.Content, events[0].Content)
+	assert.Equal(t, "agent", events[0].Role)
+	assert.Equal(t, userEvent.Content, events[1].Content)
+	assert.Equal(t, "user", events[1].Role)
+}
+
+func TestSTMCache_Trim(t *testing.T) {
+	tenantID := "test-tenant"
+	userID := "test-user-trim"
+	agentID := "test-agent"
+	stmCache := setupRealSTMCache(t, tenantID, userID, agentID)
+	ctx := context.Background()
+
+	// Set max turns to 2 so the oldest event gets trimmed
+	t.Setenv("STM_CACHE_MAX_TURNS", "2")
+
+	// Add 3 events — Redis LPUSH + LTRIM(0,1) keeps only the 2 newest
+	event1 := STMEvent{Role: "user", Type: models.STMEventTypeMessage, Content: "1", Timestamp: time.Now().UTC()}
+	event2 := STMEvent{Role: "agent", Type: models.STMEventTypeMessage, Content: "2", Timestamp: time.Now().UTC()}
+	event3 := STMEvent{Role: "user", Type: models.STMEventTypeMessage, Content: "3", Timestamp: time.Now().UTC()}
+
+	assert.NoError(t, stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, event1))
+	assert.NoError(t, stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, event2))
+	assert.NoError(t, stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, event3))
+
+	// Should only return 2 most recent events
+	events, err := stmCache.GetSTMContext(ctx, tenantID, userID, agentID)
+	assert.NoError(t, err)
+	assert.Len(t, events, 2)
+	assert.Equal(t, "3", events[0].Content) // Newest
+	assert.Equal(t, "2", events[1].Content) // Second newest
+}
+
+func TestSTMCache_EmptyContext(t *testing.T) {
+	tenantID := "test-tenant"
+	userID := "test-user-empty"
+	agentID := "test-agent"
+	stmCache := setupRealSTMCache(t, tenantID, userID, agentID)
+	ctx := context.Background()
+
+	// Retrieve context for a user with no events
+	events, err := stmCache.GetSTMContext(ctx, tenantID, userID, agentID)
+	assert.NoError(t, err)
+	assert.Len(t, events, 0)
+}
+
+func TestSTMCache_UpdateSTMEntries(t *testing.T) {
+	tenantID := "test-tenant"
+	userID := "test-user-update"
+	agentID := "test-agent"
+	stmCache := setupRealSTMCache(t, tenantID, userID, agentID)
+	ctx := context.Background()
+
+	// First, add some initial events
+	initialEvent := STMEvent{Role: "user", Type: models.STMEventTypeMessage, Content: "initial", Timestamp: time.Now().UTC()}
+	assert.NoError(t, stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, initialEvent))
+
+	// Now replace with a completely new set of events via UpdateSTMEntries
+	eventsToUpdate := []STMEvent{
+		{Role: "user", Type: models.STMEventTypeMessage, Content: "older", Timestamp: time.Now().Add(-1 * time.Minute).UTC()},
+		{Role: "agent", Type: models.STMEventTypeMessage, Content: "newer", Timestamp: time.Now().UTC()},
 	}
 
-	// Measure retrieval time (hot path)
-	start := time.Now()
-	turns, err := stmCache.GetConversationContext(ctx, userID)
-	duration := time.Since(start)
+	err := stmCache.UpdateSTMEntries(ctx, tenantID, userID, agentID, eventsToUpdate)
+	assert.NoError(t, err)
 
-	if err != nil {
-		t.Fatalf("Failed to get conversation context: %v", err)
+	// Verify the cache now contains exactly the updated events in correct order
+	events, err := stmCache.GetSTMContext(ctx, tenantID, userID, agentID)
+	assert.NoError(t, err)
+	assert.Len(t, events, 2)
+
+	// UpdateSTMEntries pushes in reverse order via LPUSH, so newest ends up first
+	assert.Equal(t, "older", events[0].Content)
+	assert.Equal(t, "newer", events[1].Content)
+}
+
+func TestSTMCache_KeyScoping(t *testing.T) {
+	ctx := context.Background()
+	tenantA := "tenant-a"
+	tenantB := "tenant-b"
+	userID := "same-user"
+	agentID := "same-agent"
+
+	// Create two caches for different tenants (sharing the same Redis)
+	stmCacheA := setupRealSTMCache(t, tenantA, userID, agentID)
+	stmCacheB := setupRealSTMCache(t, tenantB, userID, agentID)
+
+	// Add an event to tenant A
+	eventA := STMEvent{Role: "user", Type: models.STMEventTypeMessage, Content: "tenant A message", Timestamp: time.Now().UTC()}
+	assert.NoError(t, stmCacheA.AddSTMEvent(ctx, tenantA, userID, agentID, eventA))
+
+	// Add a different event to tenant B
+	eventB := STMEvent{Role: "user", Type: models.STMEventTypeMessage, Content: "tenant B message", Timestamp: time.Now().UTC()}
+	assert.NoError(t, stmCacheB.AddSTMEvent(ctx, tenantB, userID, agentID, eventB))
+
+	// Retrieve tenant A — should only see tenant A's event
+	eventsA, err := stmCacheA.GetSTMContext(ctx, tenantA, userID, agentID)
+	assert.NoError(t, err)
+	assert.Len(t, eventsA, 1)
+	assert.Equal(t, "tenant A message", eventsA[0].Content)
+
+	// Retrieve tenant B — should only see tenant B's event
+	eventsB, err := stmCacheB.GetSTMContext(ctx, tenantB, userID, agentID)
+	assert.NoError(t, err)
+	assert.Len(t, eventsB, 1)
+	assert.Equal(t, "tenant B message", eventsB[0].Content)
+}
+
+func TestSTMCache_EventCoalescing(t *testing.T) {
+	tenantID := "test-tenant"
+	userID := "test-user-coalesce"
+	agentID := "test-agent"
+	stmCache := setupRealSTMCache(t, tenantID, userID, agentID)
+	ctx := context.Background()
+
+	// 1. Add first observation event
+	event1 := STMEvent{
+		Role:      "agent",
+		Type:      models.STMEventTypeObservation,
+		Content:   "Step 1: Starting",
+		Timestamp: time.Now().UTC(),
+		Metadata:  map[string]string{"execution_id": "exec-1"},
+	}
+	assert.NoError(t, stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, event1))
+
+	// 2. Add second observation event with SAME execution_id
+	event2 := STMEvent{
+		Role:      "agent",
+		Type:      models.STMEventTypeObservation,
+		Content:   "Step 2: Processing",
+		Timestamp: time.Now().UTC(),
+		Metadata:  map[string]string{"execution_id": "exec-1", "extra": "data"},
+	}
+	assert.NoError(t, stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, event2))
+
+	// 3. Add third observation event with SAME execution_id
+	event3 := STMEvent{
+		Role:      "agent",
+		Type:      models.STMEventTypeObservation,
+		Content:   "Step 3: Finishing",
+		Timestamp: time.Now().UTC(),
+		Metadata:  map[string]string{"execution_id": "exec-1", "final": "true"},
+	}
+	assert.NoError(t, stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, event3))
+
+	// Verify coalescing: Should only have 1 event in cache
+	events, err := stmCache.GetSTMContext(ctx, tenantID, userID, agentID)
+	assert.NoError(t, err)
+	assert.Len(t, events, 1, "Expected exactly 1 event due to coalescing")
+
+	if len(events) == 1 {
+		coalescedEvent := events[0]
+		assert.Equal(t, "Step 3: Finishing", coalescedEvent.Content)
+		assert.Equal(t, "exec-1", coalescedEvent.Metadata["execution_id"])
+		assert.Equal(t, "data", coalescedEvent.Metadata["extra"])
+		assert.Equal(t, "true", coalescedEvent.Metadata["final"])
+		assert.Equal(t, "3", coalescedEvent.Metadata["coalesced_count"])
 	}
 
-	// Should only return max turns (10)
-	if int64(len(turns)) != StmCacheMaxTurns {
-		t.Errorf("Expected %d turns, got %d", StmCacheMaxTurns, len(turns))
+	// 4. Fire a standard message event
+	messageEvent := STMEvent{
+		Role:      "user",
+		Type:      models.STMEventTypeMessage,
+		Content:   "Hello",
+		Timestamp: time.Now().UTC(),
 	}
+	assert.NoError(t, stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, messageEvent))
 
-	// Hot path should be very fast (< 10ms for mock)
-	if duration > 10*time.Millisecond {
-		t.Logf("Hot path took %v (may be acceptable for mock cache)", duration)
+	// Verify list length is 2
+	events, err = stmCache.GetSTMContext(ctx, tenantID, userID, agentID)
+	assert.NoError(t, err)
+	assert.Len(t, events, 2)
+	assert.Equal(t, "Hello", events[0].Content)             // Newest (Message)
+	assert.Equal(t, "Step 3: Finishing", events[1].Content) // Older (Coalesced Observation)
+
+	// 5. Fire a new observation with DIFFERENT execution_id
+	event4 := STMEvent{
+		Role:      "agent",
+		Type:      models.STMEventTypeObservation,
+		Content:   "New Exec Step 1",
+		Timestamp: time.Now().UTC(),
+		Metadata:  map[string]string{"execution_id": "exec-2"},
 	}
+	assert.NoError(t, stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, event4))
 
-	t.Logf("Hot path retrieval completed in %v", duration)
+	// Verify list length is 3 (Message, Coalesced1, NewObs) -> wait, add pushes to head.
+	// Order: NewObs, Message, Coalesced1
+	events, err = stmCache.GetSTMContext(ctx, tenantID, userID, agentID)
+	assert.NoError(t, err)
+	assert.Len(t, events, 3)
+	assert.Equal(t, "New Exec Step 1", events[0].Content)
+	assert.Equal(t, "exec-2", events[0].Metadata["execution_id"])
+	// coalesced_count might not be present or "1" depending on logic?
+	// Logic: "Increment coalesced_count ... if countStr != '' ... else count=1 ... strconv.Itoa(count)".
+	// If it's a new event (not coalesced), we don't set coalesced_count explicitly in AddSTMEvent unless we modify it before LPush.
+	// The implementation only sets it when coalescing. So it shouldn't exist for new uncoalesced events unless passed in.
+	_, hasCount := events[0].Metadata["coalesced_count"]
+	assert.False(t, hasCount, "New uncoalesced event should not have coalesced_count yet")
+
+	// 6. Fire another observation with exec-2
+	event5 := STMEvent{
+		Role:      "agent",
+		Type:      models.STMEventTypeObservation,
+		Content:   "New Exec Step 2",
+		Timestamp: time.Now().UTC(),
+		Metadata:  map[string]string{"execution_id": "exec-2"},
+	}
+	assert.NoError(t, stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, event5))
+
+	// Verify length is still 3 (coalesced exec-2)
+	events, err = stmCache.GetSTMContext(ctx, tenantID, userID, agentID)
+	assert.NoError(t, err)
+	assert.Len(t, events, 3)
+	assert.Equal(t, "New Exec Step 2", events[0].Content)
+	assert.Equal(t, "2", events[0].Metadata["coalesced_count"])
 }

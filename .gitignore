@@ -23,6 +23,7 @@ go.work
 .env.development
 .env.test
 .env.production
+.env.dev
 
 # IDE files
 .vscode/
@@ -68,3 +69,17 @@ temp/
 dist/
 build/
 memory-server
+
+Paper-MemoryOS.pdf
+Paper-MemoryOS.pdf:Zone.Identifier
+
+MemoryOS
+
+eval
+
+whitepaper.md
+tests/simulation
+run_simulation_tests.sh
+
+# Go module path artifacts
+bitbucket.org/

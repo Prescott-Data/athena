@@ -68,8 +68,8 @@ services:
     environment:
       - MONGO_INITDB_ROOT_USERNAME=admin
       - MONGO_INITDB_ROOT_PASSWORD=admin123
-      - MONGO_INITDB_DATABASE=memory_os
     volumes:
+      - ./mongo-init:/docker-entrypoint-initdb.d
       - mongodb_data:/data/db
     profiles:
       - local

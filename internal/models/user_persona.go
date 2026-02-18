@@ -93,6 +93,51 @@ type ContentInterestTags struct {
 	GamingInterest       *DimensionScore `json:"gaming_interest" bson:"gaming_interest"`
 	AnimalConcern        *DimensionScore `json:"animal_concern" bson:"animal_concern"`
 
+	// Hobbies & Activities (15)
+	PhotographyInterest  *DimensionScore `json:"photography_interest" bson:"photography_interest"`
+	DIYInterest          *DimensionScore `json:"diy_interest" bson:"diy_interest"`
+	GardeningInterest    *DimensionScore `json:"gardening_interest" bson:"gardening_interest"`
+	CookingInterest      *DimensionScore `json:"cooking_interest" bson:"cooking_interest"`
+	DancingInterest      *DimensionScore `json:"dancing_interest" bson:"dancing_interest"`
+	WritingInterest      *DimensionScore `json:"writing_interest" bson:"writing_interest"`
+	VolunteeringInterest *DimensionScore `json:"volunteering_interest" bson:"volunteering_interest"`
+	FitnessActivity      *DimensionScore `json:"fitness_activity" bson:"fitness_activity"`
+	HikingInterest       *DimensionScore `json:"hiking_interest" bson:"hiking_interest"`
+	ReadingInterest      *DimensionScore `json:"reading_interest" bson:"reading_interest"`
+	CollectingInterest   *DimensionScore `json:"collecting_interest" bson:"collecting_interest"`
+	BoardGamesInterest   *DimensionScore `json:"board_games_interest" bson:"board_games_interest"`
+	TheaterInterest      *DimensionScore `json:"theater_interest" bson:"theater_interest"`
+	CraftingInterest     *DimensionScore `json:"crafting_interest" bson:"crafting_interest"`
+	CampingInterest      *DimensionScore `json:"camping_interest" bson:"camping_interest"`
+
+	// Media Consumption (10)
+	PodcastInterest      *DimensionScore `json:"podcast_interest" bson:"podcast_interest"`
+	NewsInterest         *DimensionScore `json:"news_interest" bson:"news_interest"`
+	DocumentaryInterest  *DimensionScore `json:"documentary_interest" bson:"documentary_interest"`
+	TVSeriesInterest     *DimensionScore `json:"tv_series_interest" bson:"tv_series_interest"`
+	AnimeMangaInterest   *DimensionScore `json:"anime_manga_interest" bson:"anime_manga_interest"`
+	YouTubeInterest      *DimensionScore `json:"youtube_interest" bson:"youtube_interest"`
+	TwitchInterest       *DimensionScore `json:"twitch_interest" bson:"twitch_interest"`
+	AudiobookInterest    *DimensionScore `json:"audiobook_interest" bson:"audiobook_interest"`
+	ComicsInterest       *DimensionScore `json:"comics_interest" bson:"comics_interest"`
+	StreamingServicePref *DimensionScore `json:"streaming_service_pref" bson:"streaming_service_pref"`
+
+	// Professional & Lifestyle (14)
+	CareerDevelopment    *DimensionScore `json:"career_development" bson:"career_development"`
+	Entrepreneurship     *DimensionScore `json:"entrepreneurship" bson:"entrepreneurship"`
+	WorkLifeBalance      *DimensionScore `json:"work_life_balance" bson:"work_life_balance"`
+	RemoteWorkPref       *DimensionScore `json:"remote_work_pref" bson:"remote_work_pref"`
+	ProductivityHacks    *DimensionScore `json:"productivity_hacks" bson:"productivity_hacks"`
+	PersonalFinance      *DimensionScore `json:"personal_finance" bson:"personal_finance"`
+	InvestmentInterest   *DimensionScore `json:"investment_interest" bson:"investment_interest"`
+	RealEstateInterest   *DimensionScore `json:"real_estate_interest" bson:"real_estate_interest"`
+	AutomotiveInterest   *DimensionScore `json:"automotive_interest" bson:"automotive_interest"`
+	ShoppingPreference   *DimensionScore `json:"shopping_preference" bson:"shopping_preference"`
+	LuxuryGoodsInterest  *DimensionScore `json:"luxury_goods_interest" bson:"luxury_goods_interest"`
+	SustainabilityFocus  *DimensionScore `json:"sustainability_focus" bson:"sustainability_focus"`
+	PetOwnership         *DimensionScore `json:"pet_ownership" bson:"pet_ownership"`
+	HomeOwnership        *DimensionScore `json:"home_ownership" bson:"home_ownership"`
+
 	// Communication Style (5)
 	EmotionalExpression *DimensionScore `json:"emotional_expression" bson:"emotional_expression"`
 	SenseOfHumor        *DimensionScore `json:"sense_of_humor" bson:"sense_of_humor"`
@@ -169,7 +214,16 @@ func GetAllDimensionNames() map[DimensionType][]string {
 			"sports_interest", "food_interest", "travel_interest", "music_interest",
 			"literature_interest", "film_interest", "social_media_activity", "tech_interest",
 			"environmental_concern", "history_interest", "political_concern", "religious_interest",
-			"gaming_interest", "animal_concern", "emotional_expression", "sense_of_humor",
+			"gaming_interest", "animal_concern",
+			"photography_interest", "diy_interest", "gardening_interest", "cooking_interest", "dancing_interest",
+			"writing_interest", "volunteering_interest", "fitness_activity", "hiking_interest", "reading_interest",
+			"collecting_interest", "board_games_interest", "theater_interest", "crafting_interest", "camping_interest",
+			"podcast_interest", "news_interest", "documentary_interest", "tv_series_interest", "anime_manga_interest",
+			"youtube_interest", "twitch_interest", "audiobook_interest", "comics_interest", "streaming_service_pref",
+			"career_development", "entrepreneurship", "work_life_balance", "remote_work_pref", "productivity_hacks",
+			"personal_finance", "investment_interest", "real_estate_interest", "automotive_interest", "shopping_preference",
+			"luxury_goods_interest", "sustainability_focus", "pet_ownership", "home_ownership",
+			"emotional_expression", "sense_of_humor",
 			"information_density", "language_style", "practicality_focus",
 		},
 	}
@@ -229,6 +283,45 @@ func GetDimensionDescription(dimensionName string) string {
 		"religious_interest":    "Interest in religion and spirituality",
 		"gaming_interest":       "Enjoyment of video games or board games",
 		"animal_concern":        "Concern for animals or pets",
+		"photography_interest":  "Interest in taking or viewing photos",
+		"diy_interest":          "Interest in do-it-yourself projects",
+		"gardening_interest":    "Interest in gardening and plants",
+		"cooking_interest":      "Interest in cooking and recipes",
+		"dancing_interest":      "Interest in dancing",
+		"writing_interest":      "Interest in creative or professional writing",
+		"volunteering_interest": "Interest in community service",
+		"fitness_activity":      "Engagement in physical fitness activities",
+		"hiking_interest":       "Interest in hiking and outdoor trails",
+		"reading_interest":      "Interest in reading books and articles",
+		"collecting_interest":   "Interest in collecting items (e.g., stamps, coins)",
+		"board_games_interest":  "Interest in board games and tabletop RPGs",
+		"theater_interest":      "Interest in live theater and plays",
+		"crafting_interest":     "Interest in arts and crafts",
+		"camping_interest":      "Interest in camping and outdoor survival",
+		"podcast_interest":      "Consumption of podcasts",
+		"news_interest":         "Interest in current events and news",
+		"documentary_interest":  "Interest in documentary films and series",
+		"tv_series_interest":    "Interest in watching television series",
+		"anime_manga_interest":  "Interest in Japanese animation and comics",
+		"youtube_interest":      "Consumption of content on YouTube",
+		"twitch_interest":       "Consumption of content on Twitch",
+		"audiobook_interest":    "Consumption of audiobooks",
+		"comics_interest":       "Interest in comic books and graphic novels",
+		"streaming_service_pref":"Preference for specific streaming services",
+		"career_development":    "Focus on professional growth and career planning",
+		"entrepreneurship":      "Interest in starting or running a business",
+		"work_life_balance":     "Concern for balancing work and personal life",
+		"remote_work_pref":      "Preference for remote or flexible work arrangements",
+		"productivity_hacks":    "Interest in productivity methods and tools",
+		"personal_finance":      "Interest in managing personal finances",
+		"investment_interest":   "Interest in investing in stocks or other assets",
+		"real_estate_interest":  "Interest in the real estate market",
+		"automotive_interest":   "Interest in cars and other vehicles",
+		"shopping_preference":   "Patterns and preferences in shopping",
+		"luxury_goods_interest": "Interest in luxury brands and products",
+		"sustainability_focus":  "Focus on sustainable living and products",
+		"pet_ownership":         "Ownership of or strong interest in pets",
+		"home_ownership":        "Status or interest in owning a home",
 		"emotional_expression":  "Preference for direct vs restrained expression",
 		"sense_of_humor":        "Preference for humorous communication",
 		"information_density":   "Preference for detailed vs concise information",

@@ -305,10 +305,82 @@ services:
 ## 🎯 Memory Types
 
 ### Short-Term Memory (STM) - *The Working Memory*
-- **Analogy**: Like human short-term memory, STM is a fast, volatile cache of the most recent interactions.
-- **Purpose**: To provide immediate context for the ongoing conversation. It answers the question, "What were we just talking about?"
-- **Storage**: Redis is used for its speed, providing a sliding window of the last N turns of conversation.
-- **Process**: Every new interaction is written to STM. As the conversation grows, the oldest messages are pushed out, ensuring the cache remains fast and relevant to the current moment.
+
+Of course. Here is a detailed explanation of how the Short-Term Memory (STM) works in this system, based on the code you and I have been working on.
+
+#### High-Level Overview
+
+The STM is designed to hold the most recent events in a conversation with a user. Its primary purpose is to provide immediate context for the AI agent. Think of it as the agent's "working memory." It's fast, volatile, and has a limited size.
+
+The core of the STM functionality revolves around a few key components:
+
+1.  **STM Cache (`stm_cache.go`)**: This is the actual storage mechanism for the STM. It uses Redis, an in-memory data store, to keep a list of recent conversational events for each user.
+2.  **Task Queue (`task_queue.go`)**: When a new event happens (like a user sending a message), a task is added to a queue. This is an asynchronous way to trigger analysis of the conversation without blocking the main application flow.
+3.  **Worker (`worker.go`)**: A background process that constantly watches the task queue. When a new task appears, the worker picks it up and performs the analysis.
+4.  **STM Store (`stm_store.go`)**: This component provides the necessary tools for the worker to perform its analysis, such as creating vector embeddings and interacting with an LLM.
+
+#### The Step-by-Step Workflow
+
+Let's walk through what happens when a user sends a message:
+
+**Step 1: A New Event is Added to the STM Cache**
+
+1.  When the user sends a message, the application creates an `STMEvent` struct. This struct contains the content of the message, the role (e.g., "user"), the type of event (e.g., "message"), and a timestamp.
+2.  This new `STMEvent` is then added to the user's STM cache in Redis using the `AddSTMEvent` function in `stm_cache.go`.
+3.  The cache is implemented as a Redis list. The `LPUSH` command adds the new event to the beginning of the list, ensuring the most recent events are always at the front.
+4.  To keep the memory from growing indefinitely, the list is trimmed to a maximum size (defined by `StmCacheMaxTurns`) using the `LTRIM` command. This creates a "sliding window" of the most recent conversational turns.
+5.  A Time-To-Live (TTL) is also set on the Redis key, so if a conversation goes inactive for a long period, the memory is automatically cleared.
+
+**Step 2: A Task is Enqueued using the "Index Queue" Pattern**
+
+  This is where the new, scalable architecture comes into play. Instead of a single global queue, we use a "queue
+  of queues".
+
+   1. Immediately after the event is cached, the API server (server.go) begins the producer logic.
+   2. It generates a scoped queue name that is unique to the agent (e.g.,
+      'memory_processing_queue:v1:tenant-abc:user-123:agent-xyz').
+   3. It creates a CognitiveChainCheckTask, which tells a worker to analyze the latest interaction for that specific
+      agent.
+   4. Two-Step Enqueue:
+       * Step 2a: The task is pushed onto the agent's private, scoped queue using LPUSH.
+       * Step 2b: The name of that scoped queue is then pushed onto the global work queue (cognitive_work_queue)
+         using 'LPUSH'.
+
+  This ensures that tasks for different agents are isolated, preventing a "Noisy Neighbor" scenario where a busy
+  agent could block others.
+
+  **Step 3: The Worker Processes the Task from the Index Queue**
+
+   1. The Worker (worker.go), a constantly running background process, acts as the consumer.
+   2. Two-Step Dequeue:
+       * Step 3a: The worker performs a blocking pop (BRPOP) on the global work queue to get the name of a scoped
+         queue that has work to be done.
+       * Step 3b: The worker then performs a pop (RPop) on that scoped queue name to retrieve the actual
+         CognitiveChainCheckTask.
+   3. Once the task is retrieved, the worker calls the processCognitiveChainCheck function to perform the core
+      analysis.
+
+**Step 4: The "Cosine Gate" - Analyzing Conversational Flow**
+
+This is the heart of the STM's intelligence, where the "cosine gate" logic comes into play.
+
+1.  **Fetch Last Two Events**: The worker retrieves the two most recent events from the user's STM cache in Redis.
+2.  **Create Vector Embeddings**: For each of the two events, the worker calls the `CreateEmbedding` function in `stm_store.go`. This function sends the text content of the event to an AI model (like Azure OpenAI's `text-embedding-ada-002`) which converts the text into a numerical representation called a vector embedding. These vectors capture the semantic meaning of the text.
+3.  **Calculate Cosine Similarity**: The worker then calculates the [cosine similarity](https://en.wikipedia.org/wiki/Cosine_similarity) between the two vector embeddings. This calculation results in a score between -1 and 1, where 1 means the vectors are identical (the text has the same meaning), 0 means they are unrelated, and -1 means they are opposites.
+4.  **Make a Decision**: The worker uses this similarity score to decide if the conversation is still on the same topic:
+    *   **High Similarity (e.g., > 0.9)**: If the score is above a high threshold, the worker assumes the conversation is continuing smoothly. It does nothing and the task is complete.
+    *   **Low Similarity (e.g., < 0.7)**: If the score is below a low threshold, the worker assumes a "chain break" has occurred—the user has changed the topic. It then proceeds to the next step (MTM formation).
+    *   **Gray Area**: If the score is in between the high and low thresholds, the result is ambiguous. In this "gray area," the worker calls `analyzeTopicContinuity` in `stm_store.go`. This function sends the content of both events to a powerful Large Language Model (LLM) and asks it to make a final judgment on whether the topic has changed.
+
+**Step 5: Medium-Term Memory (MTM) Formation (If a Chain Break Occurs)**
+
+If a chain break is detected (either by low cosine similarity or by the LLM's decision), the worker initiates the process of forming a Medium-Term Memory:
+
+1.  It retrieves the *entire* old conversation chain from the STM cache (all events before the most recent one).
+2.  It calls `ProcessMTMFormation` in `stm_store.go`, which is responsible for summarizing the old conversation and storing it in a more permanent database (like MongoDB and Milvus) for long-term recall.
+3.  Finally, it trims the STM cache in Redis, leaving only the single, most recent event, which becomes the start of a new conversational chain.
+
+This entire process ensures that the agent has immediate access to the latest context while also being able to intelligently detect when a topic has changed and archive the old conversation for future reference. It's a sophisticated system for managing the flow of a conversation.
 
 ### Mid-Term Memory (MTM) - *Consolidating Experiences*
 - **Analogy**: This is like the process of sleep, where the brain consolidates the day's important events into lasting memories.
@@ -324,24 +396,29 @@ services:
 
 ## 🔧 Development & Tests
 
-### Running E2E Tests
-Ensure infrastructure is reachable (Azure or local):
-- MongoDB with authentication (example): `mongodb://memory_user:memory_password_2024@<host>:27017/memory_os?authSource=memory_os`
-- Redis (set `REDIS_PASSWORD` if enabled)
-- Milvus optional; if not set, vector search is disabled with a warning.
+### Running STM Tests
 
-```bash
-export MONGO_URI="mongodb://memory_user:memory_password_2024@<mongo-host>:27017/memory_os?authSource=memory_os"
-export MONGO_DB=memory_os
-export REDIS_HOST=<redis-host>
-export REDIS_PORT=6379
-export REDIS_PASSWORD=<redis-password>
-export REDIS_DB=3
+To run the Short-Term Memory (STM) tests, you will need a `.env.dev` file in the root of the project with the following variables:
 
-go test -v ./internal/memory -run "TestTenantIsolation|TestAuthValidation"
+```
+MONGO_URI="mongodb://e2e_user:e2e_password_2024@localhost:27017/memory_os_e2e?authSource=admin"
+MONGO_DBNAME="memory_os_e2e"
+REDIS_HOST="localhost"
+REDIS_PORT="6379"
+REDIS_PASSWORD=""
+REDIS_DB="0"
+AZURE_OPENAI_ENDPOINT="https://dromos-open-ai.openai.azure.com/"
+AZURE_OPENAI_API_KEY="..."
+RUN_E2E_TESTS="true"
 ```
 
-If Redis vars are empty, sensible defaults are applied to avoid test crashes.
+Once the `.env.dev` file is created, you can run the STM tests with the following command:
+
+```bash
+env $(grep -v '^#' .env.dev | xargs) go test -v ./internal/memory/...
+```
+
+This will run all the tests in the `internal/memory` directory with the environment variables loaded from the `.env.dev` file.
 
 ## 🧹 Development & Linting
 

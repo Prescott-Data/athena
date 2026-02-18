@@ -3,6 +3,8 @@ package memory
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,56 +17,35 @@ import (
 	"time"
 
 	"bitbucket.org/dromos/memory-os/internal/cache"
+	"bitbucket.org/dromos/memory-os/internal/llm"
 	"bitbucket.org/dromos/memory-os/internal/models"
-
+	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 
 	// Load environment variables from .env file
 	_ "github.com/joho/godotenv/autoload"
 )
 
+// STMStorer defines the interface for STM store operations.
+type STMStorer interface {
+	CreateEmbedding(ctx context.Context, textToEmbed string) (*models.EmbeddingData, error)
+	analyzeTopicContinuity(ctx context.Context, userID string, previousContent string, newContent string) (bool, error)
+	ProcessMTMFormation(ctx context.Context, tenantID, userID, agentID string, events []models.CognitiveEvent) error
+	StoreCognitiveEvent(ctx context.Context, event *models.CognitiveEvent) (primitive.ObjectID, error)
+	SearchSimilarChains(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int) ([]*models.CognitiveChain, error)
+}
+
 const (
-	// DialoguePagesCollection is the MongoDB collection name for dialogue pages
-	DialoguePagesCollection = "dialogue_pages"
-	// DialogueChainsCollection is the MongoDB collection name for dialogue chains
-	DialogueChainsCollection = "dialogue_chains"
-)
-
-var (
-	// AIAgentBaseURL is the base URL for the AI Agent service
-	AIAgentBaseURL = os.Getenv("AI_AGENT_BASE_URL")
-	// LLMBaseURL is the base URL for the LLM service
-	LLMBaseURL = os.Getenv("LLM_BASE_URL")
-	// LLMModelName is the model name for the LLM service
-	LLMModelName = os.Getenv("LLM_MODEL_NAME")
-	// Azure OpenAI configuration
-	AzureOpenAIEndpoint = os.Getenv("AZURE_OPENAI_ENDPOINT")        // https://dromos-open-ai.openai.azure.com
-	AzureOpenAIAPIKey   = os.Getenv("AZURE_OPENAI_API_KEY")         // Azure OpenAI API key
-	EmbeddingBaseURL    = os.Getenv("EMBEDDING_BASE_URL")           // Full embedding endpoint URL
-	EmbeddingModelName  = os.Getenv("EMBEDDING_MODEL_NAME")         // Default: text-embedding-ada-002
-	EmbeddingAPIVersion = os.Getenv("EMBEDDING_API_VERSION")        // Default: 2023-05-15
-	EmbeddingDimensions = parseIntEnv("EMBEDDING_DIMENSIONS", 1536) // Azure OpenAI text-embedding-ada-002
-	// MilvusHost is the Milvus server host
-	MilvusHost = os.Getenv("MILVUS_HOST")
-	// MilvusPort is the Milvus server port
-	MilvusPort = os.Getenv("MILVUS_PORT")
-	// MilvusDatabase is the Milvus database name
-	MilvusDatabase = os.Getenv("MILVUS_DATABASE")
-
-	// Cosine gate thresholds (env-tunable)
-	ChainSimHigh = parseFloatEnv("CHAIN_SIM_HIGH", 0.72)
-	ChainSimLow  = parseFloatEnv("CHAIN_SIM_LOW", 0.52)
-
-	// LLM guardrails (env-tunable)
-	LLMRateLimit               = parseIntEnv("LLM_RATE_LIMIT_PER_MINUTE", 50)           // calls per minute per user
-	LLMCircuitBreakerThreshold = parseIntEnv("LLM_CIRCUIT_BREAKER_THRESHOLD", 5)        // failures before opening
-	LLMCircuitBreakerTimeout   = parseIntEnv("LLM_CIRCUIT_BREAKER_TIMEOUT_SECONDS", 60) // seconds to wait before retry
+	// CognitiveEventsCollection is the MongoDB collection name for cognitive events
+	CognitiveEventsCollection = "cognitive_events"
+	// CognitiveChainsCollection is the MongoDB collection name for cognitive chains
+	CognitiveChainsCollection = "cognitive_chains"
 )
 
 // parseFloatEnv reads a float from env with default
+// This is the "master" copy. Delete duplicates from other files in 'package memory'.
 func parseFloatEnv(key string, def float64) float64 {
 	if v := os.Getenv(key); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
@@ -75,6 +56,7 @@ func parseFloatEnv(key string, def float64) float64 {
 }
 
 // parseIntEnv reads an int from env with default
+// This is the "master" copy. Delete duplicates from other files in 'package memory'.
 func parseIntEnv(key string, def int) int {
 	if v := os.Getenv(key); v != "" {
 		if i, err := strconv.Atoi(v); err == nil {
@@ -84,22 +66,29 @@ func parseIntEnv(key string, def int) int {
 	return def
 }
 
+// parseBoolEnv reads a bool from env with default
+// This is the "master" copy. Delete duplicates from other files in 'package memory'.
+func parseBoolEnv(key string, defaultValue bool) bool {
+	val := os.Getenv(key)
+	if val == "" {
+		return defaultValue
+	}
+	return val == "true"
+}
+
 // normalizeVector normalizes a vector to unit length
 func normalizeVector(v []float64) []float64 {
 	if len(v) == 0 {
 		return v
 	}
-
 	var norm float64
 	for _, val := range v {
 		norm += val * val
 	}
 	norm = math.Sqrt(norm)
-
 	if norm == 0 {
 		return v // Return zero vector as-is
 	}
-
 	normalized := make([]float64, len(v))
 	for i, val := range v {
 		normalized[i] = val / norm
@@ -107,44 +96,17 @@ func normalizeVector(v []float64) []float64 {
 	return normalized
 }
 
-// cosineSimilarity computes cosine similarity between two vectors with validation and normalization
+// cosineSimilarity computes cosine similarity between two vectors
 func cosineSimilarity(a, b []float64) (float64, error) {
-	if len(a) == 0 || len(b) == 0 {
-		return 0, fmt.Errorf("empty vector(s): a=%d, b=%d dimensions", len(a), len(b))
+	if len(a) != len(b) || len(a) == 0 {
+		return 0, fmt.Errorf("vector mismatch or zero length")
 	}
-
-	// Validate dimensions match
-	if len(a) != len(b) {
-		return 0, fmt.Errorf("dimension mismatch: a=%d, b=%d", len(a), len(b))
-	}
-
-	// Normalize vectors to unit length
 	normA := normalizeVector(a)
 	normB := normalizeVector(b)
-
-	// Check for zero vectors after normalization
-	var sumA, sumB float64
-	for i := range normA {
-		sumA += normA[i] * normA[i]
-		sumB += normB[i] * normB[i]
-	}
-	if sumA == 0 || sumB == 0 {
-		return 0, fmt.Errorf("zero vector after normalization")
-	}
-
-	// Compute dot product (cosine similarity for unit vectors)
 	var dot float64
 	for i := range normA {
 		dot += normA[i] * normB[i]
 	}
-
-	// Clamp to [-1, 1] to handle floating point precision issues
-	if dot > 1.0 {
-		dot = 1.0
-	} else if dot < -1.0 {
-		dot = -1.0
-	}
-
 	return dot, nil
 }
 
@@ -156,47 +118,13 @@ type LLMGuardrails struct {
 	failureCount         int
 }
 
-// STMStore manages the Short-Term Memory store operations
-type STMStore struct {
-	db        *mongo.Database
-	redis     cache.Interface
-	milvus    *MilvusClient
-	llmGuards *LLMGuardrails
-}
-
-// NewSTMStore creates a new STM store instance
-func NewSTMStore(database *mongo.Database, redisClient cache.Interface) *STMStore {
-	// Initialize Milvus client
-	var milvusClient *MilvusClient
-	if MilvusHost != "" && MilvusPort != "" {
-		var err error
-		milvusClient, err = NewMilvusClient(MilvusHost, MilvusPort)
-		if err != nil {
-			log.Printf("WARN: Failed to initialize Milvus client: %v", err)
-			log.Println("WARN: Vector similarity search will be disabled")
-		} else {
-			log.Println("INFO: Milvus client initialized successfully")
-		}
-	} else {
-		log.Println("WARN: Milvus configuration not provided, vector similarity search will be disabled")
-	}
-
-	return &STMStore{
-		db:     database,
-		redis:  redisClient,
-		milvus: milvusClient,
-		llmGuards: &LLMGuardrails{
-			redis: redisClient,
-		},
-	}
-}
-
 // checkRateLimit checks if user has exceeded LLM call rate limit
 func (lg *LLMGuardrails) checkRateLimit(ctx context.Context, userID string) bool {
+	_ = ctx // Mark as used to satisfy linter, as cache.Interface doesn't use it
 	if lg.redis == nil {
 		return true // Allow if Redis unavailable
 	}
-
+	llmRateLimit := parseIntEnv("LLM_RATE_LIMIT_PER_MINUTE", 50)
 	rateLimitKey := fmt.Sprintf("llm_rate_limit:%s", userID)
 
 	// Get current count
@@ -207,8 +135,8 @@ func (lg *LLMGuardrails) checkRateLimit(ctx context.Context, userID string) bool
 		count = 0
 	}
 
-	if count >= LLMRateLimit {
-		log.Printf("WARN: LLM rate limit exceeded for user %s: %d/%d calls", userID, count, LLMRateLimit)
+	if count >= llmRateLimit {
+		log.Printf("WARN: LLM rate limit exceeded for user %s: %d/%d calls", userID, count, llmRateLimit)
 		return false
 	}
 
@@ -225,8 +153,10 @@ func (lg *LLMGuardrails) checkCircuitBreaker() bool {
 		return true
 	}
 
+	llmCircuitBreakerTimeout := parseIntEnv("LLM_CIRCUIT_BREAKER_TIMEOUT_SECONDS", 60)
+
 	// Check if timeout has passed
-	if time.Since(lg.circuitBreakerOpened) > time.Duration(LLMCircuitBreakerTimeout)*time.Second {
+	if time.Since(lg.circuitBreakerOpened) > time.Duration(llmCircuitBreakerTimeout)*time.Second {
 		lg.circuitBreakerOpen = false
 		lg.failureCount = 0
 		log.Printf("INFO: LLM circuit breaker reset after timeout")
@@ -247,8 +177,9 @@ func (lg *LLMGuardrails) recordLLMResult(success bool) {
 			log.Printf("INFO: LLM circuit breaker closed after successful call")
 		}
 	} else {
+		llmCircuitBreakerThreshold := parseIntEnv("LLM_CIRCUIT_BREAKER_THRESHOLD", 5)
 		lg.failureCount++
-		if lg.failureCount >= LLMCircuitBreakerThreshold && !lg.circuitBreakerOpen {
+		if lg.failureCount >= llmCircuitBreakerThreshold && !lg.circuitBreakerOpen {
 			lg.circuitBreakerOpen = true
 			lg.circuitBreakerOpened = time.Now()
 			log.Printf("WARN: LLM circuit breaker opened after %d failures", lg.failureCount)
@@ -256,198 +187,260 @@ func (lg *LLMGuardrails) recordLLMResult(success bool) {
 	}
 }
 
-// DetermineDialogueChain performs Step A: Dialogue Chain Analysis
-func (s *STMStore) DetermineDialogueChain(ctx context.Context, tenantID, userID, agentID, userMessage, agentResponse string) (string, error) {
-	start := time.Now()
-	defer func() {
-		MetricDialogueChainLatency.Observe(time.Since(start).Seconds())
-	}()
+// --- END LLM GUARDRAILS ---
 
-	// Get the most recent dialogue page for this user within tenant/agent scope
-	previousPage, err := s.getLastDialoguePage(ctx, tenantID, userID, agentID)
-	if err != nil && err != mongo.ErrNoDocuments {
-		return "", fmt.Errorf("failed to retrieve previous dialogue page: %w", err)
-	}
+// LLMConfig holds configuration for LLM client timeouts and settings
+type LLMConfig struct {
+	EmbeddingTimeout time.Duration
+	SummaryTimeout   time.Duration
+}
 
-	var chainID string
+// STMStore manages the Short-Term Memory store operations
+type STMStore struct {
+	db          *mongo.Database
+	redis       cache.Interface
+	milvus      *MilvusClient
+	llmGuards   *LLMGuardrails
+	llmConfig   LLMConfig
+	HTTPClient  *http.Client
+	llmProvider llm.Provider
 
-	if previousPage == nil {
-		// First conversation turn - create new chain
-		chainID = fmt.Sprintf("chain_%s_%d", userID, time.Now().Unix())
+	// MTM Components
+	qualityValidator  *QualityValidator
+	topicAnalyzer     *TopicAnalyzer
+	sessionManager    *SessionManager
+	parallelProcessor *ParallelProcessor
+}
 
-		// Create dialogue chain metadata
-		chain := &models.DialogueChain{
-			TenantID:   tenantID,
-			UserID:     userID,
-			AgentID:    agentID,
-			ChainID:    chainID,
-			Topic:      "New conversation", // Will be updated later
-			Summary:    fmt.Sprintf("Started with: %s", userMessage[:min(100, len(userMessage))]),
-			StartedAt:  time.Now(),
-			LastTurnAt: time.Now(),
-			TurnCount:  1,
-			Status:     "active",
-		}
+// NewSTMStore creates a new STM store instance
+func NewSTMStore(database *mongo.Database, redisClient cache.Interface) *STMStore {
+	MilvusHost := os.Getenv("MILVUS_HOST")
+	MilvusPort := os.Getenv("MILVUS_PORT")
 
-		if err := s.createDialogueChain(ctx, chain); err != nil {
-			log.Printf("WARN: Failed to create dialogue chain metadata: %v", err)
-		}
-
-		duration := time.Since(start)
-		log.Printf("INFO: New dialogue chain created - UserID: %s, ChainID: %s, Duration: %v",
-			userID, chainID, duration)
-
-		return chainID, nil
-	}
-
-	// Cosine-gate: fast check before LLM
-	var isContinuous bool
-	var needsLLM bool
-	{
-		// Embed current turn
-		curEmb, err := s.CreateEmbedding(ctx, userMessage, agentResponse)
+	var milvusClient *MilvusClient
+	if MilvusHost != "" && MilvusPort != "" {
+		var err error
+		milvusClient, err = NewMilvusClient(MilvusHost, MilvusPort)
 		if err != nil {
-			log.Printf("WARN: Cosine-gate: failed to embed current turn, falling back to LLM: %v", err)
-			needsLLM = true
+			log.Printf("WARN: Failed to initialize Milvus client: %v", err)
 		} else {
-			// Try to retrieve stored embedding for previous turn, fallback to recomputing
-			var prevEmb *models.EmbeddingData
-			if previousPage.ID != primitive.NilObjectID {
-				prevEmb, err = s.GetEmbedding(ctx, tenantID, userID, agentID, previousPage.ID.Hex())
-				if err != nil {
-					log.Printf("INFO: Stored embedding not found for previous turn, recomputing: %v", err)
-				}
-			}
-
-			// Fallback to recomputing if no stored embedding found
-			if prevEmb == nil {
-				prevEmb, err = s.CreateEmbedding(ctx, previousPage.UserMessage, previousPage.AgentResponse)
-				if err != nil {
-					log.Printf("WARN: Cosine-gate: failed to embed previous turn, falling back to LLM: %v", err)
-					needsLLM = true
-				}
-			}
-
-			if prevEmb != nil {
-				sim, err := cosineSimilarity(curEmb.Vector, prevEmb.Vector)
-				if err != nil {
-					log.Printf("WARN: Cosine similarity calculation failed: %v, falling back to LLM", err)
-					MetricLLMFallbackCalls.WithLabelValues("embedding_failure", "").Inc()
-					needsLLM = true
-				} else {
-					// Record similarity distribution
-					MetricCosineSimilarity.Observe(sim)
-					log.Printf("INFO: Cosine-gate similarity=%.3f (high=%.2f low=%.2f)", sim, ChainSimHigh, ChainSimLow)
-
-					if sim >= ChainSimHigh {
-						isContinuous = true
-						needsLLM = false
-						MetricCosineGateDecisions.WithLabelValues("high", "continue").Inc()
-					} else if sim <= ChainSimLow {
-						isContinuous = false
-						needsLLM = false
-						MetricCosineGateDecisions.WithLabelValues("low", "new_chain").Inc()
-					} else {
-						// Gray zone → will use LLM below
-						needsLLM = true
-						MetricCosineGateDecisions.WithLabelValues("gray_zone", "llm_fallback").Inc()
-					}
-				}
-			}
+			log.Println("INFO: Milvus client initialized successfully")
 		}
 	}
 
-	// Only call LLM for gray zone or embedding failures (with guardrails)
-	if needsLLM {
-		// Check rate limit and circuit breaker
-		if !s.llmGuards.checkRateLimit(ctx, userID) {
-			log.Printf("WARN: LLM rate limit exceeded for user %s, defaulting to new chain", userID)
-			MetricLLMFallbackCalls.WithLabelValues("rate_limited", "blocked").Inc()
-			isContinuous = false
-		} else if !s.llmGuards.checkCircuitBreaker() {
-			log.Printf("WARN: LLM circuit breaker open, defaulting to new chain")
-			MetricLLMFallbackCalls.WithLabelValues("circuit_breaker", "blocked").Inc()
-			isContinuous = false
-		} else {
-			isContinuousLLM, err := s.analyzeTopicContinuity(ctx, previousPage, userMessage, agentResponse)
-			if err != nil {
-				log.Printf("WARN: Topic continuity analysis failed: %v, defaulting to new chain", err)
-				MetricLLMFallbackCalls.WithLabelValues("gray_zone", "error").Inc()
-				s.llmGuards.recordLLMResult(false)
-				isContinuousLLM = false // Default to creating new chain on error
-			} else {
-				MetricLLMFallbackCalls.WithLabelValues("gray_zone", "success").Inc()
-				s.llmGuards.recordLLMResult(true)
-			}
-			isContinuous = isContinuousLLM
-		}
+	// Load LLM configuration from environment variables
+	llmConfig := LLMConfig{
+		EmbeddingTimeout: time.Duration(parseIntEnv("LLM_EMBEDDING_TIMEOUT_SEC", 15)) * time.Second,
+		SummaryTimeout:   time.Duration(parseIntEnv("LLM_SUMMARY_TIMEOUT_SEC", 20)) * time.Second,
 	}
 
-	if isContinuous {
-		// Continue existing chain
-		chainID = previousPage.ChainID
+	providerType := os.Getenv("LLM_PROVIDER")
+	if providerType == "" {
+		providerType = "azure" // Default to azure for backward compatibility
+	}
 
-		// Update chain metadata
-		if err := s.updateDialogueChain(ctx, chainID); err != nil {
-			log.Printf("WARN: Failed to update dialogue chain metadata: %v", err)
+	factory := &llm.Factory{}
+	llmProvider, err := factory.NewProvider(providerType)
+	if err != nil {
+		log.Printf("WARN: Failed to initialize LLM provider: %v", err)
+	}
+
+	ss := &STMStore{
+		db:          database,
+		redis:       redisClient,
+		milvus:      milvusClient,
+		llmConfig:   llmConfig,
+		llmGuards: &LLMGuardrails{
+			redis: redisClient,
+		},
+		HTTPClient:  &http.Client{},
+		llmProvider: llmProvider,
+	}
+
+	// Initialize MTM components
+	ss.qualityValidator = NewQualityValidator()
+	ss.parallelProcessor = NewParallelProcessor(10, ss)
+	ss.topicAnalyzer = NewTopicAnalyzer(ss, ss.parallelProcessor)
+	ss.sessionManager = NewSessionManager(database, ss)
+
+	return ss
+}
+
+// ProcessMTMFormation orchestrates the MTM persistence pipeline
+// This logic is based on the refactored 'archivist.go'
+func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, agentID string, events []models.CognitiveEvent) error {
+	if len(events) == 0 {
+		log.Println("INFO: ProcessMTMFormation called with no events.")
+		return nil
+	}
+
+	// Get ChainID from events if set, otherwise generate a new one
+	chainID := events[0].ChainID
+	if chainID == "" {
+		chainID = uuid.New().String()
+		log.Printf("INFO: Generated new ChainID %s for MTM formation", chainID)
+	}
+
+	// Idempotency check: ensure we don't process the same chain twice
+	if !s.acquireProcessingLock(ctx, chainID) {
+		log.Printf("INFO: Chain %s is already being processed or has been processed recently. Skipping.", chainID)
+		return nil
+	}
+	defer s.releaseProcessingLock(ctx, chainID)
+
+	log.Printf("INFO: Starting MTM formation for user %s with %d events.", userID, len(events))
+
+	// Step 1: (Analysis)
+	// We create the summary *first* to build the candidate.
+	summary, intrinsicImportance, err := s.CreateSegmentSummary(ctx, events)
+	if err != nil {
+		// Log but don't fail, we can use a placeholder
+		log.Printf("WARN: Failed to create segment summary for chain %s: %v", chainID, err)
+		summary = "Conversation segment."
+		intrinsicImportance = 0.5
+	}
+	log.Printf("INFO: Topic analysis complete. Main topic: %s (Importance: %.2f)", summary, intrinsicImportance)
+
+	// Step 2: (Build Candidate)
+	candidateChain := &models.CognitiveChain{
+		ID:                  primitive.NewObjectID(), // Generate a temp ID
+		TenantID:            tenantID,
+		UserID:              userID,
+		AgentID:             agentID,
+		ChainID:             chainID,
+		Topic:               "<placeholder>", // Placeholder, TopicAnalyzer can fill this
+		Summary:             summary,
+		StartedAt:           events[0].CreatedAt,
+		LastEventAt:         events[len(events)-1].CreatedAt,
+		EventCount:          len(events),
+		Status:              "pending",           // Not yet saved
+		RecallStrength:      1.0,                 // Initialize Ebbinghaus recall strength
+		IntrinsicImportance: intrinsicImportance, // From LLM analysis
+	}
+
+	// Step 3: (Quality Gate)
+	validationResult, err := s.qualityValidator.ValidateSegment(ctx, candidateChain, events)
+	if err != nil {
+		return fmt.Errorf("failed during quality validation: %w", err)
+	}
+	if !validationResult.ShouldStore {
+		log.Printf("INFO: MTM formation discarded for chain %s due to low quality. Score: %.2f.",
+			chainID, validationResult.QualityScore)
+		// Here you would delete the "in_stm" events from Mongo
+		// Or just let them expire from STM cache (if you're not saving to Mongo first)
+		return nil
+	}
+	log.Printf("INFO: Quality gate passed for chain %s. Score: %.2f", chainID, validationResult.QualityScore)
+
+	// Step 3.5: Persist individual cognitive events to MongoDB
+	eventsCollection := s.db.Collection(CognitiveEventsCollection)
+	eventDocs := make([]interface{}, len(events))
+	for i := range events {
+		events[i].Status = "in_mtm"
+		events[i].EventIndex = i
+		if events[i].ID.IsZero() {
+			events[i].ID = primitive.NewObjectID()
 		}
+		eventDocs[i] = events[i]
+	}
+	if _, err := eventsCollection.InsertMany(ctx, eventDocs); err != nil {
+		log.Printf("WARN: Failed to persist %d cognitive events for chain %s: %v", len(events), chainID, err)
+		// Non-fatal: chain can still be created without individual events
 	} else {
-		// Create new chain
-		chainID = fmt.Sprintf("chain_%s_%d", userID, time.Now().Unix())
+		log.Printf("INFO: Persisted %d cognitive events for chain %s", len(events), chainID)
+	}
 
-		// Create dialogue chain metadata
-		chain := &models.DialogueChain{
-			ChainID:    chainID,
-			UserID:     userID,
-			Topic:      "Topic shift",
-			Summary:    fmt.Sprintf("New topic: %s", userMessage[:min(100, len(userMessage))]),
-			StartedAt:  time.Now(),
-			LastTurnAt: time.Now(),
-			TurnCount:  1,
-			Status:     "active",
-		}
+	// Step 4: (Merge/Create)
+	// This function will handle the actual persistence of the Chain and Events
+	finalChain, err := s.sessionManager.ProcessNewChain(ctx, candidateChain, events)
+	if err != nil {
+		return fmt.Errorf("failed to process chain with session manager: %w", err)
+	}
+	log.Printf("INFO: Session manager processed chain %s, final ID: %s", candidateChain.ChainID, finalChain.ChainID)
 
-		if err := s.createDialogueChain(ctx, chain); err != nil {
-			log.Printf("WARN: Failed to create new dialogue chain metadata: %v", err)
+	// Post-processing: Store embedding for the final chain
+	if finalChain.Summary != "" {
+		embedding, err := s.CreateEmbedding(ctx, finalChain.Summary)
+		if err != nil {
+			log.Printf("WARN: Failed to create embedding for chain %s: %v", finalChain.ChainID, err)
+		} else {
+			if err := s.StoreChainEmbedding(ctx, finalChain, embedding); err != nil {
+				log.Printf("WARN: Failed to store embedding for chain %s: %v", finalChain.ChainID, err)
+			} else {
+				log.Printf("INFO: Stored embedding for chain %s", finalChain.ChainID)
+			}
 		}
 	}
 
-	duration := time.Since(start)
-	log.Printf("INFO: Dialogue chain analysis completed - UserID: %s, ChainID: %s, Continuous: %t, Duration: %v",
-		userID, chainID, isContinuous, duration)
+	// Post-processing: Index individual high-value events for semantic search
+	if err := s.IndexCognitiveEvents(ctx, finalChain.ChainID, events); err != nil {
+		// Log as a warning, as this is a non-critical background task
+		log.Printf("WARN: Failed to index cognitive events for chain %s: %v", finalChain.ChainID, err)
+	}
 
-	return chainID, nil
+	// Post-processing: Cleanup old chains for the user
+	if err := s.sessionManager.CleanupOldChains(ctx, userID); err != nil {
+		log.Printf("WARN: Failed to cleanup old chains for user %s: %v", userID, err)
+	}
+
+	log.Printf("INFO: MTM formation complete for chain %s.", finalChain.ChainID)
+	return nil
+}
+
+// StoreCognitiveEvent stores a single cognitive event in MongoDB
+func (s *STMStore) StoreCognitiveEvent(ctx context.Context, event *models.CognitiveEvent) (primitive.ObjectID, error) {
+	collection := s.db.Collection(CognitiveEventsCollection)
+	if event.ID.IsZero() {
+		event.ID = primitive.NewObjectID()
+	}
+	_, err := collection.InsertOne(ctx, event)
+	if err != nil {
+		return primitive.NilObjectID, fmt.Errorf("failed to insert cognitive event: %w", err)
+	}
+	return event.ID, nil
 }
 
 // analyzeTopicContinuity uses the LLM endpoint to analyze topic continuity
-func (s *STMStore) analyzeTopicContinuity(ctx context.Context, previousPage *models.DialoguePage, userMessage, agentResponse string) (bool, error) {
-	if LLMBaseURL == "" {
-		return false, fmt.Errorf("LLM_BASE_URL not configured")
+func (s *STMStore) analyzeTopicContinuity(ctx context.Context, userID string, previousContent string, newContent string) (bool, error) {
+	llmBaseURL := os.Getenv("LLM_BASE_URL")
+	apiKey := os.Getenv("AZURE_OPENAI_API_KEY")
+
+	if llmBaseURL == "" {
+		return false, fmt.Errorf("llm_base_url not configured")
+	}
+	if apiKey == "" {
+		return false, fmt.Errorf("azure_openai_api_key not configured")
 	}
 
-	// Create prompt for the LLM to analyze topic continuity
-	prompt := fmt.Sprintf(`Analyze whether the following two conversation turns are about the same topic or a continuation of the same conversation.
-
-Previous turn:
-User: %s
-Assistant: %s
-
-New turn:
-User: %s
-Assistant: %s
-
-Respond with only "true" if the conversations are continuous/related or "false" if they represent a topic change or new conversation.`,
-		previousPage.UserMessage, previousPage.AgentResponse, userMessage, agentResponse)
-
-	// Create LLM completion request
-	modelName := LLMModelName
-	if modelName == "" {
-		modelName = "Qwen/Qwen3-32B-AWQ"
+	if !s.llmGuards.checkRateLimit(ctx, userID) {
+		return false, fmt.Errorf("llm rate limit exceeded for user %s", userID)
 	}
+	if !s.llmGuards.checkCircuitBreaker() {
+		return false, fmt.Errorf("llm circuit breaker is open")
+	}
+
+	prompt := fmt.Sprintf(`You are a topic boundary detector. Determine if two conversation messages are about the SAME topic or DIFFERENT topics.
+
+Rules:
+- "Same topic" means they discuss the same subject, task, or line of inquiry
+- "Different topic" means the user shifted to a new subject, even if loosely related
+- A question about a DIFFERENT technical area (e.g., workflow design → authentication) is a topic change
+- Asking "by the way" or "also" about something new is a topic change
+- Follow-up questions that deepen the SAME subject are NOT a topic change
+
+Previous message:
+%s
+
+New message:
+%s
+
+Is the new message about the SAME topic as the previous message? Respond with only "true" or "false".`,
+		previousContent, newContent)
 
 	request := map[string]interface{}{
-		"model":       modelName,
-		"prompt":      prompt,
+		"messages": []map[string]string{
+			{"role": "user", "content": prompt},
+		},
 		"max_tokens":  10,
 		"temperature": 0.1,
 		"stop":        []string{"\n"},
@@ -455,810 +448,561 @@ Respond with only "true" if the conversations are continuous/related or "false" 
 
 	requestBody, err := json.Marshal(request)
 	if err != nil {
-		return false, fmt.Errorf("failed to marshal LLM request: %w", err)
+		return false, fmt.Errorf("failed to marshal llm request: %w", err)
 	}
 
-	// Use more aggressive timeout for LLM fallback calls
 	llmTimeout := parseIntEnv("LLM_TIMEOUT_SECONDS", 10)
 	httpCtx, cancel := context.WithTimeout(ctx, time.Duration(llmTimeout)*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(httpCtx, "POST", LLMBaseURL, bytes.NewBuffer(requestBody))
+	req, err := http.NewRequestWithContext(httpCtx, "POST", llmBaseURL, bytes.NewBuffer(requestBody))
 	if err != nil {
-		return false, fmt.Errorf("failed to create HTTP request: %w", err)
+		s.llmGuards.recordLLMResult(false) // Record failure
+		return false, fmt.Errorf("failed to create http request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("api-key", apiKey)
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := s.HTTPClient.Do(req)
 	if err != nil {
-		return false, fmt.Errorf("failed to make LLM API call: %w", err)
+		s.llmGuards.recordLLMResult(false) // Record failure
+		return false, fmt.Errorf("failed to make llm api call: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return false, fmt.Errorf("LLM API returned status %d", resp.StatusCode)
+		s.llmGuards.recordLLMResult(false) // Record failure
+		return false, fmt.Errorf("llm api returned status %d", resp.StatusCode)
 	}
 
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		s.llmGuards.recordLLMResult(false) // Record failure
 		return false, fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	// Parse the LLM response
 	var llmResponse struct {
 		Choices []struct {
-			Text string `json:"text"`
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(responseBody, &llmResponse); err != nil {
-		return false, fmt.Errorf("failed to unmarshal LLM response: %w", err)
+		s.llmGuards.recordLLMResult(false) // Record failure
+		return false, fmt.Errorf("failed to unmarshal llm response: %w", err)
 	}
 
 	if len(llmResponse.Choices) == 0 {
-		return false, fmt.Errorf("no choices in LLM response")
+		s.llmGuards.recordLLMResult(false) // Record failure
+		return false, fmt.Errorf("no choices in llm response")
 	}
 
-	// Parse the response text to determine continuity
-	responseText := strings.ToLower(strings.TrimSpace(llmResponse.Choices[0].Text))
+	s.llmGuards.recordLLMResult(true) // Record success
+
+	responseText := strings.ToLower(strings.TrimSpace(llmResponse.Choices[0].Message.Content))
 	return responseText == "true", nil
 }
 
-// CreateEmbedding performs Step B: Vector Embedding Creation using Azure OpenAI
-func (s *STMStore) CreateEmbedding(ctx context.Context, userMessage, agentResponse string) (*models.EmbeddingData, error) {
-	start := time.Now()
+// CreateEmbedding performs vector embedding creation using an external service like Azure OpenAI
+func (s *STMStore) CreateEmbedding(ctx context.Context, textToEmbed string) (*models.EmbeddingData, error) {
+	apiKey := os.Getenv("AZURE_OPENAI_API_KEY")
+	url := os.Getenv("EMBEDDING_BASE_URL")
+	embeddingModel := os.Getenv("EMBEDDING_MODEL_NAME")
 
-	// Check Azure OpenAI configuration
-	if AzureOpenAIEndpoint == "" {
-		return nil, fmt.Errorf("Azure OpenAI endpoint not configured")
+	if url == "" {
+		return nil, fmt.Errorf("embedding_base_url environment variable not set")
 	}
-	if AzureOpenAIAPIKey == "" {
-		return nil, fmt.Errorf("Azure OpenAI API key not configured")
+	if apiKey == "" {
+		return nil, fmt.Errorf("azure openai api key not configured")
 	}
 
-	// Use configured model or default to text-embedding-ada-002
-	embeddingModel := EmbeddingModelName
 	if embeddingModel == "" {
 		embeddingModel = "text-embedding-ada-002"
 	}
 
-	// Combine user message and agent response for embedding
-	combinedText := fmt.Sprintf("User: %s\nAgent: %s", userMessage, agentResponse)
-
-	// Create Azure OpenAI embedding request
-	embeddingRequest := map[string]interface{}{
-		"input": combinedText,
-		"model": embeddingModel,
+	// Check embedding cache first
+	if cachedEmbedding := s.getEmbeddingFromCache(ctx, textToEmbed, embeddingModel); cachedEmbedding != nil {
+		log.Printf("INFO: Embedding cache hit for text (len=%d)", len(textToEmbed))
+		return cachedEmbedding, nil
 	}
 
-	requestBody, err := json.Marshal(embeddingRequest)
+	if !s.llmGuards.checkRateLimit(ctx, "embedding_user") {
+		return nil, fmt.Errorf("embedding api rate limit exceeded")
+	}
+	if !s.llmGuards.checkCircuitBreaker() {
+		return nil, fmt.Errorf("embedding api circuit breaker is open")
+	}
+
+	embeddingRequest := map[string]interface{}{"input": textToEmbed}
+	body, err := json.Marshal(embeddingRequest)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal Azure OpenAI embedding request: %w", err)
+		return nil, fmt.Errorf("failed to marshal embedding request: %w", err)
 	}
 
-	// Make API call to Azure OpenAI
-	httpCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	httpCtx, cancel := context.WithTimeout(ctx, s.llmConfig.EmbeddingTimeout)
 	defer cancel()
 
-	url := fmt.Sprintf("%s/openai/deployments/%s/embeddings?api-version=2023-05-15", AzureOpenAIEndpoint, embeddingModel)
-
-	req, err := http.NewRequestWithContext(httpCtx, "POST", url, bytes.NewBuffer(requestBody))
+	req, err := http.NewRequestWithContext(httpCtx, "POST", url, bytes.NewBuffer(body))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create Azure OpenAI embedding request: %w", err)
+		s.llmGuards.recordLLMResult(false) // Record failure
+		return nil, fmt.Errorf("failed to create embedding request: %w", err)
 	}
-
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("api-key", AzureOpenAIAPIKey)
+	req.Header.Set("api-key", apiKey)
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := s.HTTPClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to make Azure OpenAI embedding API call: %w", err)
+		s.llmGuards.recordLLMResult(false) // Record failure
+		return nil, fmt.Errorf("failed to call embedding service: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		s.llmGuards.recordLLMResult(false) // Record failure
 		responseBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("Azure OpenAI API returned status %d: %s", resp.StatusCode, string(responseBody))
+		return nil, fmt.Errorf("azure openai api returned status %d: %s", resp.StatusCode, string(responseBody))
 	}
 
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read Azure OpenAI embedding response: %w", err)
+		s.llmGuards.recordLLMResult(false) // Record failure
+		return nil, fmt.Errorf("failed to read embedding response: %w", err)
 	}
 
-	// Parse Azure OpenAI embedding response
 	var embeddingResponse struct {
 		Data []struct {
 			Embedding []float64 `json:"embedding"`
 		} `json:"data"`
 		Usage struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			TotalTokens      int `json:"total_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
+			PromptTokens int `json:"prompt_tokens"`
+			TotalTokens  int `json:"total_tokens"`
 		} `json:"usage"`
 	}
-
 	if err := json.Unmarshal(responseBody, &embeddingResponse); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal Azure OpenAI embedding response: %w", err)
+		s.llmGuards.recordLLMResult(false) // Record failure
+		return nil, fmt.Errorf("failed to decode embedding response: %w", err)
 	}
 
 	if len(embeddingResponse.Data) == 0 || len(embeddingResponse.Data[0].Embedding) == 0 {
-		return nil, fmt.Errorf("no embedding data in Azure OpenAI response")
+		s.llmGuards.recordLLMResult(false) // Record failure
+		return nil, fmt.Errorf("no embedding data in response")
 	}
 
-	embedding := &models.EmbeddingData{
+	s.llmGuards.recordLLMResult(true) // Record success
+
+	embeddingData := &models.EmbeddingData{
 		Vector:     embeddingResponse.Data[0].Embedding,
 		Dimensions: len(embeddingResponse.Data[0].Embedding),
 		Model:      embeddingModel,
 		CreatedAt:  time.Now(),
 	}
 
-	duration := time.Since(start)
-	MetricEmbeddingLatency.Observe(duration.Seconds())
-	log.Printf("INFO: Azure OpenAI embedding created - Model: %s, Dimensions: %d, Duration: %v, Tokens: %d",
-		embedding.Model, embedding.Dimensions, duration, embeddingResponse.Usage.TotalTokens)
+	// Store in cache for future reuse
+	s.storeEmbeddingInCache(ctx, textToEmbed, embeddingModel, embeddingData)
 
-	return embedding, nil
+	return embeddingData, nil
 }
 
-// validateAzureOpenAIConfig validates that Azure OpenAI is properly configured
-func (s *STMStore) validateAzureOpenAIConfig() error {
-	if AzureOpenAIEndpoint == "" {
-		return fmt.Errorf("AZURE_OPENAI_ENDPOINT environment variable not set")
-	}
-	if AzureOpenAIAPIKey == "" {
-		return fmt.Errorf("AZURE_OPENAI_API_KEY environment variable not set")
-	}
-	return nil
-}
-
-// StoreDialoguePage performs Step C: Write to STM Store (MongoDB)
-func (s *STMStore) StoreDialoguePage(ctx context.Context, page *models.DialoguePage) (primitive.ObjectID, error) {
-	return s.StoreDialoguePageWithContext(ctx, page, "", "", "")
-}
-
-// StoreDialoguePageWithContext stores a dialogue page using tenant/user/agent from context (enforced)
-func (s *STMStore) StoreDialoguePageWithContext(ctx context.Context, page *models.DialoguePage, tenantID, userID, agentID string) (primitive.ObjectID, error) {
-	start := time.Now()
-
-	// Override tenant/user/agent values from authenticated context
-	if tenantID != "" {
-		page.TenantID = tenantID
-	}
-	if userID != "" {
-		page.UserID = userID
-	}
-	if agentID != "" {
-		page.AgentID = agentID
-	}
-
-	// Ensure timestamps are set
-	if page.CreatedAt.IsZero() {
-		page.CreatedAt = time.Now()
-	}
-	if page.UpdatedAt.IsZero() {
-		page.UpdatedAt = time.Now()
-	}
-
-	// Insert into MongoDB
-	collection := s.db.Collection(DialoguePagesCollection)
-	result, err := collection.InsertOne(ctx, page)
-	if err != nil {
-		return primitive.ObjectID{}, fmt.Errorf("failed to insert dialogue page: %w", err)
-	}
-
-	pageID := result.InsertedID.(primitive.ObjectID)
-
-	duration := time.Since(start)
-	log.Printf("INFO: Dialogue page stored - PageID: %s, ChainID: %s, Duration: %v",
-		pageID.Hex(), page.ChainID, duration)
-
-	return pageID, nil
-}
-
-// GetEmbedding retrieves a stored embedding by page ID with tenant scope
-func (s *STMStore) GetEmbedding(ctx context.Context, tenantID, userID, agentID, pageID string) (*models.EmbeddingData, error) {
-	// Try Milvus first if available
-	if s.milvus != nil {
-		embedding, err := s.milvus.GetEmbeddingByPageID(ctx, tenantID, userID, agentID, pageID)
-		if err == nil {
-			return embedding, nil
-		}
-		log.Printf("WARN: Failed to retrieve embedding from Milvus for page %s: %v", pageID, err)
-	}
-
-	// Fall back to Redis
-	return s.getEmbeddingFromRedis(ctx, pageID)
-}
-
-// generateEmbeddingKey creates the Redis key for embedding storage
-func (s *STMStore) generateEmbeddingKey(pageID string) string {
-	return fmt.Sprintf("embedding:%s", pageID)
-}
-
-// generateScopedEmbeddingKey creates the Redis key for embedding storage with tenant scope
-func (s *STMStore) generateScopedEmbeddingKey(tenantID, userID, agentID, pageID string) string {
-	return fmt.Sprintf("embedding:v1:%s:%s:%s:%s", tenantID, userID, agentID, pageID)
-}
-
-// getEmbeddingFromRedis retrieves embedding from Redis fallback storage
-func (s *STMStore) getEmbeddingFromRedis(ctx context.Context, pageID string) (*models.EmbeddingData, error) {
-	embeddingKey := s.generateEmbeddingKey(pageID)
-	var embeddingJSON string
-	err := s.redis.Get(embeddingKey, &embeddingJSON)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get embedding from Redis: %w", err)
-	}
-
-	var embedding models.EmbeddingData
-	if err := json.Unmarshal([]byte(embeddingJSON), &embedding); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal embedding: %w", err)
-	}
-
-	return &embedding, nil
-}
-
-// StoreEmbedding stores the vector embedding in Milvus with tenant scope
-func (s *STMStore) StoreEmbedding(ctx context.Context, tenantID, userID, agentID, pageID string, embedding *models.EmbeddingData) error {
-	start := time.Now()
-
-	// Set the page reference
-	embedding.PageID = pageID
-
-	// Store in Milvus if available
-	if s.milvus != nil {
-		if err := s.milvus.InsertEmbedding(ctx, tenantID, userID, agentID, pageID, embedding); err != nil {
-			log.Printf("WARN: Failed to store embedding in Milvus: %v", err)
-			// Fall back to Redis storage
-			return s.storeEmbeddingInRedis(ctx, pageID, embedding)
-		}
-
-		duration := time.Since(start)
-		log.Printf("INFO: Embedding stored in Milvus - PageID: %s, Dimensions: %d, Duration: %v",
-			pageID, embedding.Dimensions, duration)
+// getEmbeddingFromCache retrieves a cached embedding for the given text and model
+func (s *STMStore) getEmbeddingFromCache(ctx context.Context, text, model string) *models.EmbeddingData {
+	if s.redis == nil {
 		return nil
 	}
 
-	// Fall back to Redis storage
-	return s.storeEmbeddingInRedis(ctx, pageID, embedding)
+	cacheKey := s.generateEmbeddingCacheKey(text, model)
+	var cachedData models.EmbeddingData
+
+	err := s.redis.Get(cacheKey, &cachedData)
+	if err != nil {
+		// Cache miss or error - not critical
+		return nil
+	}
+
+	return &cachedData
 }
 
-// storeEmbeddingInRedis stores embedding in Redis as fallback
-func (s *STMStore) storeEmbeddingInRedis(ctx context.Context, pageID string, embedding *models.EmbeddingData) error {
-	start := time.Now()
+// storeEmbeddingInCache stores an embedding in the cache
+func (s *STMStore) storeEmbeddingInCache(ctx context.Context, text, model string, embedding *models.EmbeddingData) {
+	if s.redis == nil {
+		return
+	}
 
-	embeddingKey := s.generateEmbeddingKey(pageID)
-	embeddingJSON, err := json.Marshal(embedding)
+	cacheKey := s.generateEmbeddingCacheKey(text, model)
+	// Cache embeddings for 24 hours
+	cacheTTL := 24 * time.Hour
+
+	err := s.redis.SetWithTTL(cacheKey, embedding, cacheTTL)
 	if err != nil {
-		return fmt.Errorf("failed to marshal embedding: %w", err)
+		log.Printf("WARN: Failed to cache embedding: %v", err)
 	}
-
-	// Store with long TTL (30 days)
-	if err := s.redis.SetEX(embeddingKey, string(embeddingJSON), 30*24*time.Hour); err != nil {
-		return fmt.Errorf("failed to store embedding in Redis: %w", err)
-	}
-
-	duration := time.Since(start)
-	log.Printf("INFO: Embedding stored in Redis (fallback) - PageID: %s, Dimensions: %d, Duration: %v",
-		pageID, embedding.Dimensions, duration)
-
-	return nil
 }
 
-// Helper functions
+// generateEmbeddingCacheKey creates a consistent cache key from text and model
+func (s *STMStore) generateEmbeddingCacheKey(text, model string) string {
+	// Use SHA256 hash to create a fixed-length key from variable-length text
+	hasher := sha256.New()
+	hasher.Write([]byte(text))
+	hasher.Write([]byte(model))
+	hash := hex.EncodeToString(hasher.Sum(nil))
+	return fmt.Sprintf("embedding:cache:%s", hash)
+}
 
-func (s *STMStore) getLastDialoguePage(ctx context.Context, tenantID, userID, agentID string) (*models.DialoguePage, error) {
-	collection := s.db.Collection(DialoguePagesCollection)
-
-	filter := bson.M{
-		"tenantId": tenantID,
-		"userId":   userID,
-		"agentId":  agentID,
+// acquireProcessingLock attempts to acquire a lock for processing a chain
+// Returns true if lock was acquired, false if chain is already being processed
+func (s *STMStore) acquireProcessingLock(ctx context.Context, chainID string) bool {
+	if s.redis == nil {
+		// If Redis is not available, allow processing (fail-open for availability)
+		log.Println("WARN: Redis not available for idempotency check, proceeding with processing")
+		return true
 	}
-	opts := options.FindOne()
-	opts.SetSort(bson.D{bson.E{Key: "createdAt", Value: -1}}) // Most recent first
 
-	var page models.DialoguePage
-	err := collection.FindOne(ctx, filter, opts).Decode(&page)
+	lockKey := fmt.Sprintf("mtm:processing:lock:%s", chainID)
+	lockTTL := 5 * time.Minute // Lock expires after 5 minutes to prevent deadlocks
+
+	// Try to set the lock with NX (only if not exists)
+	err := s.redis.SetWithTTL(lockKey, "processing", lockTTL)
 	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			return nil, nil // No previous pages found
+		// Lock already exists or error occurred
+		log.Printf("WARN: Failed to acquire processing lock for chain %s: %v", chainID, err)
+
+		// Check if the key already exists to distinguish between "already processing" and other errors
+		exists, checkErr := s.redis.Exists(lockKey)
+		if checkErr == nil && exists {
+			return false // Chain is already being processed
 		}
-		return nil, err
+		// For other errors, fail-open for availability
+		return true
 	}
 
-	return &page, nil
+	return true
 }
 
-func (s *STMStore) createDialogueChain(ctx context.Context, chain *models.DialogueChain) error {
-	collection := s.db.Collection(DialogueChainsCollection)
-	_, err := collection.InsertOne(ctx, chain)
-	return err
+// releaseProcessingLock releases the processing lock for a chain
+func (s *STMStore) releaseProcessingLock(ctx context.Context, chainID string) {
+	if s.redis == nil {
+		return
+	}
+
+	lockKey := fmt.Sprintf("mtm:processing:lock:%s", chainID)
+	err := s.redis.Delete(lockKey)
+	if err != nil {
+		log.Printf("WARN: Failed to release processing lock for chain %s: %v", chainID, err)
+	}
 }
 
-func (s *STMStore) updateDialogueChain(ctx context.Context, chainID string) error {
-	collection := s.db.Collection(DialogueChainsCollection)
+// CreateSegmentSummary generates a detailed summary and importance score for a segment using the LLM with Structured Outputs
+func (s *STMStore) CreateSegmentSummary(ctx context.Context, events []models.CognitiveEvent) (string, float64, error) {
+	LLMBaseURL := os.Getenv("LLM_BASE_URL")
+	apiKey := os.Getenv("AZURE_OPENAI_API_KEY")
 
-	filter := bson.M{"chainId": chainID}
-	update := bson.M{
-		"$set": bson.M{
-			"lastTurnAt": time.Now(),
-		},
-		"$inc": bson.M{
-			"turnCount": 1,
-		},
-	}
-
-	_, err := collection.UpdateOne(ctx, filter, update)
-	return err
-}
-
-// STM Store Retrieval Methods
-
-// RetrieveFromSTMStore performs semantic search on stored memories with tenant scope
-func (s *STMStore) RetrieveFromSTMStore(ctx context.Context, tenantID, userID, agentID, query string, limit int) ([]*models.DialoguePage, error) {
-	start := time.Now()
-
-	// Step 1: Create query embedding
-	queryEmbedding, err := s.CreateEmbedding(ctx, query, "")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create query embedding: %w", err)
-	}
-
-	// Step 2: Find similar vectors from Redis (placeholder for vector DB)
-	pageIDs, err := s.findSimilarEmbeddings(ctx, tenantID, userID, agentID, queryEmbedding.Vector, limit)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find similar embeddings: %w", err)
-	}
-
-	// Step 3: Retrieve full dialogue pages from MongoDB
-	pages, err := s.getDialoguePagesByIDs(ctx, pageIDs)
-	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve dialogue pages: %w", err)
-	}
-
-	duration := time.Since(start)
-	log.Printf("INFO: STM Store retrieval completed - UserID: %s, Query: %s, Results: %d, Duration: %v",
-		userID, query, len(pages), duration)
-
-	return pages, nil
-}
-
-// RetrieveSegments performs segment-level search using segment embeddings with tenant scope
-func (s *STMStore) RetrieveSegments(ctx context.Context, tenantID, userID, agentID, query string, limit int) ([]models.Segment, error) {
-	if s.milvus == nil {
-		return []models.Segment{}, nil
-	}
-
-	emb, err := s.CreateEmbedding(ctx, query, "")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create query embedding: %w", err)
-	}
-
-	segIDs, _, err := s.milvus.SearchSimilarSegments(ctx, tenantID, userID, agentID, emb.Vector, limit)
-	if err != nil || len(segIDs) == 0 {
-		return []models.Segment{}, nil
-	}
-
-	// Fetch segments from Mongo by segmentId string field
-	col := s.db.Collection("segments")
-	cur, err := col.Find(ctx, bson.M{"segmentId": bson.M{"$in": segIDs}})
-	if err != nil {
-		return nil, err
-	}
-	defer cur.Close(ctx)
-
-	var segments []models.Segment
-	if err := cur.All(ctx, &segments); err != nil {
-		return nil, err
-	}
-
-	// Track access for heat scoring (background operation, don't fail retrieval if this fails)
-	go func() {
-		heatScorer := NewHeatScorer(s.db)
-		for _, segment := range segments {
-			if err := heatScorer.UpdateSegmentAccess(context.Background(), segment.SegmentID); err != nil {
-				log.Printf("WARN: Failed to update segment access for heat scoring %s: %v", segment.SegmentID, err)
-			}
-		}
-	}()
-
-	log.Printf("INFO: Retrieved %d segments for query, tracking access for heat scoring", len(segments))
-	return segments, nil
-}
-
-// GetDialoguePagesByIDs fetches dialogue pages by ObjectIDs
-func (s *STMStore) GetDialoguePagesByIDs(ctx context.Context, ids []primitive.ObjectID) ([]*models.DialoguePage, error) {
-	if len(ids) == 0 {
-		return []*models.DialoguePage{}, nil
-	}
-	col := s.db.Collection(DialoguePagesCollection)
-	cur, err := col.Find(ctx, bson.M{"_id": bson.M{"$in": ids}})
-	if err != nil {
-		return nil, err
-	}
-	defer cur.Close(ctx)
-	var pages []*models.DialoguePage
-	if err := cur.All(ctx, &pages); err != nil {
-		return nil, err
-	}
-	return pages, nil
-}
-
-// CreateSegmentSummary generates a one-sentence summary for a segment using the LLM
-func (s *STMStore) CreateSegmentSummary(ctx context.Context, pages []models.DialoguePage) (string, error) {
 	if LLMBaseURL == "" {
-		return "", fmt.Errorf("LLM_BASE_URL not configured")
+		return "", 0, fmt.Errorf("llm_base_url not configured")
 	}
+
+	if apiKey == "" {
+		return "", 0, fmt.Errorf("azure_openai_api_key not configured")
+	}
+
+	if !s.llmGuards.checkRateLimit(ctx, "summary_user") {
+		return "", 0, fmt.Errorf("llm summary rate limit exceeded")
+	}
+	if !s.llmGuards.checkCircuitBreaker() {
+		return "", 0, fmt.Errorf("llm summary circuit breaker is open")
+	}
+
+	// Define strict JSON Schema for the response
+	jsonSchema := map[string]interface{}{
+		"name":   "mtm_summary_schema",
+		"strict": true,
+		"schema": map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"summary": map[string]interface{}{
+					"type":        "string",
+					"description": "A concise, detailed summary of the conversation segment.",
+				},
+				"intrinsic_importance": map[string]interface{}{
+					"type":        "number",
+					"description": "A float between 0.0 and 1.0 indicating the core value or permanence of this memory. 0.1 is trivial chitchat, 0.5 is standard context, 0.9+ is a critical system fact, core user preference, or hard constraint.",
+				},
+			},
+			"required":             []string{"summary", "intrinsic_importance"},
+			"additionalProperties": false,
+		},
+	}
+
 	var b strings.Builder
-	b.WriteString("Summarize the following conversation segment in one sentence, focusing on topic and key facts.\n\n")
-	for _, p := range pages {
-		b.WriteString("User: ")
-		b.WriteString(p.UserMessage)
-		b.WriteString("\nAssistant: ")
-		b.WriteString(p.AgentResponse)
-		b.WriteString("\n---\n")
+	b.WriteString("You are a memory analysis agent. Analyze the following conversation segment.\n")
+	b.WriteString("1. Generate a concise, detailed summary of the core topic, key facts, and reasoning.\n")
+	b.WriteString("2. Evaluate the 'intrinsic_importance' of this segment based on its long-term value.\n")
+	b.WriteString("\nEvent Chain:\n---")
+	for _, event := range events {
+		b.WriteString(fmt.Sprintf("%s: [%s] %s\n", event.Role, event.Type, event.Content))
 	}
+	b.WriteString("---\n\nRespond with the required JSON object.")
+
 	prompt := b.String()
-	modelName := LLMModelName
-	if modelName == "" {
-		modelName = "Qwen/Qwen3-32B-AWQ"
-	}
+
 	reqBody := map[string]interface{}{
-		"model":       modelName,
-		"prompt":      prompt,
-		"max_tokens":  64,
+		"messages": []map[string]string{
+			{"role": "system", "content": "You are a helpful assistant designed to output JSON."},
+			{"role": "user", "content": prompt},
+		},
+		"max_tokens":  256,
 		"temperature": 0.3,
-		"stop":        []string{"\n"},
+		"response_format": map[string]interface{}{
+			"type":        "json_schema",
+			"json_schema": jsonSchema,
+		},
 	}
 	body, _ := json.Marshal(reqBody)
-	httpCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	httpCtx, cancel := context.WithTimeout(ctx, s.llmConfig.SummaryTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(httpCtx, "POST", LLMBaseURL, bytes.NewBuffer(body))
 	if err != nil {
-		return "", err
+		s.llmGuards.recordLLMResult(false) // Record failure
+		return "", 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := (&http.Client{}).Do(req)
+	req.Header.Set("api-key", apiKey)
+
+	resp, err := s.HTTPClient.Do(req)
 	if err != nil {
-		return "", err
+		s.llmGuards.recordLLMResult(false) // Record failure
+		return "", 0, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("LLM summary API returned %d", resp.StatusCode)
+		s.llmGuards.recordLLMResult(false) // Record failure
+		return "", 0, fmt.Errorf("llm summary API returned %d", resp.StatusCode)
 	}
 	raw, _ := io.ReadAll(resp.Body)
 	var llmResp struct {
 		Choices []struct {
-			Text string `json:"text"`
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(raw, &llmResp); err != nil {
-		return "", err
+		s.llmGuards.recordLLMResult(false) // Record failure
+		return "", 0, err
 	}
 	if len(llmResp.Choices) == 0 {
-		return "", fmt.Errorf("empty summary choices")
+		s.llmGuards.recordLLMResult(false) // Record failure
+		return "", 0, fmt.Errorf("empty summary choices")
 	}
-	return strings.TrimSpace(llmResp.Choices[0].Text), nil
+
+	// Parse the structured output
+	type MTMSummaryResponse struct {
+		Summary             string  `json:"summary"`
+		IntrinsicImportance float64 `json:"intrinsic_importance"`
+	}
+	var summaryResp MTMSummaryResponse
+	if err := json.Unmarshal([]byte(llmResp.Choices[0].Message.Content), &summaryResp); err != nil {
+		s.llmGuards.recordLLMResult(false)
+		return "", 0, fmt.Errorf("failed to parse structured output: %w", err)
+	}
+
+	s.llmGuards.recordLLMResult(true) // Record success
+	return summaryResp.Summary, summaryResp.IntrinsicImportance, nil
 }
 
-// StoreSegmentEmbedding creates an embedding for a segment summary and stores it with tenant scope
-func (s *STMStore) StoreSegmentEmbedding(ctx context.Context, tenantID, userID, agentID, segmentID string, summary string) error {
+// StoreChainEmbedding stores an embedding for a cognitive chain summary in Milvus
+func (s *STMStore) StoreChainEmbedding(ctx context.Context, chain *models.CognitiveChain, embedding *models.EmbeddingData) error {
 	if s.milvus == nil {
-		return fmt.Errorf("milvus client not configured for segment embeddings")
+		return fmt.Errorf("milvus client not configured")
 	}
-	emb, err := s.CreateEmbedding(ctx, summary, "")
-	if err != nil {
-		return fmt.Errorf("failed to create segment embedding: %w", err)
-	}
-	return s.milvus.InsertSegmentEmbedding(ctx, tenantID, userID, agentID, segmentID, emb)
+	return s.milvus.InsertSegmentEmbedding(ctx, chain.TenantID, chain.UserID, chain.AgentID, chain.ChainID, embedding)
 }
 
-// GetRecentConversationContext retrieves recent dialogue pages for a user
-func (s *STMStore) GetRecentConversationContext(ctx context.Context, userID string, limit int) ([]*models.DialoguePage, error) {
-	collection := s.db.Collection(DialoguePagesCollection)
+// StoreEventEmbedding stores an embedding for a single cognitive event in Milvus.
+// NOTE: This currently uses the same Milvus collection as chain summaries.
+func (s *STMStore) StoreEventEmbedding(ctx context.Context, event *models.CognitiveEvent, embedding *models.EmbeddingData) error {
+	if s.milvus == nil {
+		return fmt.Errorf("milvus client not configured")
+	}
+	// Using event.ID.Hex() as the reference ID.
+	return s.milvus.InsertSegmentEmbedding(ctx, event.TenantID, event.UserID, event.AgentID, event.ID.Hex(), embedding)
+}
+
+// IndexCognitiveEvents creates and stores embeddings for individual high-value cognitive events.
+func (s *STMStore) IndexCognitiveEvents(ctx context.Context, chainID string, events []models.CognitiveEvent) error {
+	if s.milvus == nil {
+		log.Println("WARN: Milvus client not configured, skipping event indexing.")
+		return nil // Not a fatal error
+	}
+
+	indexedCount := 0
+	for _, event := range events {
+		// Filter for high-value events
+		shouldIndex := false
+		switch event.Type {
+		case models.STMEventTypeObservation, models.STMEventTypeThought:
+			shouldIndex = true
+		case models.STMEventTypeMessage:
+			if len(event.Content) > 100 {
+				shouldIndex = true
+			}
+		}
+
+		if shouldIndex {
+			// Create embedding for the event content
+			embedding, err := s.CreateEmbedding(ctx, event.Content)
+			if err != nil {
+				log.Printf("WARN: Failed to create embedding for event %s in chain %s: %v", event.ID.Hex(), chainID, err)
+				continue // Skip this event
+			}
+
+			// Store the embedding in Milvus using the event's ID as the reference
+			err = s.StoreEventEmbedding(ctx, &event, embedding)
+			if err != nil {
+				log.Printf("WARN: Failed to store embedding for event %s in chain %s: %v", event.ID.Hex(), chainID, err)
+				continue // Skip this event
+			}
+			indexedCount++
+		}
+	}
+
+	if indexedCount > 0 {
+		log.Printf("INFO: Indexed %d individual cognitive events for chain %s.", indexedCount, chainID)
+	}
+
+	return nil
+}
+
+// SearchSimilarChains finds cognitive chains that are semantically similar to a query vector.
+func (s *STMStore) SearchSimilarChains(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int) ([]*models.CognitiveChain, error) {
+	if s.milvus == nil {
+		log.Println("WARN: Milvus client not configured, cannot search for similar chains.")
+		return nil, nil // Return empty slice, not an error
+	}
+
+	// Step A: Call Milvus to get IDs of similar chains
+	chainIDs, _, err := s.milvus.SearchSimilarSegments(ctx, tenantID, userID, agentID, queryVector, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search for similar segments in milvus: %w", err)
+	}
+
+	if len(chainIDs) == 0 {
+		return []*models.CognitiveChain{}, nil // No similar chains found
+	}
+
+	log.Printf("INFO: Vector search found %d candidate chain IDs.", len(chainIDs))
+
+	// Step B: Fetch the full metadata for those chain IDs from MongoDB
+	collection := s.db.Collection(CognitiveChainsCollection)
+	filter := bson.M{
+		"chainId": bson.M{"$in": chainIDs},
+		"status":  "active", // Only consider active chains
+		"userId":  userID,   // Ensure chains belong to the same user
+	}
+
+	cursor, err := collection.Find(ctx, filter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query similar chains from mongodb: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	var chains []*models.CognitiveChain
+	if err := cursor.All(ctx, &chains); err != nil {
+		return nil, fmt.Errorf("failed to decode similar chains from mongodb: %w", err)
+	}
+
+	log.Printf("INFO: Fetched %d full cognitive chain documents from MongoDB.", len(chains))
+
+	return chains, nil
+}
+
+// ArchiveColdChains scans for cold chains (low heat score) and archives them.
+// Archiving involves deleting the vector embedding from Milvus and updating the status in MongoDB.
+func (s *STMStore) ArchiveColdChains(ctx context.Context) (int, error) {
+	if s.db == nil {
+		return 0, fmt.Errorf("database not initialized")
+	}
+
+	// 1. Define criteria for "potentially cold" chains to scan.
+	// We look for active chains that haven't been accessed in a while (e.g., 7 days).
+	// This optimization avoids scanning the entire database every time.
+	archiveScanDays := parseIntEnv("MTM_ARCHIVE_SCAN_DAYS", 7)
+	scanThreshold := time.Now().AddDate(0, 0, -archiveScanDays)
 
 	filter := bson.M{
-		"userId": userID,
-		"status": "in_stm",
+		"status": "active",
+		"$or": []bson.M{
+			{"lastAccessedAt": bson.M{"$lt": scanThreshold}},
+			{"lastAccessedAt": bson.M{"$exists": false}, "lastEventAt": bson.M{"$lt": scanThreshold}},
+		},
 	}
 
-	opts := options.Find()
-	opts.SetSort(bson.D{bson.E{Key: "createdAt", Value: -1}}) // Most recent first
-	opts.SetLimit(int64(limit))
-
-	cursor, err := collection.Find(ctx, filter, opts)
+	collection := s.db.Collection(CognitiveChainsCollection)
+	cursor, err := collection.Find(ctx, filter)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find recent pages: %w", err)
+		return 0, fmt.Errorf("failed to query potential cold chains: %w", err)
 	}
 	defer cursor.Close(ctx)
 
-	var pages []*models.DialoguePage
-	for cursor.Next(ctx) {
-		var page models.DialoguePage
-		if err := cursor.Decode(&page); err != nil {
-			log.Printf("WARN: Failed to decode dialogue page: %v", err)
-			continue
-		}
-		pages = append(pages, &page)
+	var chains []models.CognitiveChain
+	if err := cursor.All(ctx, &chains); err != nil {
+		return 0, fmt.Errorf("failed to decode potential cold chains: %w", err)
 	}
 
-	if err := cursor.Err(); err != nil {
-		return nil, fmt.Errorf("cursor error: %w", err)
+	if len(chains) == 0 {
+		return 0, nil
 	}
 
-	return pages, nil
-}
+	log.Printf("INFO: ArchiveColdChains found %d candidates for analysis.", len(chains))
 
-// GetDialogueChainPages retrieves all pages for a specific dialogue chain
-func (s *STMStore) GetDialogueChainPages(ctx context.Context, chainID string) ([]*models.DialoguePage, error) {
-	collection := s.db.Collection(DialoguePagesCollection)
+	// 2. Initialize HeatScorer to calculate current heat
+	heatScorer := NewHeatScorer(s.db)
+	freezingPoint := parseFloatEnv("MTM_FREEZING_POINT", 0.1)
 
-	filter := bson.M{"chainId": chainID}
-	opts := options.Find()
-	opts.SetSort(bson.D{bson.E{Key: "createdAt", Value: 1}}) // Chronological order
+	archivedCount := 0
 
-	cursor, err := collection.Find(ctx, filter, opts)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find chain pages: %w", err)
-	}
-	defer cursor.Close(ctx)
-
-	var pages []*models.DialoguePage
-	for cursor.Next(ctx) {
-		var page models.DialoguePage
-		if err := cursor.Decode(&page); err != nil {
-			log.Printf("WARN: Failed to decode dialogue page: %v", err)
-			continue
-		}
-		pages = append(pages, &page)
-	}
-
-	if err := cursor.Err(); err != nil {
-		return nil, fmt.Errorf("cursor error: %w", err)
-	}
-
-	return pages, nil
-}
-
-// GetSegmentsBySessionID retrieves all segments for a specific session (chain)
-func (s *STMStore) GetSegmentsBySessionID(ctx context.Context, sessionID string, limit int) ([]*models.Segment, error) {
-	collection := s.db.Collection("segments")
-
-	filter := bson.M{"chainId": sessionID}
-	opts := options.Find()
-	opts.SetSort(bson.D{bson.E{Key: "createdAt", Value: -1}}) // Most recent first
-	opts.SetLimit(int64(limit))
-
-	cursor, err := collection.Find(ctx, filter, opts)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find segments for session %s: %w", sessionID, err)
-	}
-	defer cursor.Close(ctx)
-
-	var segments []*models.Segment
-	if err := cursor.All(ctx, &segments); err != nil {
-		return nil, fmt.Errorf("failed to decode segments: %w", err)
-	}
-
-	return segments, nil
-}
-
-// GetHeatMetricsBySessionID calculates and retrieves heat metrics for a session
-func (s *STMStore) GetHeatMetricsBySessionID(ctx context.Context, sessionID string) (*models.HeatMetrics, error) {
-	// 1. Retrieve all segments for the session
-	segments, err := s.GetSegmentsBySessionID(ctx, sessionID, 1000) // High limit to get all segments
-	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve segments for heat metrics: %w", err)
-	}
-
-	if len(segments) == 0 {
-		return &models.HeatMetrics{
-			OverallHeat: 0.0,
-			Breakdown:   &models.HeatFactors{},
-		}, nil
-	}
-
-	// 2. Aggregate heat scores and factors
-	var totalHeat float64
-	var totalAccessFrequency, totalInteractionDepth, totalRecencyScore, totalUserEngagement, totalTopicImportance float64
-	var lastActivity time.Time
-	var totalInteractions int
-
-	for _, segment := range segments {
-		totalHeat += segment.HeatScore
-		totalInteractions += segment.InteractionSize
-
-		if segment.HeatFactors != nil {
-			totalAccessFrequency += segment.HeatFactors.AccessFrequency
-			totalInteractionDepth += segment.HeatFactors.InteractionDepth
-			totalRecencyScore += segment.HeatFactors.RecencyScore
-			totalUserEngagement += segment.HeatFactors.UserEngagement
-			totalTopicImportance += segment.HeatFactors.TopicImportance
-		}
-
-		if segment.UpdatedAt.After(lastActivity) {
-			lastActivity = segment.UpdatedAt
-		}
-	}
-
-	// 3. Calculate average heat and factors
-	numSegments := float64(len(segments))
-	overallHeat := totalHeat / numSegments
-	avgBreakdown := &models.HeatFactors{
-		AccessFrequency:  totalAccessFrequency / numSegments,
-		InteractionDepth: totalInteractionDepth / numSegments,
-		RecencyScore:     totalRecencyScore / numSegments,
-		UserEngagement:   totalUserEngagement / numSegments,
-		TopicImportance:  totalTopicImportance / numSegments,
-	}
-
-	return &models.HeatMetrics{
-		OverallHeat:       overallHeat,
-		Breakdown:         avgBreakdown,
-		TotalInteractions: totalInteractions,
-		LastActivity:      lastActivity,
-	}, nil
-}
-
-// GetTopicsBySessionID analyzes and retrieves topics for a session
-func (s *STMStore) GetTopicsBySessionID(ctx context.Context, sessionID string) (*MultiTopicResult, error) {
-	// 1. Retrieve all dialogue pages for the session
-	pagePointers, err := s.GetDialogueChainPages(ctx, sessionID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve dialogue pages for topic analysis: %w", err)
-	}
-
-	if len(pagePointers) == 0 {
-		return &MultiTopicResult{
-			TotalTopics: 0,
-		}, nil
-	}
-
-	// Convert slice of pointers to slice of values
-	pages := make([]models.DialoguePage, len(pagePointers))
-	for i, p := range pagePointers {
-		if p != nil {
-			pages[i] = *p
-		}
-	}
-
-	// 2. Analyze topics using the TopicAnalyzer
-	topicAnalyzer := NewTopicAnalyzer(s, nil) // ParallelProcessor is not used in this path
-	topicResult, err := topicAnalyzer.AnalyzeTopics(ctx, pages)
-	if err != nil {
-		return nil, fmt.Errorf("failed to analyze topics: %w", err)
-	}
-
-	return topicResult, nil
-}
-
-// Helper functions for retrieval
-
-func (s *STMStore) findSimilarEmbeddings(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int) ([]string, error) {
-	// Use Milvus if available
-	if s.milvus != nil {
-		pageIDs, scores, err := s.milvus.SearchSimilarEmbeddings(ctx, tenantID, userID, agentID, queryVector, limit)
+	for _, chain := range chains {
+		// Calculate current heat score
+		currentHeat, _, err := heatScorer.ComputeSegmentHeat(ctx, &chain)
 		if err != nil {
-			log.Printf("WARN: Milvus search failed, falling back to Redis: %v", err)
-			return s.findSimilarEmbeddingsInRedis(ctx, tenantID, userID, agentID, queryVector, limit)
-		}
-
-		log.Printf("INFO: Found %d similar embeddings in Milvus with scores: %v", len(pageIDs), scores)
-		return pageIDs, nil
-	}
-
-	// Fall back to Redis
-	return s.findSimilarEmbeddingsInRedis(ctx, tenantID, userID, agentID, queryVector, limit)
-}
-
-func (s *STMStore) findSimilarEmbeddingsInRedis(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int) ([]string, error) {
-	// This is a simplified similarity search using Redis
-	// Get all embedding keys for this user (in practice, this would be optimized)
-	pattern := "embedding:*"
-	keys, err := s.redis.Keys(pattern)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get embedding keys: %w", err)
-	}
-
-	type similarity struct {
-		pageID string
-		score  float64
-	}
-
-	var similarities []similarity
-
-	// Calculate cosine similarity for each embedding
-	for _, key := range keys {
-		var embeddingJSON string
-		err := s.redis.Get(key, &embeddingJSON)
-		if err != nil {
+			log.Printf("WARN: Failed to compute heat for chain %s: %v", chain.ChainID, err)
 			continue
 		}
 
-		var embedding models.EmbeddingData
-		if err := json.Unmarshal([]byte(embeddingJSON), &embedding); err != nil {
-			continue
-		}
+		// Check if below freezing point
+		if currentHeat < freezingPoint {
+			log.Printf("INFO: Archiving cold chain %s (Heat: %.3f < %.3f)", chain.ChainID, currentHeat, freezingPoint)
 
-		// Calculate cosine similarity
-		score, err := cosineSimilarity(queryVector, embedding.Vector)
-		if err != nil {
-			log.Printf("WARN: Cosine similarity calculation failed for page %s: %v", embedding.PageID, err)
-			continue
-		}
-		similarities = append(similarities, similarity{
-			pageID: embedding.PageID,
-			score:  score,
-		})
-	}
+			// A. Delete vector from Milvus
+			if s.milvus != nil {
+				if err := s.milvus.DeleteSegmentEmbedding(ctx, chain.TenantID, chain.UserID, chain.AgentID, chain.ChainID); err != nil {
+					log.Printf("ERROR: Failed to delete vector for chain %s: %v", chain.ChainID, err)
+					// We continue to mark as archived in Mongo, assuming Milvus might be down or data inconsistent.
+					// Alternatively, we could skip archiving in Mongo to retry later.
+					// For now, let's proceed to ensure Mongo state reflects "archived" status.
+				}
+			} else {
+				log.Println("WARN: Milvus client not available, skipping vector deletion.")
+			}
 
-	// Sort by similarity score (highest first)
-	for i := 0; i < len(similarities)-1; i++ {
-		for j := i + 1; j < len(similarities); j++ {
-			if similarities[j].score > similarities[i].score {
-				similarities[i], similarities[j] = similarities[j], similarities[i]
+			// B. Update status in MongoDB
+			now := time.Now()
+			update := bson.M{
+				"$set": bson.M{
+					"status":     "archived",
+					"archivedAt": now,
+					"heatScore":  currentHeat, // Persist the final low score
+				},
+			}
+			_, err := collection.UpdateOne(ctx, bson.M{"_id": chain.ID}, update)
+			if err != nil {
+				log.Printf("ERROR: Failed to update status for chain %s in MongoDB: %v", chain.ChainID, err)
+			} else {
+				archivedCount++
 			}
 		}
 	}
 
-	// Return top results
-	var pageIDs []string
-	maxResults := min(limit, len(similarities))
-	for i := 0; i < maxResults; i++ {
-		pageIDs = append(pageIDs, similarities[i].pageID)
-	}
-
-	log.Printf("INFO: Found %d similar embeddings in Redis (fallback)", len(pageIDs))
-	return pageIDs, nil
-}
-
-func (s *STMStore) getDialoguePagesByIDs(ctx context.Context, pageIDs []string) ([]*models.DialoguePage, error) {
-	if len(pageIDs) == 0 {
-		return []*models.DialoguePage{}, nil
-	}
-
-	collection := s.db.Collection(DialoguePagesCollection)
-
-	// Convert string IDs to ObjectIDs
-	objectIDs := make([]primitive.ObjectID, 0, len(pageIDs))
-	for _, pageID := range pageIDs {
-		if oid, err := primitive.ObjectIDFromHex(pageID); err == nil {
-			objectIDs = append(objectIDs, oid)
-		}
-	}
-
-	filter := bson.M{"_id": bson.M{"$in": objectIDs}}
-	cursor, err := collection.Find(ctx, filter)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find pages by IDs: %w", err)
-	}
-	defer cursor.Close(ctx)
-
-	var pages []*models.DialoguePage
-	for cursor.Next(ctx) {
-		var page models.DialoguePage
-		if err := cursor.Decode(&page); err != nil {
-			log.Printf("WARN: Failed to decode dialogue page: %v", err)
-			continue
-		}
-		pages = append(pages, &page)
-	}
-
-	if err := cursor.Err(); err != nil {
-		return nil, fmt.Errorf("cursor error: %w", err)
-	}
-
-	return pages, nil
-}
-
-// Utility functions
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
+	log.Printf("INFO: ArchiveColdChains completed. Archived %d/%d candidates.", archivedCount, len(chains))
+	return archivedCount, nil
 }
