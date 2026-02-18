@@ -8,6 +8,8 @@ The core philosophy is to mimic the way human memory works, progressing from a f
 
 ## 🏗️ Architecture
 
+For a deep dive into the conceptual design and physics-based analogies (Kepler's Laws) governing our memory pipelines, see [The Orbital Mechanics of Memory](docs/ARCHITECTURE_EVOLUTION.md).
+
 ```
 ┌─────────────────────────────────────────────┐
 │              Memory OS API                  │

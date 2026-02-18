@@ -161,7 +161,7 @@ func (sm *SessionManager) findVectorCandidates(ctx context.Context, newChain *mo
 
 	// 2. Search for similar chains using STMStore's SearchSimilarChains method
 	// which handles both vector search and MongoDB retrieval
-	similarChains, err := sm.stmStore.SearchSimilarChains(ctx, newChain.TenantID, newChain.UserID, newChain.AgentID, embedding.Vector, sm.config.VectorSearchLimit)
+	similarChains, err := sm.stmStore.SearchSimilarChains(ctx, newChain.TenantID, newChain.UserID, newChain.AgentID, embedding.Vector, sm.config.VectorSearchLimit, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to perform vector search for similar chains: %w", err)
 	}
@@ -348,13 +348,20 @@ func (sm *SessionManager) mergeChains(ctx context.Context, targetChain *models.C
 	// 3. Update the target chain
 	combinedSummary := sm.combineSummaries(targetChain.Summary, newChain.Summary)
 
+	// Inherit the topic from the new chain if the target chain has none
+	mergedTopic := targetChain.Topic
+	if mergedTopic == "" && newChain.Topic != "" {
+		mergedTopic = newChain.Topic
+	}
+
 	update := bson.M{
 		"$set": bson.M{
-			"summary":     combinedSummary,
-			"eventCount":  targetChain.EventCount + newChain.EventCount,
-			"lastEventAt": newChain.LastEventAt,
-			"entities":    mergedEntities,
-			"updatedAt":   now,
+			"summary":    combinedSummary,
+			"topic":      mergedTopic,
+			"eventCount": targetChain.EventCount + newChain.EventCount,
+			"lastEventAt":     newChain.LastEventAt,
+			"entities":        mergedEntities,
+			"updatedAt":       now,
 		},
 	}
 

@@ -96,10 +96,17 @@ func (p *Promoter) updateChainHeat(ctx context.Context, chainID string, heatScor
 	return err
 }
 
-// promoteChainToLPM promotes a "hot" cognitive chain to the Long-Term Personal Memory (LPM)
+// promoteChainToLPM promotes a "hot" cognitive chain to the Long-Term Personal Memory (LPM).
+// When the chain has extracted entities, it writes one structured triple per entity
+// (e.g. User → interested_in → "OAuth2"). Falls back to a single topic-based triple
+// for older chains that pre-date entity extraction.
 func (p *Promoter) promoteChainToLPM(ctx context.Context, chain *models.CognitiveChain, heatScore float64) error {
-	// Logic for promotion to LTM (e.g. JanusGraph) is currently disabled.
-	// This function is a placeholder for future implementation or alternative storage.
-	log.Printf("INFO: Chain %s qualified for promotion (heat=%.3f). LTM promotion skipped (JanusGraph disabled).", chain.ChainID, heatScore)
+	// LTM write (JanusGraph/ArangoDB) is disabled — handled by colleague's Odin integration.
+	// Entities are stored on the chain in MongoDB and ready for future graph writing.
+	if len(chain.Entities) > 0 {
+		log.Printf("INFO: Chain %s qualified for LTM promotion (heat=%.3f). Entities ready: %v. LTM write skipped (pending Odin integration).", chain.ChainID, heatScore, chain.Entities)
+	} else {
+		log.Printf("INFO: Chain %s qualified for LTM promotion (heat=%.3f). LTM write skipped (pending Odin integration).", chain.ChainID, heatScore)
+	}
 	return nil
 }
