@@ -62,7 +62,7 @@ func getConnectionConfig() ConnectionConfig {
 // loadConnectionConfig loads configuration without calling log.Fatal (testable version)
 func loadConnectionConfig() (ConnectionConfig, error) {
 	// Try to load .env file - ignore errors if file doesn't exist (e.g., during tests)
-	_ = godotenv.Load(".env")
+	_ = godotenv.Load("../../.env.dev")
 
 	uri := os.Getenv("MONGO_URI")
 	dbName := os.Getenv("MONGO_DB")

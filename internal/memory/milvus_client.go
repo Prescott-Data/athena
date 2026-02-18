@@ -32,14 +32,36 @@ const (
 	UserIDFieldName = "user_id"
 	// AgentIDFieldName is the agent ID field name
 	AgentIDFieldName = "agent_id"
-	// VectorDimension is the vector dimension (adjust based on your embedding model)
-	VectorDimension = 1536 // Azure OpenAI text-embedding-ada-002 output dimension
+	// DefaultVectorDimension is the default vector dimension for embedding models
+	DefaultVectorDimension = 1536 // Azure OpenAI text-embedding-ada-002 output dimension
 )
+
+// VectorDimension returns the configured vector dimension from env or default.
+// Supports text-embedding-ada-002 (1536) and text-embedding-3-large (3072).
+var VectorDimension = getVectorDimension()
+
+func getVectorDimension() int {
+	return parseIntEnv("MILVUS_VECTOR_DIMENSION", DefaultVectorDimension)
+}
+
+// MilvusClientInterface defines the interface for Milvus client operations
+type MilvusClientInterface interface {
+	InsertEmbedding(ctx context.Context, tenantID, userID, agentID, pageID string, embedding *models.EmbeddingData) error
+	InsertSegmentEmbedding(ctx context.Context, tenantID, userID, agentID, segmentID string, embedding *models.EmbeddingData) error
+	GetEmbeddingByPageID(ctx context.Context, tenantID, userID, agentID, pageID string) (*models.EmbeddingData, error)
+	SearchSimilarEmbeddings(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int) ([]string, []float32, error)
+	SearchSimilarSegments(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int) ([]string, []float32, error)
+	DeleteSegmentEmbedding(ctx context.Context, tenantID, userID, agentID, segmentID string) error
+	Close() error
+}
 
 // MilvusClient wraps the Milvus SDK for STM operations
 type MilvusClient struct {
 	client client.Client
 }
+
+// Ensure MilvusClient implements MilvusClientInterface
+var _ MilvusClientInterface = (*MilvusClient)(nil)
 
 // NewMilvusClient creates a new Milvus client connection
 func NewMilvusClient(host, port string) (*MilvusClient, error) {
@@ -399,11 +421,11 @@ func (mc *MilvusClient) GetEmbeddingByPageID(ctx context.Context, tenantID, user
 	}
 
 	return &models.EmbeddingData{
-		PageID:     pageID,
-		Vector:     vector,
-		Dimensions: len(vector),
-		Model:      "retrieved_from_milvus",
-		CreatedAt:  time.Unix(createdAt, 0),
+		ReferenceID: pageID,
+		Vector:      vector,
+		Dimensions:  len(vector),
+		Model:       "retrieved_from_milvus",
+		CreatedAt:   time.Unix(createdAt, 0),
 	}, nil
 }
 
@@ -529,6 +551,21 @@ func (mc *MilvusClient) SearchSimilarSegments(ctx context.Context, tenantID, use
 		scores = append(scores, res.Scores[i])
 	}
 	return ids, scores, nil
+}
+
+// DeleteSegmentEmbedding removes a segment embedding from Milvus with tenant/user/agent scope
+func (mc *MilvusClient) DeleteSegmentEmbedding(ctx context.Context, tenantID, userID, agentID, segmentID string) error {
+	// Filter expression for tenant/user/agent scope and segment ID
+	expr := fmt.Sprintf(`%s == "%s" && %s == "%s" && %s == "%s" && %s == "%s"`,
+		TenantIDFieldName, tenantID,
+		UserIDFieldName, userID,
+		AgentIDFieldName, agentID,
+		SegmentIDFieldName, segmentID)
+
+	if err := mc.client.Delete(ctx, SegmentCollectionName, "", expr); err != nil {
+		return fmt.Errorf("failed to delete segment embedding: %w", err)
+	}
+	return nil
 }
 
 // Close closes the Milvus client connection

@@ -1,3 +1,5 @@
+SHELL=/bin/bash
+
 .PHONY: help build run test clean lint lint-fmt lint-vet lint-lint lint-tidy docker-build docker-run install-tools generate
 
 # Default target
@@ -17,6 +19,15 @@ run: ## Run the memory-server (requires .env file)
 # Testing targets
 test: ## Run all tests
 	go test -v ./...
+
+test-e2e: ## Run end-to-end tests with environment variables from .env.dev
+	set -a; source .env.dev; set +a; go test -v ./...
+
+debug-test-e2e: ## Run end-to-end tests with debug output
+	@echo "--- Environment variables ---"
+	@set -a; source .env.dev; set +a; env
+	@echo "--- Running tests ---"
+	@set -a; source .env.dev; set +a; go test -v ./...
 
 test-short: ## Run tests with short flag
 	go test -short -v ./...

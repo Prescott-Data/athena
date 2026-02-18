@@ -33,16 +33,16 @@ type ProcessingResult struct {
 	Duration time.Duration
 }
 
-// SegmentAnalysisTask represents analysis tasks for segments
-type SegmentAnalysisTask struct {
-	Segment  *models.Segment
-	Pages    []models.DialoguePage
-	TaskType string // "summary", "continuity", "quality"
+// ChainAnalysisTask represents analysis tasks for cognitive chains
+type ChainAnalysisTask struct {
+	Chain    *models.CognitiveChain
+	Events   []models.CognitiveEvent
+	TaskType string // "summary", "quality", "keywords", "full"
 }
 
-// SegmentAnalysisResult holds results from segment analysis
-type SegmentAnalysisResult struct {
-	SegmentID       string
+// ChainAnalysisResult holds results from chain analysis
+type ChainAnalysisResult struct {
+	ChainID         string
 	Summary         string
 	QualityScore    float64
 	ContinuityScore float64
@@ -56,7 +56,6 @@ func NewParallelProcessor(maxWorkers int, stmStore *STMStore) *ParallelProcessor
 	if maxWorkers <= 0 {
 		maxWorkers = parseIntEnv("PARALLEL_PROCESSOR_MAX_WORKERS", 3)
 	}
-
 	return &ParallelProcessor{
 		maxWorkers: maxWorkers,
 		semaphore:  make(chan struct{}, maxWorkers),
@@ -74,13 +73,10 @@ func (pp *ParallelProcessor) ProcessTasks(ctx context.Context, tasks []*Processi
 	results := make([]*ProcessingResult, len(tasks))
 	var wg sync.WaitGroup
 
-	// Process tasks with controlled concurrency
 	for i, task := range tasks {
 		wg.Add(1)
 		go func(index int, t *ProcessingTask) {
 			defer wg.Done()
-
-			// Acquire semaphore
 			pp.semaphore <- struct{}{}
 			defer func() { <-pp.semaphore }()
 
@@ -97,9 +93,7 @@ func (pp *ParallelProcessor) ProcessTasks(ctx context.Context, tasks []*Processi
 		}(i, task)
 	}
 
-	// Wait for all tasks to complete
 	wg.Wait()
-
 	totalDuration := time.Since(start)
 	log.Printf("INFO: Parallel processing completed - Tasks: %d, Duration: %v, Avg per task: %v",
 		len(tasks), totalDuration, totalDuration/time.Duration(len(tasks)))
@@ -107,83 +101,70 @@ func (pp *ParallelProcessor) ProcessTasks(ctx context.Context, tasks []*Processi
 	return results, nil
 }
 
-// ProcessSegmentAnalysis performs parallel analysis on multiple segments
-func (pp *ParallelProcessor) ProcessSegmentAnalysis(ctx context.Context, tasks []*SegmentAnalysisTask) ([]*SegmentAnalysisResult, error) {
+// ProcessChainAnalysis performs parallel analysis on multiple cognitive chains
+func (pp *ParallelProcessor) ProcessChainAnalysis(ctx context.Context, tasks []*ChainAnalysisTask) ([]*ChainAnalysisResult, error) {
 	if len(tasks) == 0 {
-		return []*SegmentAnalysisResult{}, nil
+		return []*ChainAnalysisResult{}, nil
 	}
 
 	start := time.Now()
-	results := make([]*SegmentAnalysisResult, len(tasks))
+	results := make([]*ChainAnalysisResult, len(tasks))
 	var wg sync.WaitGroup
 
 	for i, task := range tasks {
 		wg.Add(1)
-		go func(index int, t *SegmentAnalysisTask) {
+		go func(index int, t *ChainAnalysisTask) {
 			defer wg.Done()
-
-			// Acquire semaphore for controlled concurrency
 			pp.semaphore <- struct{}{}
 			defer func() { <-pp.semaphore }()
-
-			result := pp.analyzeSegment(ctx, t)
-			results[index] = result
+			results[index] = pp.analyzeChain(ctx, t)
 		}(i, task)
 	}
 
 	wg.Wait()
-
 	totalDuration := time.Since(start)
-	log.Printf("INFO: Parallel segment analysis completed - Segments: %d, Duration: %v",
-		len(tasks), totalDuration)
-
+	log.Printf("INFO: Parallel chain analysis completed - Chains: %d, Duration: %v", len(tasks), totalDuration)
 	return results, nil
 }
 
-// analyzeSegment performs comprehensive analysis on a single segment
-func (pp *ParallelProcessor) analyzeSegment(ctx context.Context, task *SegmentAnalysisTask) *SegmentAnalysisResult {
+// analyzeChain performs comprehensive analysis on a single cognitive chain
+func (pp *ParallelProcessor) analyzeChain(ctx context.Context, task *ChainAnalysisTask) *ChainAnalysisResult {
 	start := time.Now()
-	result := &SegmentAnalysisResult{
-		SegmentID: task.Segment.SegmentID,
+	result := &ChainAnalysisResult{
+		ChainID: task.Chain.ChainID,
 	}
 
 	switch task.TaskType {
 	case "summary":
-		summary, err := pp.generateSummary(ctx, task.Pages)
+		summary, err := pp.generateSummary(ctx, task.Events)
 		if err != nil {
 			result.Error = err
 		} else {
 			result.Summary = summary
 		}
-
 	case "quality":
-		score, err := pp.assessQuality(ctx, task.Segment, task.Pages)
+		score, err := pp.assessQuality(ctx, task.Chain, task.Events)
 		if err != nil {
 			result.Error = err
 		} else {
 			result.QualityScore = score
 		}
-
 	case "keywords":
-		keywords, err := pp.extractKeywords(ctx, task.Segment)
+		keywords, err := pp.extractKeywords(ctx, task.Events)
 		if err != nil {
 			result.Error = err
 		} else {
 			result.Keywords = keywords
 		}
-
 	case "full":
-		// Perform all analyses
-		if summary, err := pp.generateSummary(ctx, task.Pages); err == nil {
-			result.Summary = summary
+		// Perform analysis efficiently
+		analysisResult, err := pp.stmStore.topicAnalyzer.AnalyzeTopics(ctx, task.Events)
+		if err == nil && analysisResult.MainTopic != nil {
+			result.Summary = analysisResult.MainTopic.Content
+			result.Keywords = analysisResult.MainTopic.Keywords
 		}
-
-		if score, err := pp.assessQuality(ctx, task.Segment, task.Pages); err == nil {
+		if score, err := pp.assessQuality(ctx, task.Chain, task.Events); err == nil {
 			result.QualityScore = score
-		}
-
-		if keywords, err := pp.extractKeywords(ctx, task.Segment); err == nil {
-			result.Keywords = keywords
 		}
 	}
 
@@ -191,123 +172,66 @@ func (pp *ParallelProcessor) analyzeSegment(ctx context.Context, task *SegmentAn
 	return result
 }
 
-// generateSummary creates a summary for the given pages
-func (pp *ParallelProcessor) generateSummary(ctx context.Context, pages []models.DialoguePage) (string, error) {
-	if pp.stmStore == nil {
-		return "", fmt.Errorf("STM store not available")
+// generateSummary creates a summary for the given cognitive events using the TopicAnalyzer
+func (pp *ParallelProcessor) generateSummary(ctx context.Context, events []models.CognitiveEvent) (string, error) {
+	if pp.stmStore == nil || pp.stmStore.topicAnalyzer == nil {
+		return "", fmt.Errorf("topic analyzer not available")
 	}
-
-	return pp.stmStore.CreateSegmentSummary(ctx, pages)
+	analysisResult, err := pp.stmStore.topicAnalyzer.AnalyzeTopics(ctx, events)
+	if err != nil {
+		return "", err
+	}
+	if analysisResult.MainTopic != nil && analysisResult.MainTopic.Content != "" {
+		return analysisResult.MainTopic.Content, nil
+	}
+	return "Conversation summary.", nil
 }
 
-// assessQuality evaluates the quality of a segment
-func (pp *ParallelProcessor) assessQuality(ctx context.Context, segment *models.Segment, pages []models.DialoguePage) (float64, error) {
-	// Quality assessment based on multiple factors
-	var qualityScore float64 = 0.5 // Default moderate quality
-
-	// Factor 1: Information completeness
-	if len(pages) > 0 {
-		avgMessageLength := 0
-		for _, page := range pages {
-			avgMessageLength += len(page.UserMessage) + len(page.AgentResponse)
-		}
-		avgMessageLength /= len(pages)
-
-		// Longer messages generally indicate more detailed conversations
-		if avgMessageLength > 200 {
-			qualityScore += 0.2
-		} else if avgMessageLength < 50 {
-			qualityScore -= 0.1
-		}
+// assessQuality evaluates the quality of a cognitive chain using the QualityValidator
+func (pp *ParallelProcessor) assessQuality(ctx context.Context, chain *models.CognitiveChain, events []models.CognitiveEvent) (float64, error) {
+	if pp.stmStore == nil || pp.stmStore.qualityValidator == nil {
+		return 0, fmt.Errorf("quality validator not available")
 	}
-
-	// Factor 2: Topic coherence (based on summary quality)
-	if segment.TopicSummary != "" {
-		summaryLength := len(segment.TopicSummary)
-		if summaryLength > 100 && summaryLength < 500 {
-			qualityScore += 0.1 // Good summary length
-		} else if summaryLength < 20 {
-			qualityScore -= 0.2 // Too short, likely not meaningful
-		}
+	validationResult, err := pp.stmStore.qualityValidator.ValidateSegment(ctx, chain, events)
+	if err != nil {
+		return 0, err
 	}
-
-	// Factor 3: Interaction depth
-	interactionDepth := len(pages)
-	if interactionDepth >= 3 {
-		qualityScore += 0.1 // Multi-turn conversations are generally higher quality
-	} else if interactionDepth == 1 {
-		qualityScore -= 0.1 // Single exchanges might be less valuable
-	}
-
-	// Factor 4: Time span (conversations over longer periods might be more substantial)
-	if len(pages) > 1 {
-		timeSpan := pages[len(pages)-1].CreatedAt.Sub(pages[0].CreatedAt)
-		if timeSpan > 5*time.Minute && timeSpan < 2*time.Hour {
-			qualityScore += 0.1 // Good conversation duration
-		}
-	}
-
-	// Normalize to [0, 1] range
-	if qualityScore > 1.0 {
-		qualityScore = 1.0
-	} else if qualityScore < 0.0 {
-		qualityScore = 0.0
-	}
-
-	return qualityScore, nil
+	return validationResult.QualityScore, nil
 }
 
-// extractKeywords extracts relevant keywords from a segment
-func (pp *ParallelProcessor) extractKeywords(ctx context.Context, segment *models.Segment) ([]string, error) {
-	if segment.TopicSummary == "" {
-		return []string{}, nil
+// extractKeywords extracts relevant keywords from cognitive events using the TopicAnalyzer
+func (pp *ParallelProcessor) extractKeywords(ctx context.Context, events []models.CognitiveEvent) ([]string, error) {
+	if pp.stmStore == nil || pp.stmStore.topicAnalyzer == nil {
+		return nil, fmt.Errorf("topic analyzer not available")
 	}
-
-	// Simple keyword extraction (in production, you might use NLP libraries)
-	summary := strings.ToLower(segment.TopicSummary)
-
-	// Common technical and conversation keywords
-	importantKeywords := []string{
-		"error", "problem", "issue", "bug", "fix", "solution",
-		"python", "golang", "javascript", "database", "api",
-		"deployment", "server", "configuration", "authentication",
-		"urgent", "critical", "important", "help", "question",
-		"tutorial", "guide", "example", "documentation",
-		"performance", "optimization", "security", "backup",
+	analysisResult, err := pp.stmStore.topicAnalyzer.AnalyzeTopics(ctx, events)
+	if err != nil {
+		return nil, err
 	}
-
-	var foundKeywords []string
-	for _, keyword := range importantKeywords {
-		if strings.Contains(summary, keyword) {
-			foundKeywords = append(foundKeywords, keyword)
-		}
+	if analysisResult.MainTopic != nil && len(analysisResult.MainTopic.Keywords) > 0 {
+		return analysisResult.MainTopic.Keywords, nil
 	}
-
-	return foundKeywords, nil
+	return []string{}, nil
 }
 
-// ProcessUserProfileAnalysis performs parallel user profile and knowledge extraction
-func (pp *ParallelProcessor) ProcessUserProfileAnalysis(ctx context.Context, segments []*models.Segment) (*ProfileAnalysisResult, error) {
-	if len(segments) == 0 {
+// ProcessUserProfileAnalysis performs parallel user profile and knowledge extraction from cognitive chains
+func (pp *ParallelProcessor) ProcessUserProfileAnalysis(ctx context.Context, chains []*models.CognitiveChain) (*ProfileAnalysisResult, error) {
+	if len(chains) == 0 {
 		return &ProfileAnalysisResult{}, nil
 	}
 
 	start := time.Now()
 	var wg sync.WaitGroup
-
-	// Results channels
 	profileChan := make(chan string, 1)
 	knowledgeChan := make(chan []string, 1)
 	errorChan := make(chan error, 2)
 
-	// Parallel profile analysis
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		pp.semaphore <- struct{}{}
 		defer func() { <-pp.semaphore }()
-
-		profile, err := pp.analyzeUserProfile(ctx, segments)
+		profile, err := pp.analyzeUserProfile(ctx, chains)
 		if err != nil {
 			errorChan <- err
 			return
@@ -315,14 +239,12 @@ func (pp *ParallelProcessor) ProcessUserProfileAnalysis(ctx context.Context, seg
 		profileChan <- profile
 	}()
 
-	// Parallel knowledge extraction
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		pp.semaphore <- struct{}{}
 		defer func() { <-pp.semaphore }()
-
-		knowledge, err := pp.extractUserKnowledge(ctx, segments)
+		knowledge, err := pp.extractUserKnowledge(ctx, chains)
 		if err != nil {
 			errorChan <- err
 			return
@@ -335,32 +257,28 @@ func (pp *ParallelProcessor) ProcessUserProfileAnalysis(ctx context.Context, seg
 	close(knowledgeChan)
 	close(errorChan)
 
-	// Check for errors
 	for err := range errorChan {
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	// Collect results
 	var profile string
 	var knowledge []string
-
 	if p := <-profileChan; p != "" {
 		profile = p
 	}
-
 	if k := <-knowledgeChan; len(k) > 0 {
 		knowledge = k
 	}
 
 	duration := time.Since(start)
-	log.Printf("INFO: Parallel profile analysis completed - Segments: %d, Duration: %v", len(segments), duration)
+	log.Printf("INFO: Parallel profile analysis completed - Chains: %d, Duration: %v", len(chains), duration)
 
 	return &ProfileAnalysisResult{
 		UserProfile:        profile,
 		ExtractedKnowledge: knowledge,
-		AnalyzedSegments:   len(segments),
+		AnalyzedSegments:   len(chains),
 		Duration:           duration,
 	}, nil
 }
@@ -373,16 +291,11 @@ type ProfileAnalysisResult struct {
 	Duration           time.Duration
 }
 
-// analyzeUserProfile analyzes user characteristics from segments
-func (pp *ParallelProcessor) analyzeUserProfile(ctx context.Context, segments []*models.Segment) (string, error) {
-	// Simplified profile analysis - in production this would use LLM
-	var interests []string
-	var skills []string
-
-	for _, segment := range segments {
-		summary := strings.ToLower(segment.TopicSummary)
-
-		// Detect interests
+// analyzeUserProfile analyzes user characteristics from cognitive chains
+func (pp *ParallelProcessor) analyzeUserProfile(_ context.Context, chains []*models.CognitiveChain) (string, error) {
+	var interests, skills []string
+	for _, chain := range chains {
+		summary := strings.ToLower(chain.Summary)
 		if strings.Contains(summary, "python") || strings.Contains(summary, "programming") {
 			interests = append(interests, "programming")
 		}
@@ -392,8 +305,6 @@ func (pp *ParallelProcessor) analyzeUserProfile(ctx context.Context, segments []
 		if strings.Contains(summary, "database") || strings.Contains(summary, "sql") {
 			interests = append(interests, "databases")
 		}
-
-		// Detect skill level
 		if strings.Contains(summary, "advanced") || strings.Contains(summary, "expert") {
 			skills = append(skills, "advanced")
 		} else if strings.Contains(summary, "beginner") || strings.Contains(summary, "learning") {
@@ -401,47 +312,37 @@ func (pp *ParallelProcessor) analyzeUserProfile(ctx context.Context, segments []
 		}
 	}
 
-	// Remove duplicates
-	interests = uniqueStrings(interests)
-	skills = uniqueStrings(skills)
-
-	profile := fmt.Sprintf("User shows interest in: %v. Skill level appears to be: %v. Based on %d conversation segments.",
-		interests, skills, len(segments))
-
+	profile := fmt.Sprintf("User shows interest in: %v. Skill level appears to be: %v. Based on %d conversation chains.",
+		uniqueStrings(interests), uniqueStrings(skills), len(chains))
 	return profile, nil
 }
 
-// extractUserKnowledge extracts factual knowledge from segments
-func (pp *ParallelProcessor) extractUserKnowledge(ctx context.Context, segments []*models.Segment) ([]string, error) {
+// extractUserKnowledge extracts factual knowledge from cognitive chains
+func (pp *ParallelProcessor) extractUserKnowledge(_ context.Context, chains []*models.CognitiveChain) ([]string, error) {
 	var knowledge []string
-
-	for _, segment := range segments {
-		// Extract factual statements from summaries
-		if strings.Contains(segment.TopicSummary, "uses") {
-			knowledge = append(knowledge, fmt.Sprintf("User uses: %s", segment.TopicSummary))
+	for _, chain := range chains {
+		if strings.Contains(chain.Summary, "uses") {
+			knowledge = append(knowledge, fmt.Sprintf("User uses: %s", chain.Summary))
 		}
-		if strings.Contains(segment.TopicSummary, "prefers") {
-			knowledge = append(knowledge, fmt.Sprintf("User prefers: %s", segment.TopicSummary))
+		if strings.Contains(chain.Summary, "prefers") {
+			knowledge = append(knowledge, fmt.Sprintf("User prefers: %s", chain.Summary))
 		}
-		if strings.Contains(segment.TopicSummary, "works with") {
-			knowledge = append(knowledge, fmt.Sprintf("User works with: %s", segment.TopicSummary))
+		if strings.Contains(chain.Summary, "works with") {
+			knowledge = append(knowledge, fmt.Sprintf("User works with: %s", chain.Summary))
 		}
 	}
-
 	return uniqueStrings(knowledge), nil
 }
 
 // uniqueStrings removes duplicate strings from a slice
-func uniqueStrings(strings []string) []string {
+func uniqueStrings(s []string) []string {
 	keys := make(map[string]bool)
-	var unique []string
-
-	for _, str := range strings {
-		if !keys[str] {
-			keys[str] = true
-			unique = append(unique, str)
+	var list []string
+	for _, entry := range s {
+		if _, value := keys[entry]; !value {
+			keys[entry] = true
+			list = append(list, entry)
 		}
 	}
-
-	return unique
+	return list
 }

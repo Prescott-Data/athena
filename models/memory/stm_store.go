@@ -53,12 +53,12 @@ type MemoryProcessingTask struct {
 
 // TopicContinuityRequest represents the request for LLM topic analysis
 type TopicContinuityRequest struct {
-	PreviousTurn ConversationTurnText `json:"previousTurn"`
-	NewTurn      ConversationTurnText `json:"newTurn"`
+	PreviousEvent STMEventText `json:"previousEvent"`
+	NewEvent      STMEventText `json:"newEvent"`
 }
 
-// ConversationTurnText represents a turn for topic analysis
-type ConversationTurnText struct {
+// STMEventText represents an event for topic analysis
+type STMEventText struct {
 	UserMessage   string `json:"userMessage"`
 	AgentResponse string `json:"agentResponse"`
 }

@@ -3,280 +3,280 @@ package memory
 import (
 	"context"
 	"math"
-	"strings"
 	"time"
 
 	"bitbucket.org/dromos/memory-os/internal/models"
-
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
-// Heat scoring configuration with environment variable support
-var (
-	// Heat scoring weights (configurable via environment)
-	HeatAlpha   = parseFloatEnv("HEAT_ALPHA", 1.0)   // Weight for access frequency
-	HeatBeta    = parseFloatEnv("HEAT_BETA", 1.0)    // Weight for interaction depth
-	HeatGamma   = parseFloatEnv("HEAT_GAMMA", 1.0)   // Weight for recency
-	HeatDelta   = parseFloatEnv("HEAT_DELTA", 0.5)   // Weight for user engagement
-	HeatEpsilon = parseFloatEnv("HEAT_EPSILON", 0.3) // Weight for topic importance
-
-	// Recency decay parameters
-	RecencyTauHours = parseFloatEnv("RECENCY_TAU_HOURS", 24.0)      // Time decay constant (hours)
-	RecencyMaxAge   = parseFloatEnv("RECENCY_MAX_AGE_HOURS", 168.0) // Max age before score becomes negligible (1 week)
-
-	// User engagement thresholds
-	EngagementMinQuestionWords = parseIntEnv("ENGAGEMENT_MIN_QUESTION_WORDS", 5)
-	EngagementMaxResponseChars = parseIntEnv("ENGAGEMENT_MAX_RESPONSE_CHARS", 1000)
-)
-
-// HeatScorer provides advanced heat scoring for segments
+// HeatScorer provides advanced heat scoring for cognitive chains based on Ebbinghaus Forgetting Curve
 type HeatScorer struct {
 	db     *mongo.Database
 	config HeatScoringConfig
 }
 
-// HeatScoringConfig holds configuration for heat scoring algorithm
+// HeatScoringConfig holds configuration for the Ebbinghaus heat scoring algorithm
 type HeatScoringConfig struct {
-	Alpha   float64 // Access frequency weight
-	Beta    float64 // Interaction depth weight
-	Gamma   float64 // Recency weight
-	Delta   float64 // User engagement weight
-	Epsilon float64 // Topic importance weight
-
-	RecencyTauHours float64 // Time decay constant
-	RecencyMaxAge   float64 // Maximum age before negligible score
+	WeightIntrinsic    float64 // Weight for LLM-provided importance (0.0-1.0)
+	WeightDensity      float64 // Weight for contextual density (0.0-1.0)
+	DecayTauHours      float64 // Base decay constant in hours
+	RecallGrowthFactor float64 // Multiplier for RecallStrength on successful recall
+	CooldownHours      float64 // Minimum hours between recall strength boosts
 }
 
-// NewHeatScorer creates a new heat scorer with default or environment configuration
+// NewHeatScorer creates a new heat scorer and initializes configuration from environment variables
 func NewHeatScorer(db *mongo.Database) *HeatScorer {
 	return &HeatScorer{
 		db: db,
 		config: HeatScoringConfig{
-			Alpha:           HeatAlpha,
-			Beta:            HeatBeta,
-			Gamma:           HeatGamma,
-			Delta:           HeatDelta,
-			Epsilon:         HeatEpsilon,
-			RecencyTauHours: RecencyTauHours,
-			RecencyMaxAge:   RecencyMaxAge,
+			WeightIntrinsic:    parseFloatEnv("HEAT_WEIGHT_INTRINSIC", 0.7),
+			WeightDensity:      parseFloatEnv("HEAT_WEIGHT_DENSITY", 0.3),
+			DecayTauHours:      parseFloatEnv("HEAT_DECAY_TAU_HOURS", 24.0),
+			RecallGrowthFactor: parseFloatEnv("HEAT_RECALL_GROWTH", 1.5),
+			CooldownHours:      parseFloatEnv("HEAT_COOLDOWN_HOURS", 12.0),
 		},
 	}
 }
 
-// ComputeSegmentHeat calculates enhanced heat score for a segment
-func (h *HeatScorer) ComputeSegmentHeat(ctx context.Context, segment *models.Segment) (float64, *models.HeatFactors, error) {
+// ComputeSegmentHeat calculates the heat score using the Ebbinghaus Forgetting Curve formula.
+// HeatScore = I_base * exp(-DeltaT / (Tau * S))
+func (h *HeatScorer) ComputeSegmentHeat(ctx context.Context, chain *models.CognitiveChain) (float64, *models.HeatFactors, error) {
 	now := time.Now()
 
-	// Factor 1: Access Frequency (N_visit)
-	accessFrequency := h.calculateAccessFrequency(segment)
+	// 1. Calculate Density Score if not already set (or if we want to refresh it)
+	// For efficiency, we only calculate if it's 0.0, assuming 0.0 means uninitialized.
+	if chain.DensityScore == 0.0 {
+		// Fetch events to calculate density
+		events, err := h.fetchEventsForChain(ctx, chain.ChainID)
+		if err == nil {
+			chain.DensityScore = h.CalculateDensity(chain, events)
+		} else {
+			// If failed to fetch, default to 0.0 or keep as is?
+			// CalculateDensity with nil events might be safe if implemented defensively
+			chain.DensityScore = h.CalculateDensity(chain, nil)
+		}
+	}
 
-	// Factor 2: Interaction Depth (L_interaction)
-	interactionDepth := h.calculateInteractionDepth(ctx, segment)
+	// 2. Calculate Base Importance (I_base)
+	// I_base = min(1.0, w1 * Intrinsic + w2 * Density)
+	iBase := math.Min(1.0, (h.config.WeightIntrinsic*chain.IntrinsicImportance)+(h.config.WeightDensity*chain.DensityScore))
 
-	// Factor 3: Recency Score (R_recency)
-	recencyScore := h.calculateRecencyScore(segment, now)
+	// 3. Calculate Time Delta (DeltaT)
+	var lastAccess time.Time
+	if chain.LastAccessedAt != nil {
+		lastAccess = *chain.LastAccessedAt
+	} else {
+		// Fallback to LastEventAt or StartedAt if never accessed
+		if !chain.LastEventAt.IsZero() {
+			lastAccess = chain.LastEventAt
+		} else {
+			lastAccess = chain.StartedAt
+		}
+	}
+	deltaHours := now.Sub(lastAccess).Hours()
+	if deltaHours < 0 {
+		deltaHours = 0
+	}
 
-	// Factor 4: User Engagement
-	userEngagement := h.calculateUserEngagement(ctx, segment)
+	// 4. Ensure RecallStrength is at least 1.0
+	recallStrength := chain.RecallStrength
+	if recallStrength < 1.0 {
+		recallStrength = 1.0
+	}
 
-	// Factor 5: Topic Importance
-	topicImportance := h.calculateTopicImportance(segment)
-
-	// Weighted combination
-	heatScore := h.config.Alpha*accessFrequency +
-		h.config.Beta*interactionDepth +
-		h.config.Gamma*recencyScore +
-		h.config.Delta*userEngagement +
-		h.config.Epsilon*topicImportance
-
-	// Normalize using tanh to keep score in [0,1] range
-	normalizedScore := math.Tanh(heatScore)
+	// 5. Calculate Heat Score (H_t)
+	// Heat = I_base * exp(-DeltaT / (Tau * S))
+	decayFactor := math.Exp(-deltaHours / (h.config.DecayTauHours * recallStrength))
+	heatScore := iBase * decayFactor
 
 	factors := &models.HeatFactors{
-		AccessFrequency:  accessFrequency,
-		InteractionDepth: interactionDepth,
-		RecencyScore:     recencyScore,
-		UserEngagement:   userEngagement,
-		TopicImportance:  topicImportance,
+		BaseImportance: iBase,
+		TimeDecay:      decayFactor,
+		RecallStrength: recallStrength,
 	}
 
-	return normalizedScore, factors, nil
+	return heatScore, factors, nil
 }
 
-// calculateAccessFrequency computes normalized access frequency score
-func (h *HeatScorer) calculateAccessFrequency(segment *models.Segment) float64 {
-	if segment.AccessCount <= 0 {
-		return 0.0
+// RecordAccess updates a cognitive chain when it is retrieved/recalled.
+// It implements Spaced Repetition by increasing RecallStrength and resetting the forgetting curve.
+func (h *HeatScorer) RecordAccess(ctx context.Context, chain *models.CognitiveChain) error {
+	// Apply the logic (Cooldown, Growth, Recalculation)
+	if err := h.ApplyAccessUpdate(ctx, chain); err != nil {
+		return err
 	}
 
-	// Logarithmic scaling to prevent very high access counts from dominating
-	return math.Log(float64(segment.AccessCount) + 1.0)
-}
-
-// calculateInteractionDepth computes interaction complexity score
-func (h *HeatScorer) calculateInteractionDepth(ctx context.Context, segment *models.Segment) float64 {
-	// Base score from number of pages
-	pageCount := len(segment.PageIDs)
-	if pageCount == 0 {
-		return 0.0
-	}
-
-	// Enhanced score based on actual interaction complexity
-	if segment.InteractionSize > 0 {
-		// Use stored interaction size if available
-		return math.Log(float64(segment.InteractionSize) + 1.0)
-	}
-
-	// Fallback: use page count as proxy for interaction depth
-	return math.Log(float64(pageCount) + 1.0)
-}
-
-// calculateRecencyScore computes time-decay based recency score
-func (h *HeatScorer) calculateRecencyScore(segment *models.Segment, currentTime time.Time) float64 {
-	var referenceTime time.Time
-
-	// Use last access time if available, otherwise creation time
-	if segment.LastAccessTime != nil {
-		referenceTime = *segment.LastAccessTime
-	} else {
-		referenceTime = segment.CreatedAt
-	}
-
-	// Calculate hours since reference time
-	hoursSince := currentTime.Sub(referenceTime).Hours()
-
-	// If too old, return minimal score
-	if hoursSince > h.config.RecencyMaxAge {
-		return 0.001
-	}
-
-	// Exponential decay: e^(-t/tau)
-	return math.Exp(-hoursSince / h.config.RecencyTauHours)
-}
-
-// calculateUserEngagement estimates user engagement level
-func (h *HeatScorer) calculateUserEngagement(ctx context.Context, segment *models.Segment) float64 {
-	// This is a simplified implementation - in production you might analyze:
-	// - Question complexity and length
-	// - Response detail and helpfulness
-	// - Follow-up questions
-	// - User satisfaction indicators
-
-	if len(segment.PageIDs) == 0 {
-		return 0.0
-	}
-
-	// Base engagement from interaction count
-	baseEngagement := math.Log(float64(len(segment.PageIDs))+1.0) / 3.0
-
-	// Could be enhanced with NLP analysis of the actual page content
-	// For now, use a simple heuristic based on segment summary length
-	summaryLength := len(segment.TopicSummary)
-	if summaryLength > 100 {
-		baseEngagement *= 1.2 // Longer summaries suggest more complex interactions
-	}
-
-	return math.Tanh(baseEngagement) // Normalize to [0,1]
-}
-
-// calculateTopicImportance estimates topic importance
-func (h *HeatScorer) calculateTopicImportance(segment *models.Segment) float64 {
-	// This could be enhanced with:
-	// - Entity extraction and importance scoring
-	// - Topic classification
-	// - User priority keywords
-	// - Urgency indicators
-
-	importance := 0.5 // Default moderate importance
-
-	// Simple heuristic: check for important keywords in summary
-	summary := segment.TopicSummary
-	importantKeywords := []string{
-		"urgent", "important", "critical", "deadline", "problem",
-		"error", "issue", "help", "question", "decision",
-	}
-
-	for _, keyword := range importantKeywords {
-		if contains(summary, keyword) {
-			importance += 0.1
+	// Persist changes to MongoDB
+	if h.db != nil {
+		collection := h.db.Collection("cognitive_chains")
+		filter := bson.M{"chainId": chain.ChainID}
+		update := bson.M{
+			"$set": bson.M{
+				"lastAccessedAt": chain.LastAccessedAt,
+				"recallStrength": chain.RecallStrength,
+				"heatScore":      chain.HeatScore,
+				"heatFactors":    chain.HeatFactors,
+				"densityScore":   chain.DensityScore,
+				"updatedAt":      time.Now(),
+			},
 		}
+		_, err := collection.UpdateOne(ctx, filter, update)
+		return err
 	}
-
-	return math.Tanh(importance) // Normalize to [0,1]
+	return nil
 }
 
-// UpdateSegmentAccess updates segment access tracking and recalculates heat
-func (h *HeatScorer) UpdateSegmentAccess(ctx context.Context, segmentID string) error {
-	collection := h.db.Collection("segments")
+// ApplyAccessUpdate applies the spaced repetition and cooldown logic to the chain object.
+// It does NOT persist to the database.
+func (h *HeatScorer) ApplyAccessUpdate(ctx context.Context, chain *models.CognitiveChain) error {
 	now := time.Now()
 
-	// Increment access count and update last access time
-	update := bson.M{
-		"$inc": bson.M{"accessCount": 1},
-		"$set": bson.M{
-			"lastAccessTime": now,
-			"updatedAt":      now,
-		},
+	// Initialize RecallStrength if needed
+	if chain.RecallStrength < 1.0 {
+		chain.RecallStrength = 1.0
 	}
 
-	filter := bson.M{"segmentId": segmentID}
-	result, err := collection.UpdateOne(ctx, filter, update)
+	// Determine if RecallStrength should grow (Spaced Repetition Cooldown)
+	shouldGrow := true
+	if chain.LastAccessedAt != nil {
+		elapsed := now.Sub(*chain.LastAccessedAt).Hours()
+		if elapsed < h.config.CooldownHours {
+			shouldGrow = false
+		}
+	}
+
+	// 1. Update LastAccessedAt
+	chain.LastAccessedAt = &now
+
+	// 2. Increase RecallStrength only if cooldown passed
+	if shouldGrow {
+		chain.RecallStrength *= h.config.RecallGrowthFactor
+	}
+
+	// 3. Recalculate Heat Score immediately to reflect the "refresh"
+	// (DeltaT is now 0, so Heat should jump to I_base)
+	newHeat, factors, err := h.ComputeSegmentHeat(ctx, chain)
 	if err != nil {
 		return err
 	}
+	chain.HeatScore = newHeat
+	chain.HeatFactors = factors
 
-	if result.MatchedCount == 0 {
-		return mongo.ErrNoDocuments
-	}
-
-	// Fetch updated segment and recalculate heat
-	var segment models.Segment
-	if err := collection.FindOne(ctx, filter).Decode(&segment); err != nil {
-		return err
-	}
-
-	// Recalculate heat score
-	newHeatScore, heatFactors, err := h.ComputeSegmentHeat(ctx, &segment)
-	if err != nil {
-		return err
-	}
-
-	// Update heat score in database
-	heatUpdate := bson.M{
-		"$set": bson.M{
-			"heatScore":   newHeatScore,
-			"heatFactors": heatFactors,
-			"updatedAt":   now,
-		},
-	}
-
-	_, err = collection.UpdateOne(ctx, filter, heatUpdate)
-	return err
+	return nil
 }
 
-// BatchRecalculateHeat recalculates heat scores for multiple segments
-func (h *HeatScorer) BatchRecalculateHeat(ctx context.Context, segmentIDs []string) error {
-	collection := h.db.Collection("segments")
+// CalculateDensity computes the Contextual Density score for a chain.
+func (h *HeatScorer) CalculateDensity(chain *models.CognitiveChain, events []models.CognitiveEvent) float64 {
+	density := 0.0
 
-	for _, segmentID := range segmentIDs {
-		var segment models.Segment
-		filter := bson.M{"segmentId": segmentID}
+	// 1. Entity Presence
+	if len(chain.Entities) > 0 {
+		density += 0.15
+	}
 
-		if err := collection.FindOne(ctx, filter).Decode(&segment); err != nil {
-			continue // Skip missing segments
+	hasThoughtOrAction := false
+	hasWorkflowMetadata := false
+	uniqueOriginServices := make(map[string]bool)
+
+	for _, event := range events {
+		// 2. Event Types
+		if !hasThoughtOrAction && (event.Type == models.STMEventTypeThought || event.Type == models.STMEventTypeAction) {
+			density += 0.20
+			hasThoughtOrAction = true
 		}
 
-		heatScore, heatFactors, err := h.ComputeSegmentHeat(ctx, &segment)
+		// 3. Workflow Metadata
+		if !hasWorkflowMetadata && event.Type == models.STMEventTypeObservation {
+			if event.Metadata != nil {
+				_, hasWf := event.Metadata["workflow_id"]
+				_, hasExec := event.Metadata["execution_id"]
+				_, hasBlob := event.Metadata["blob_url"]
+				if hasWf || hasExec || hasBlob {
+					density += 0.25
+					hasWorkflowMetadata = true
+				}
+			}
+		}
+
+		// 4. Origin Service Tracking
+		if event.Metadata != nil {
+			if svc, ok := event.Metadata["origin_service"]; ok {
+				if svcStr, valid := svc.(string); valid && svcStr != "" {
+					uniqueOriginServices[svcStr] = true
+				}
+			}
+		}
+	}
+
+	// 5. Multi-Service Context
+	if len(uniqueOriginServices) > 1 {
+		density += 0.20
+	}
+
+	// Cap at 1.0
+	return math.Min(1.0, density)
+}
+
+// fetchEventsForChain retrieves events for a given chain ID
+func (h *HeatScorer) fetchEventsForChain(ctx context.Context, chainID string) ([]models.CognitiveEvent, error) {
+	if h.db == nil {
+		return nil, mongo.ErrNoDocuments
+	}
+
+	eventsCollection := h.db.Collection(CognitiveEventsCollection)
+	filter := bson.M{"chainId": chainID}
+
+	cursor, err := eventsCollection.Find(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var events []models.CognitiveEvent
+	if err := cursor.All(ctx, &events); err != nil {
+		return nil, err
+	}
+	return events, nil
+}
+
+// UpdateSegmentAccess is deprecated but kept for compatibility. Use RecordAccess instead.
+// It adapts the old interface to the new logic.
+func (h *HeatScorer) UpdateSegmentAccess(ctx context.Context, chainID string) error {
+	collection := h.db.Collection("cognitive_chains")
+	filter := bson.M{"chainId": chainID}
+
+	var chain models.CognitiveChain
+	if err := collection.FindOne(ctx, filter).Decode(&chain); err != nil {
+		return err
+	}
+
+	return h.RecordAccess(ctx, &chain)
+}
+
+// BatchRecalculateHeat recalculates heat scores for multiple cognitive chains
+func (h *HeatScorer) BatchRecalculateHeat(ctx context.Context, chainIDs []string) error {
+	collection := h.db.Collection("cognitive_chains")
+
+	for _, chainID := range chainIDs {
+		var chain models.CognitiveChain
+		filter := bson.M{"chainId": chainID}
+
+		if err := collection.FindOne(ctx, filter).Decode(&chain); err != nil {
+			continue
+		}
+
+		heatScore, heatFactors, err := h.ComputeSegmentHeat(ctx, &chain)
 		if err != nil {
-			continue // Skip on calculation error
+			continue
 		}
 
 		update := bson.M{
 			"$set": bson.M{
-				"heatScore":   heatScore,
-				"heatFactors": heatFactors,
-				"updatedAt":   time.Now(),
+				"heatScore":      heatScore,
+				"heatFactors":    heatFactors,
+				"densityScore":   chain.DensityScore, // Ensure this is saved
+				"updatedAt":      time.Now(),
 			},
 		}
 
@@ -284,13 +284,4 @@ func (h *HeatScorer) BatchRecalculateHeat(ctx context.Context, segmentIDs []stri
 	}
 
 	return nil
-}
-
-// Helper function to check if string contains substring (case-insensitive)
-func contains(text, substr string) bool {
-	// Simple case-insensitive contains check
-	// In production, you might want to use more sophisticated text analysis
-	textLower := strings.ToLower(text)
-	substrLower := strings.ToLower(substr)
-	return strings.Contains(textLower, substrLower)
 }

@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package memory.v1;
 
-option go_package = "bitbucket.org/dromos/memory-os/api/grpc/gen";
+option go_package = "bitbucket.org/dromos/memory-os/api/grpc/gen;gen";
 
 import "google/api/annotations.proto";
 import "google/protobuf/timestamp.proto";
@@ -33,6 +33,13 @@ service MemoryService {
   rpc StoreInteraction(StoreInteractionRequest) returns (StoreInteractionResponse) {
     option (google.api.http) = {
       post: "/api/v1/sessions/{session_id}/interactions"
+      body: "*"
+    };
+  }
+
+  rpc StoreEvent(StoreEventRequest) returns (StoreEventResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/sessions/{session_id}/events"
       body: "*"
     };
   }
@@ -120,6 +127,20 @@ message StoreInteractionResponse {
   string interaction_id = 2;
 }
 
+message StoreEventRequest {
+  string session_id = 1;
+  string role = 2;        // "user", "agent", "system"
+  string type = 3;        // "message", "thought", "action", "observation"
+  string content = 4;
+  map<string, string> metadata = 5;
+  google.protobuf.Timestamp timestamp = 6;
+}
+
+message StoreEventResponse {
+  bool success = 1;
+  string event_id = 2;
+}
+
 message GetContextRequest {
   string session_id = 1;
   int32 limit = 2;
@@ -127,7 +148,7 @@ message GetContextRequest {
 }
 
 message GetContextResponse {
-  repeated ConversationTurn recent_turns = 1;
+  repeated STMEvent recent_turns = 1;
   repeated DialoguePage relevant_pages = 2;
   repeated Segment segments = 3;
   UserPersona user_persona = 4;
@@ -188,9 +209,12 @@ message Session {
   map<string, string> metadata = 5;
 }
 
-message ConversationTurn {
+message STMEvent {
+  // The user message content.
   string user_message = 1;
+  // The agent response content.
   string agent_response = 2;
+  // When the turn occurred.
   google.protobuf.Timestamp timestamp = 3;
 }
 
