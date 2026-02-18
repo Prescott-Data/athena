@@ -495,11 +495,18 @@ func (mc *MilvusClient) SearchSimilarSegments(ctx context.Context, tenantID, use
 	}
 	sp, _ := entity.NewIndexHNSWSearchParam(200)
 
-	// Filter expression for tenant/user/agent scope
-	expr := fmt.Sprintf(`%s == "%s" && %s == "%s" && %s == "%s"`,
-		TenantIDFieldName, tenantID,
-		UserIDFieldName, userID,
-		AgentIDFieldName, agentID)
+	// Filter expression for tenant/user scope; agent scope is optional for user-wide search
+	var expr string
+	if agentID != "" {
+		expr = fmt.Sprintf(`%s == "%s" && %s == "%s" && %s == "%s"`,
+			TenantIDFieldName, tenantID,
+			UserIDFieldName, userID,
+			AgentIDFieldName, agentID)
+	} else {
+		expr = fmt.Sprintf(`%s == "%s" && %s == "%s"`,
+			TenantIDFieldName, tenantID,
+			UserIDFieldName, userID)
+	}
 
 	results, err := mc.client.Search(
 		ctx,
