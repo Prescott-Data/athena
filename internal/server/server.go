@@ -489,7 +489,7 @@ func (s *MemoryServer) CreateSession(ctx context.Context, req *gen.CreateSession
 // SearchMemory performs semantic search across MTM cognitive chains.
 func (s *MemoryServer) SearchMemory(ctx context.Context, req *gen.SearchMemoryRequest) (*gen.SearchMemoryResponse, error) {
 	sessionID := req.SessionId
-	tenantID, userID, agentID, err := s.getIDsFromSessionFunc(s, ctx, sessionID)
+	tenantID, userID, _, err := s.getIDsFromSessionFunc(s, ctx, sessionID)
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "session not found or invalid: %v", err)
 	}
@@ -510,8 +510,9 @@ func (s *MemoryServer) SearchMemory(ctx context.Context, req *gen.SearchMemoryRe
 		return nil, status.Errorf(codes.Internal, "failed to create query embedding: %v", err)
 	}
 
-	// Search for similar chains using the STM store's vector search
-	chains, err := s.stmStore.SearchSimilarChains(ctx, tenantID, userID, agentID, queryEmbedding.Vector, limit, req.Filter)
+	// Search for similar chains using the STM store's vector search.
+	// Pass empty agentID so Milvus searches across all agents for this user (user-scoped, not session-scoped).
+	chains, err := s.stmStore.SearchSimilarChains(ctx, tenantID, userID, "", queryEmbedding.Vector, limit, req.Filter)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to search similar chains: %v", err)
 	}
