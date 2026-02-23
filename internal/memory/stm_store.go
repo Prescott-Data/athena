@@ -1018,13 +1018,21 @@ func (s *STMStore) SearchSimilarChains(ctx context.Context, tenantID, userID, ag
 	}
 
 	// Step A: Call Milvus to get IDs of similar chains
-	chainIDs, _, err := s.milvus.SearchSimilarSegments(ctx, tenantID, userID, agentID, queryVector, limit)
+	chainIDs, scores, err := s.milvus.SearchSimilarSegments(ctx, tenantID, userID, agentID, queryVector, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search for similar segments in milvus: %w", err)
 	}
 
 	if len(chainIDs) == 0 {
 		return []*models.CognitiveChain{}, nil // No similar chains found
+	}
+
+	// Build a map of chainID → similarity score for later population
+	scoreMap := make(map[string]float32, len(chainIDs))
+	for i, id := range chainIDs {
+		if i < len(scores) {
+			scoreMap[id] = scores[i]
+		}
 	}
 
 	log.Printf("INFO: Vector search found %d candidate chain IDs.", len(chainIDs))
@@ -1050,6 +1058,11 @@ func (s *STMStore) SearchSimilarChains(ctx context.Context, tenantID, userID, ag
 	var chains []*models.CognitiveChain
 	if err := cursor.All(ctx, &chains); err != nil {
 		return nil, fmt.Errorf("failed to decode similar chains from mongodb: %w", err)
+	}
+
+	// Populate transient similarity scores from Milvus results
+	for _, chain := range chains {
+		chain.SimilarityScore = scoreMap[chain.ChainID]
 	}
 
 	log.Printf("INFO: Fetched %d full cognitive chain documents from MongoDB.", len(chains))

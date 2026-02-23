@@ -521,9 +521,11 @@ func (s *MemoryServer) SearchMemory(ctx context.Context, req *gen.SearchMemoryRe
 	var results []*gen.SearchResult
 	for _, chain := range chains {
 		result := &gen.SearchResult{
-			Content:    chain.Summary,
-			SourceType: "cognitive_chain",
-			SourceId:   chain.ChainID,
+			Content:         chain.Summary,
+			SimilarityScore: float64(chain.SimilarityScore),
+			SourceType:      "cognitive_chain",
+			SourceId:        chain.ChainID,
+			Timestamp:       timestamppb.New(chain.LastEventAt),
 		}
 		results = append(results, result)
 	}
