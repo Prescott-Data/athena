@@ -6,10 +6,12 @@ import (
 
 // CompletionRequest represents a request for text generation
 type CompletionRequest struct {
-	Prompt      string
-	MaxTokens   int
-	Temperature float64
-	Stop        []string
+	SystemPrompt string
+	Prompt       string
+	MaxTokens    int
+	Temperature  float64
+	Stop         []string
+	JSONSchema   map[string]interface{}
 }
 
 // EmbeddingRequest represents a request for vector embedding

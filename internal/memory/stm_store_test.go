@@ -539,9 +539,7 @@ func TestSTMStore_ConfigurableTimeouts(t *testing.T) {
 			}
 
 			stmStore := &STMStore{
-				llmConfig:  config,
-				llmGuards:  &LLMGuardrails{},
-				HTTPClient: &http.Client{},
+				llmConfig: config,
 			}
 
 			// Verify config is set correctly

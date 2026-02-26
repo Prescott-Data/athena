@@ -57,10 +57,7 @@ func TestArchiveColdChains(t *testing.T) {
 	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
 
 	mt.Run("Archives cold chain correctly", func(mt *mtest.T) {
-		stmStore := &STMStore{
-			db:     mt.DB,
-			milvus: &MilvusClient{client: nil}, // Hack to satisfy struct type, but we need to inject the mock interface
-		}
+
 		// Since STMStore uses *MilvusClient struct directly, we can't easily mock it without refactoring STMStore to use an interface.
 		// However, for this specific test, we can temporarily modify STMStore or rely on the fact that we can't run this test fully without refactoring.
 		// Wait, the prompt asked to add DeleteSegmentEmbedding to MilvusClient, and ArchiveColdChains calls s.milvus.DeleteSegmentEmbedding.
@@ -95,9 +92,9 @@ func TestArchiveColdChains(t *testing.T) {
 			UserID:              "u1",
 			AgentID:             "a1",
 			Status:              "active",
-			IntrinsicImportance: 0.05, // Very low importance
-			RecallStrength:      0.1,  // Very low recall
-			DensityScore:        0.1,  // Low density
+			IntrinsicImportance: 0.05,                                   // Very low importance
+			RecallStrength:      0.1,                                    // Very low recall
+			DensityScore:        0.1,                                    // Low density
 			LastAccessedAt:      timePtr(time.Now().AddDate(0, 0, -30)), // 30 days old
 		}
 
@@ -115,11 +112,11 @@ func TestArchiveColdChains(t *testing.T) {
 				{Key: "lastAccessedAt", Value: coldChain.LastAccessedAt},
 			}),
 			mtest.CreateCursorResponse(0, "foo.cognitive_chains", mtest.NextBatch), // End of cursor
-			mtest.CreateSuccessResponse(), // UpdateOne response
+			mtest.CreateSuccessResponse(),                                          // UpdateOne response
 		)
 
 		// Create a store with nil Milvus to avoid panic/network calls, focusing on Logic + Mongo
-		stmStore = &STMStore{
+		stmStore := &STMStore{
 			db:     mt.DB,
 			milvus: nil, // Skipping Milvus deletion for this unit test
 		}

@@ -30,15 +30,27 @@ func NewAzureProvider(baseURL, apiKey, embeddingURL, embeddingModel string) *Azu
 }
 
 func (p *AzureProvider) GenerateCompletion(ctx context.Context, req CompletionRequest) (string, error) {
-	requestBody := map[string]interface{}{
-		"messages": []map[string]string{
-			{"role": "user", "content": req.Prompt},
-		},
-		"max_tokens":  req.MaxTokens,
-		"temperature": req.Temperature,
+	requestBody := map[string]interface{}{}
+	messages := []map[string]string{}
+
+	if req.SystemPrompt != "" {
+		messages = append(messages, map[string]string{"role": "system", "content": req.SystemPrompt})
 	}
+	messages = append(messages, map[string]string{"role": "user", "content": req.Prompt})
+
+	requestBody["messages"] = messages
+	requestBody["max_tokens"] = req.MaxTokens
+	requestBody["temperature"] = req.Temperature
+
 	if len(req.Stop) > 0 {
 		requestBody["stop"] = req.Stop
+	}
+
+	if req.JSONSchema != nil {
+		requestBody["response_format"] = map[string]interface{}{
+			"type":        "json_schema",
+			"json_schema": req.JSONSchema,
+		}
 	}
 
 	body, err := json.Marshal(requestBody)

@@ -28,7 +28,7 @@ func NewGeminiProvider(apiKey, model, embeddingModel string) *GeminiProvider {
 	}
 	// Google's API base URL is hardcoded or can be overridden if needed for enterprise
 	baseURL := "https://generativelanguage.googleapis.com/v1beta/models"
-	
+
 	return &GeminiProvider{
 		BaseURL:        baseURL,
 		APIKey:         apiKey,
@@ -54,6 +54,26 @@ func (p *GeminiProvider) GenerateCompletion(ctx context.Context, req CompletionR
 			"temperature":     req.Temperature,
 			"stopSequences":   req.Stop,
 		},
+	}
+
+	if req.SystemPrompt != "" {
+		requestBody["systemInstruction"] = map[string]interface{}{
+			"parts": []map[string]string{
+				{"text": req.SystemPrompt},
+			},
+		}
+	}
+
+	if req.JSONSchema != nil {
+		genConfig := requestBody["generationConfig"].(map[string]interface{})
+		genConfig["responseMimeType"] = "application/json"
+
+		schemaObj := req.JSONSchema
+		if innerSchema, ok := req.JSONSchema["schema"].(map[string]interface{}); ok {
+			schemaObj = innerSchema
+		}
+
+		genConfig["responseSchema"] = mapSchemaTypesForGemini(schemaObj)
 	}
 
 	body, err := json.Marshal(requestBody)
@@ -148,4 +168,61 @@ func (p *GeminiProvider) CreateEmbedding(ctx context.Context, req EmbeddingReque
 	}
 
 	return response.Embedding.Values, nil
+}
+
+// mapSchemaTypesForGemini recursively converts type strings in a JSON schema to uppercase
+// because Gemini API strictly expects uppercase types like "OBJECT", "STRING", etc.
+func mapSchemaTypesForGemini(schema map[string]interface{}) map[string]interface{} {
+	if schema == nil {
+		return nil
+	}
+
+	result := make(map[string]interface{})
+	for k, v := range schema {
+		if k == "type" {
+			if typeStr, ok := v.(string); ok {
+				// We don't uppercase it directly if we want to use strings.ToUpper,
+				// but let's just do a naive uppercase since typical schemas have simple types.
+				if typeStr == "object" {
+					result[k] = "OBJECT"
+				}
+				if typeStr == "string" {
+					result[k] = "STRING"
+				}
+				if typeStr == "number" {
+					result[k] = "NUMBER"
+				}
+				if typeStr == "integer" {
+					result[k] = "INTEGER"
+				}
+				if typeStr == "boolean" {
+					result[k] = "BOOLEAN"
+				}
+				if typeStr == "array" {
+					result[k] = "ARRAY"
+				}
+			}
+		} else if k == "properties" {
+			if propsMap, ok := v.(map[string]interface{}); ok {
+				newProps := make(map[string]interface{})
+				for pk, pv := range propsMap {
+					if subMap, mapped := pv.(map[string]interface{}); mapped {
+						newProps[pk] = mapSchemaTypesForGemini(subMap)
+					} else {
+						newProps[pk] = pv
+					}
+				}
+				result[k] = newProps
+			}
+		} else if k == "items" {
+			if itemsMap, ok := v.(map[string]interface{}); ok {
+				result[k] = mapSchemaTypesForGemini(itemsMap)
+			} else {
+				result[k] = v
+			}
+		} else {
+			result[k] = v
+		}
+	}
+	return result
 }

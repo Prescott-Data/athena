@@ -45,7 +45,7 @@ services:
 
   milvus:
     image: milvusdb/milvus:v2.3.4
-    command: ["milvus", "run", "standalone"]
+    command: [ "milvus", "run", "standalone" ]
     environment:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
@@ -58,9 +58,19 @@ services:
       - etcd
       - minio
 
+  arangodb:
+    image: arangodb:latest
+    ports:
+      - "8529:8529"
+    environment:
+      ARANGO_ROOT_PASSWORD: athena_dev
+    volumes:
+      - arangodb_data:/var/lib/arangodb3
+
 volumes:
   redis_data:
   mongodb_data:
   etcd_data:
   minio_data:
   milvus_data:
+  arangodb_data:
