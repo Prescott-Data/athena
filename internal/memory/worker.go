@@ -64,7 +64,7 @@ func (w *Worker) processNextTask(ctx context.Context, workerID int) error {
 	}
 
 	// BRPop returns nil with no error when the queue is empty (timeout)
-	if result == nil || len(result) < 2 {
+	if len(result) < 2 {
 		time.Sleep(1 * time.Second)
 		return nil
 	}
@@ -130,7 +130,7 @@ func (w *Worker) processNextTask(ctx context.Context, workerID int) error {
 }
 
 // reEnqueueTask puts the failed task back into the queue system
-func (w *Worker) reEnqueueTask(ctx context.Context, scopedQueueName string, task *TaskEnvelope, payload *models.CognitiveChainCheckTask) error {
+func (w *Worker) reEnqueueTask(_ context.Context, scopedQueueName string, task *TaskEnvelope, payload *models.CognitiveChainCheckTask) error {
 	// Update payload in task envelope
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
@@ -339,4 +339,3 @@ func truncateLog(s string, max int) string {
 	}
 	return s
 }
-

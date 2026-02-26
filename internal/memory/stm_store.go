@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"math"
 	"net/http"
 	"os"
@@ -20,6 +21,7 @@ import (
 	"bitbucket.org/dromos/memory-os/internal/llm"
 	"bitbucket.org/dromos/memory-os/internal/models"
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -137,6 +139,7 @@ func (lg *LLMGuardrails) checkRateLimit(ctx context.Context, userID string) bool
 
 	if count >= llmRateLimit {
 		log.Printf("WARN: LLM rate limit exceeded for user %s: %d/%d calls", userID, count, llmRateLimit)
+		MetricLLMFallbackCalls.WithLabelValues("rate_limited", "error").Inc()
 		return false
 	}
 
@@ -164,6 +167,7 @@ func (lg *LLMGuardrails) checkCircuitBreaker() bool {
 	}
 
 	log.Printf("WARN: LLM circuit breaker is open, blocking call")
+	MetricLLMFallbackCalls.WithLabelValues("circuit_breaker", "error").Inc()
 	return false
 }
 
@@ -246,10 +250,10 @@ func NewSTMStore(database *mongo.Database, redisClient cache.Interface) *STMStor
 	}
 
 	ss := &STMStore{
-		db:          database,
-		redis:       redisClient,
-		milvus:      milvusClient,
-		llmConfig:   llmConfig,
+		db:        database,
+		redis:     redisClient,
+		milvus:    milvusClient,
+		llmConfig: llmConfig,
 		llmGuards: &LLMGuardrails{
 			redis: redisClient,
 		},
@@ -463,11 +467,16 @@ func (s *STMStore) analyzeTopicContinuity(ctx context.Context, userID string, pr
 	}
 
 	if !s.llmGuards.checkRateLimit(ctx, userID) {
+		MetricLLMFallbackCalls.WithLabelValues("rate_limited", "error").Inc()
 		return false, fmt.Errorf("llm rate limit exceeded for user %s", userID)
 	}
 	if !s.llmGuards.checkCircuitBreaker() {
+		MetricLLMFallbackCalls.WithLabelValues("circuit_breaker", "error").Inc()
 		return false, fmt.Errorf("llm circuit breaker is open")
 	}
+
+	timer := prometheus.NewTimer(MetricDialogueChainLatency)
+	defer timer.ObserveDuration()
 
 	prompt := fmt.Sprintf(`You are a topic boundary detector. Determine if two conversation messages are about the SAME topic or DIFFERENT topics.
 
@@ -508,6 +517,7 @@ Is the new message about the SAME topic as the previous message? Respond with on
 	req, err := http.NewRequestWithContext(httpCtx, "POST", llmBaseURL, bytes.NewBuffer(requestBody))
 	if err != nil {
 		s.llmGuards.recordLLMResult(false) // Record failure
+		MetricLLMFallbackCalls.WithLabelValues("embedding_failure", "error").Inc()
 		return false, fmt.Errorf("failed to create http request: %w", err)
 	}
 
@@ -517,12 +527,14 @@ Is the new message about the SAME topic as the previous message? Respond with on
 	resp, err := s.HTTPClient.Do(req)
 	if err != nil {
 		s.llmGuards.recordLLMResult(false) // Record failure
+		MetricLLMFallbackCalls.WithLabelValues("embedding_failure", "error").Inc()
 		return false, fmt.Errorf("failed to make llm api call: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		s.llmGuards.recordLLMResult(false) // Record failure
+		MetricLLMFallbackCalls.WithLabelValues("embedding_failure", "error").Inc()
 		return false, fmt.Errorf("llm api returned status %d", resp.StatusCode)
 	}
 
@@ -546,13 +558,23 @@ Is the new message about the SAME topic as the previous message? Respond with on
 
 	if len(llmResponse.Choices) == 0 {
 		s.llmGuards.recordLLMResult(false) // Record failure
+		MetricLLMFallbackCalls.WithLabelValues("embedding_failure", "error").Inc()
 		return false, fmt.Errorf("no choices in llm response")
 	}
 
 	s.llmGuards.recordLLMResult(true) // Record success
 
 	responseText := strings.ToLower(strings.TrimSpace(llmResponse.Choices[0].Message.Content))
-	return responseText == "true", nil
+	isSameTopic := responseText == "true"
+
+	// Record routing decision
+	if isSameTopic {
+		MetricCosineGateDecisions.WithLabelValues("high", "continue_chain").Inc()
+	} else {
+		MetricCosineGateDecisions.WithLabelValues("low", "new_chain").Inc()
+	}
+
+	return isSameTopic, nil
 }
 
 // CreateEmbedding performs vector embedding creation using an external service like Azure OpenAI
@@ -574,7 +596,7 @@ func (s *STMStore) CreateEmbedding(ctx context.Context, textToEmbed string) (*mo
 
 	// Check embedding cache first
 	if cachedEmbedding := s.getEmbeddingFromCache(ctx, textToEmbed, embeddingModel); cachedEmbedding != nil {
-		log.Printf("INFO: Embedding cache hit for text (len=%d)", len(textToEmbed))
+		slog.Info("Embedding cache hit", slog.Int("text_length", len(textToEmbed)))
 		return cachedEmbedding, nil
 	}
 
@@ -594,6 +616,7 @@ func (s *STMStore) CreateEmbedding(ctx context.Context, textToEmbed string) (*mo
 	httpCtx, cancel := context.WithTimeout(ctx, s.llmConfig.EmbeddingTimeout)
 	defer cancel()
 
+	timer := prometheus.NewTimer(MetricEmbeddingLatency)
 	req, err := http.NewRequestWithContext(httpCtx, "POST", url, bytes.NewBuffer(body))
 	if err != nil {
 		s.llmGuards.recordLLMResult(false) // Record failure
@@ -641,6 +664,7 @@ func (s *STMStore) CreateEmbedding(ctx context.Context, textToEmbed string) (*mo
 	}
 
 	s.llmGuards.recordLLMResult(true) // Record success
+	timer.ObserveDuration()           // Record successful embedding latency
 
 	embeddingData := &models.EmbeddingData{
 		Vector:     embeddingResponse.Data[0].Embedding,
@@ -656,7 +680,7 @@ func (s *STMStore) CreateEmbedding(ctx context.Context, textToEmbed string) (*mo
 }
 
 // getEmbeddingFromCache retrieves a cached embedding for the given text and model
-func (s *STMStore) getEmbeddingFromCache(ctx context.Context, text, model string) *models.EmbeddingData {
+func (s *STMStore) getEmbeddingFromCache(_ context.Context, text, model string) *models.EmbeddingData {
 	if s.redis == nil {
 		return nil
 	}
@@ -667,14 +691,16 @@ func (s *STMStore) getEmbeddingFromCache(ctx context.Context, text, model string
 	err := s.redis.Get(cacheKey, &cachedData)
 	if err != nil {
 		// Cache miss or error - not critical
+		MetricSTMCacheOps.WithLabelValues("get", "miss").Inc()
 		return nil
 	}
 
+	MetricSTMCacheOps.WithLabelValues("get", "hit").Inc()
 	return &cachedData
 }
 
 // storeEmbeddingInCache stores an embedding in the cache
-func (s *STMStore) storeEmbeddingInCache(ctx context.Context, text, model string, embedding *models.EmbeddingData) {
+func (s *STMStore) storeEmbeddingInCache(_ context.Context, text, model string, embedding *models.EmbeddingData) {
 	if s.redis == nil {
 		return
 	}
@@ -685,7 +711,10 @@ func (s *STMStore) storeEmbeddingInCache(ctx context.Context, text, model string
 
 	err := s.redis.SetWithTTL(cacheKey, embedding, cacheTTL)
 	if err != nil {
-		log.Printf("WARN: Failed to cache embedding: %v", err)
+		slog.Warn("Failed to cache embedding", slog.String("error", err.Error()))
+		MetricSTMCacheOps.WithLabelValues("set", "error").Inc()
+	} else {
+		MetricSTMCacheOps.WithLabelValues("set", "success").Inc()
 	}
 }
 
@@ -701,10 +730,10 @@ func (s *STMStore) generateEmbeddingCacheKey(text, model string) string {
 
 // acquireProcessingLock attempts to acquire a lock for processing a chain
 // Returns true if lock was acquired, false if chain is already being processed
-func (s *STMStore) acquireProcessingLock(ctx context.Context, chainID string) bool {
+func (s *STMStore) acquireProcessingLock(_ context.Context, chainID string) bool {
 	if s.redis == nil {
 		// If Redis is not available, allow processing (fail-open for availability)
-		log.Println("WARN: Redis not available for idempotency check, proceeding with processing")
+		slog.Warn("Redis not available for idempotency check, proceeding with processing")
 		return true
 	}
 
@@ -715,7 +744,7 @@ func (s *STMStore) acquireProcessingLock(ctx context.Context, chainID string) bo
 	err := s.redis.SetWithTTL(lockKey, "processing", lockTTL)
 	if err != nil {
 		// Lock already exists or error occurred
-		log.Printf("WARN: Failed to acquire processing lock for chain %s: %v", chainID, err)
+		slog.Warn("Failed to acquire processing lock", slog.String("chain_id", chainID), slog.String("error", err.Error()))
 
 		// Check if the key already exists to distinguish between "already processing" and other errors
 		exists, checkErr := s.redis.Exists(lockKey)
@@ -730,7 +759,7 @@ func (s *STMStore) acquireProcessingLock(ctx context.Context, chainID string) bo
 }
 
 // releaseProcessingLock releases the processing lock for a chain
-func (s *STMStore) releaseProcessingLock(ctx context.Context, chainID string) {
+func (s *STMStore) releaseProcessingLock(_ context.Context, chainID string) {
 	if s.redis == nil {
 		return
 	}
@@ -738,7 +767,7 @@ func (s *STMStore) releaseProcessingLock(ctx context.Context, chainID string) {
 	lockKey := fmt.Sprintf("mtm:processing:lock:%s", chainID)
 	err := s.redis.Delete(lockKey)
 	if err != nil {
-		log.Printf("WARN: Failed to release processing lock for chain %s: %v", chainID, err)
+		slog.Warn("Failed to release processing lock for chain", slog.String("chain_id", chainID), slog.String("error", err.Error()))
 	}
 }
 
@@ -853,6 +882,10 @@ func (s *STMStore) CreateSegmentSummary(ctx context.Context, events []models.Cog
 	var summaryResp MTMSummaryResponse
 	if err := json.Unmarshal([]byte(llmResp.Choices[0].Message.Content), &summaryResp); err != nil {
 		s.llmGuards.recordLLMResult(false)
+		slog.Error("LLM returned invalid JSON schema for summary",
+			slog.String("error", err.Error()),
+			slog.String("raw_llm_payload", llmResp.Choices[0].Message.Content),
+		)
 		return "", 0, fmt.Errorf("failed to parse structured output: %w", err)
 	}
 
@@ -939,7 +972,10 @@ func (s *STMStore) ExtractEntities(ctx context.Context, events []models.Cognitiv
 	var entities []string
 	if err := json.Unmarshal([]byte(content), &entities); err != nil {
 		// LLM returned non-JSON — log and return empty rather than fail MTM formation
-		log.Printf("WARN: Could not parse entity extraction response as JSON for chain (raw: %s): %v", content, err)
+		slog.Error("Could not parse entity extraction response as JSON for chain",
+			slog.String("error", err.Error()),
+			slog.String("raw_llm_payload", content),
+		)
 		return []string{}, nil
 	}
 	return entities, nil
@@ -966,7 +1002,7 @@ func (s *STMStore) StoreEventEmbedding(ctx context.Context, event *models.Cognit
 // IndexCognitiveEvents creates and stores embeddings for individual high-value cognitive events.
 func (s *STMStore) IndexCognitiveEvents(ctx context.Context, chainID string, events []models.CognitiveEvent) error {
 	if s.milvus == nil {
-		log.Println("WARN: Milvus client not configured, skipping event indexing.")
+		slog.Warn("Milvus client not configured, skipping event indexing")
 		return nil // Not a fatal error
 	}
 
@@ -987,14 +1023,14 @@ func (s *STMStore) IndexCognitiveEvents(ctx context.Context, chainID string, eve
 			// Create embedding for the event content
 			embedding, err := s.CreateEmbedding(ctx, event.Content)
 			if err != nil {
-				log.Printf("WARN: Failed to create embedding for event %s in chain %s: %v", event.ID.Hex(), chainID, err)
+				slog.Warn("Failed to create embedding for event", slog.String("event_id", event.ID.Hex()), slog.String("chain_id", chainID), slog.String("error", err.Error()))
 				continue // Skip this event
 			}
 
 			// Store the embedding in Milvus using the event's ID as the reference
 			err = s.StoreEventEmbedding(ctx, &event, embedding)
 			if err != nil {
-				log.Printf("WARN: Failed to store embedding for event %s in chain %s: %v", event.ID.Hex(), chainID, err)
+				slog.Warn("Failed to store embedding for event", slog.String("event_id", event.ID.Hex()), slog.String("chain_id", chainID), slog.String("error", err.Error()))
 				continue // Skip this event
 			}
 			indexedCount++
@@ -1002,7 +1038,7 @@ func (s *STMStore) IndexCognitiveEvents(ctx context.Context, chainID string, eve
 	}
 
 	if indexedCount > 0 {
-		log.Printf("INFO: Indexed %d individual cognitive events for chain %s.", indexedCount, chainID)
+		slog.Info("Indexed individual cognitive events for chain", slog.Int("indexed_count", indexedCount), slog.String("chain_id", chainID))
 	}
 
 	return nil
@@ -1013,7 +1049,7 @@ func (s *STMStore) IndexCognitiveEvents(ctx context.Context, chainID string, eve
 // provided key/value pairs are returned (e.g. {"origin_service": "colabra"}).
 func (s *STMStore) SearchSimilarChains(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int, metadataFilter map[string]string) ([]*models.CognitiveChain, error) {
 	if s.milvus == nil {
-		log.Println("WARN: Milvus client not configured, cannot search for similar chains.")
+		slog.Warn("Milvus client not configured, cannot search for similar chains")
 		return nil, nil // Return empty slice, not an error
 	}
 
@@ -1027,7 +1063,7 @@ func (s *STMStore) SearchSimilarChains(ctx context.Context, tenantID, userID, ag
 		return []*models.CognitiveChain{}, nil // No similar chains found
 	}
 
-	log.Printf("INFO: Vector search found %d candidate chain IDs.", len(chainIDs))
+	slog.Info("Vector search found candidate chain IDs", slog.Int("candidate_count", len(chainIDs)))
 
 	// Step B: Fetch the full metadata for those chain IDs from MongoDB.
 	// Apply metadata filters (e.g. origin_service, context_type) if provided.
@@ -1052,7 +1088,7 @@ func (s *STMStore) SearchSimilarChains(ctx context.Context, tenantID, userID, ag
 		return nil, fmt.Errorf("failed to decode similar chains from mongodb: %w", err)
 	}
 
-	log.Printf("INFO: Fetched %d full cognitive chain documents from MongoDB.", len(chains))
+	slog.Info("Fetched full cognitive chain documents from MongoDB", slog.Int("chain_count", len(chains)))
 
 	return chains, nil
 }
@@ -1094,7 +1130,7 @@ func (s *STMStore) ArchiveColdChains(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 
-	log.Printf("INFO: ArchiveColdChains found %d candidates for analysis.", len(chains))
+	slog.Info("ArchiveColdChains found candidates for analysis", slog.Int("candidate_count", len(chains)))
 
 	// 2. Initialize HeatScorer to calculate current heat
 	heatScorer := NewHeatScorer(s.db)
@@ -1106,24 +1142,24 @@ func (s *STMStore) ArchiveColdChains(ctx context.Context) (int, error) {
 		// Calculate current heat score
 		currentHeat, _, err := heatScorer.ComputeSegmentHeat(ctx, &chain)
 		if err != nil {
-			log.Printf("WARN: Failed to compute heat for chain %s: %v", chain.ChainID, err)
+			slog.Warn("Failed to compute heat for chain", slog.String("chain_id", chain.ChainID), slog.String("error", err.Error()))
 			continue
 		}
 
 		// Check if below freezing point
 		if currentHeat < freezingPoint {
-			log.Printf("INFO: Archiving cold chain %s (Heat: %.3f < %.3f)", chain.ChainID, currentHeat, freezingPoint)
+			slog.Info("Archiving cold chain", slog.String("chain_id", chain.ChainID), slog.Float64("current_heat", currentHeat), slog.Float64("freezing_point", freezingPoint))
 
 			// A. Delete vector from Milvus
 			if s.milvus != nil {
 				if err := s.milvus.DeleteSegmentEmbedding(ctx, chain.TenantID, chain.UserID, chain.AgentID, chain.ChainID); err != nil {
-					log.Printf("ERROR: Failed to delete vector for chain %s: %v", chain.ChainID, err)
+					slog.Error("Failed to delete vector for chain", slog.String("chain_id", chain.ChainID), slog.String("error", err.Error()))
 					// We continue to mark as archived in Mongo, assuming Milvus might be down or data inconsistent.
 					// Alternatively, we could skip archiving in Mongo to retry later.
 					// For now, let's proceed to ensure Mongo state reflects "archived" status.
 				}
 			} else {
-				log.Println("WARN: Milvus client not available, skipping vector deletion.")
+				slog.Warn("Milvus client not available, skipping vector deletion")
 			}
 
 			// B. Update status in MongoDB
@@ -1137,13 +1173,13 @@ func (s *STMStore) ArchiveColdChains(ctx context.Context) (int, error) {
 			}
 			_, err := collection.UpdateOne(ctx, bson.M{"_id": chain.ID}, update)
 			if err != nil {
-				log.Printf("ERROR: Failed to update status for chain %s in MongoDB: %v", chain.ChainID, err)
+				slog.Error("Failed to update status for chain in MongoDB", slog.String("chain_id", chain.ChainID), slog.String("error", err.Error()))
 			} else {
 				archivedCount++
 			}
 		}
 	}
 
-	log.Printf("INFO: ArchiveColdChains completed. Archived %d/%d candidates.", archivedCount, len(chains))
+	slog.Info("ArchiveColdChains completed", slog.Int("archived_count", archivedCount), slog.Int("candidate_count", len(chains)))
 	return archivedCount, nil
 }

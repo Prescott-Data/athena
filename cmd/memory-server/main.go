@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -25,6 +26,9 @@ import (
 )
 
 func main() {
+	// Configure structured JSON logging
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})))
+
 	// Load configuration
 	cfg, err := config.LoadConfig()
 	if err != nil {
@@ -143,7 +147,31 @@ func main() {
 	promoterIntervalMin := getEnvInt("MEMORY_OS_PROMOTER_INTERVAL_MIN", 30)
 	promoterThreshold := getEnvFloat("MEMORY_OS_PROMOTER_THRESHOLD", 0.3)
 	mongoDB := memoryServer.GetMongoClient().Database(cfg.Database.MongoDB.Database)
-	promoter := memory.NewPromoter(mongoDB)
+
+	// Initialize LTMWriter
+	dbURL := os.Getenv("ARANGODB_URL")
+	if dbURL == "" {
+		dbURL = "http://localhost:8529"
+	}
+	dbUser := os.Getenv("ARANGODB_USER")
+	if dbUser == "" {
+		dbUser = "root"
+	}
+	dbPass := os.Getenv("ARANGODB_PASSWORD")
+	if dbPass == "" {
+		dbPass = "athena_dev"
+	}
+	dbName := os.Getenv("ARANGODB_DATABASE")
+	if dbName == "" {
+		dbName = "athena_ltm"
+	}
+
+	ltmWriter, err := memory.NewLTMWriter(promoterCtx, dbURL, dbUser, dbPass, dbName)
+	if err != nil {
+		log.Printf("WARN: Failed to initialize LTMWriter (is ArangoDB running and InitializeLTMGraph called?): %v", err)
+	}
+
+	promoter := memory.NewPromoter(mongoDB, memoryServer.GetSTMStore(), ltmWriter)
 	go func() {
 		ticker := time.NewTicker(time.Duration(promoterIntervalMin) * time.Minute)
 		defer ticker.Stop()

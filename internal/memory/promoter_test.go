@@ -2,10 +2,14 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"bitbucket.org/dromos/memory-os/internal/models"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/integration/mtest"
@@ -129,4 +133,92 @@ func TestPromoter_RunOnce_IgnoresColdChain(t *testing.T) {
 			t.Fatalf("Promoter.RunOnce failed: %v", err)
 		}
 	})
+}
+
+// --- Integration Mock Services ---
+
+// MockGraphExtractor is a mock implementation of GraphExtractor
+type MockGraphExtractor struct {
+	mock.Mock
+}
+
+func (m *MockGraphExtractor) ExtractGraphFromSummary(ctx context.Context, summary string) (*GraphExtraction, error) {
+	args := m.Called(ctx, summary)
+	if args.Get(0) != nil {
+		return args.Get(0).(*GraphExtraction), args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
+// MockGraphWriter is a mock implementation of GraphWriter
+type MockGraphWriter struct {
+	mock.Mock
+}
+
+func (m *MockGraphWriter) WriteExtractionToGraph(ctx context.Context, extraction *GraphExtraction, heatScore float64) error {
+	args := m.Called(ctx, extraction, heatScore)
+	return args.Error(0)
+}
+
+func TestPromoteChainToLPM_Success(t *testing.T) {
+	mockExtractor := new(MockGraphExtractor)
+	mockWriter := new(MockGraphWriter)
+
+	promoter := &Promoter{
+		extractor: mockExtractor,
+		writer:    mockWriter,
+	}
+
+	chain := &models.CognitiveChain{
+		ChainID: "chain-123",
+		Summary: "Test summary for success path",
+	}
+	heatScore := 0.9
+
+	expectedExtraction := &GraphExtraction{
+		Nodes: []GraphNode{{ID: "1", Label: "Identities", Name: "Test Node"}},
+	}
+
+	mockExtractor.On("ExtractGraphFromSummary", mock.Anything, "Test summary for success path").Return(expectedExtraction, nil)
+	mockWriter.On("WriteExtractionToGraph", mock.Anything, expectedExtraction, 0.9).Return(nil)
+
+	err := promoter.promoteChainToLPM(context.Background(), chain, heatScore)
+	assert.NoError(t, err)
+
+	mockExtractor.AssertExpectations(t)
+	mockExtractor.AssertNumberOfCalls(t, "ExtractGraphFromSummary", 1)
+
+	mockWriter.AssertExpectations(t)
+	mockWriter.AssertNumberOfCalls(t, "WriteExtractionToGraph", 1)
+}
+
+func TestPromoteChainToLPM_ExtractorFails(t *testing.T) {
+	mockExtractor := new(MockGraphExtractor)
+	mockWriter := new(MockGraphWriter)
+
+	promoter := &Promoter{
+		extractor: mockExtractor,
+		writer:    mockWriter,
+	}
+
+	chain := &models.CognitiveChain{
+		ChainID: "chain-123",
+		Summary: "Test summary for failure path",
+	}
+	heatScore := 0.9
+
+	expectedErr := errors.New("llm extraction failed test error")
+	mockExtractor.On("ExtractGraphFromSummary", mock.Anything, "Test summary for failure path").Return(nil, expectedErr)
+
+	err := promoter.promoteChainToLPM(context.Background(), chain, heatScore)
+
+	// Ensure the error is returned back correctly
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to extract graph")
+
+	mockExtractor.AssertExpectations(t)
+	mockExtractor.AssertNumberOfCalls(t, "ExtractGraphFromSummary", 1)
+
+	// Crucial: Writer should NEVER be called if extraction fails
+	mockWriter.AssertNotCalled(t, "WriteExtractionToGraph")
 }
