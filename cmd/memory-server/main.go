@@ -15,6 +15,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
@@ -102,6 +103,9 @@ func main() {
 		})
 	})
 
+	// Prometheus Metrics endpoint (no auth required for scraping)
+	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
+
 	// Mount gRPC gateway
 	router.Any("/api/*path", func(c *gin.Context) {
 		mux.ServeHTTP(c.Writer, c.Request)
@@ -172,6 +176,8 @@ func main() {
 	}
 
 	promoter := memory.NewPromoter(mongoDB, memoryServer.GetSTMStore(), ltmWriter)
+	memoryServer.SetPromoter(promoter)
+
 	go func() {
 		ticker := time.NewTicker(time.Duration(promoterIntervalMin) * time.Minute)
 		defer ticker.Stop()
@@ -184,6 +190,30 @@ func main() {
 			case <-ticker.C:
 				if err := promoter.RunOnce(promoterCtx, promoterThreshold); err != nil {
 					log.Printf("WARN: Promoter run failed: %v", err)
+				}
+			}
+		}
+	}()
+
+	// Start Archiver scheduler
+	archiverCtx, archiverCancel := context.WithCancel(context.Background())
+	archiverIntervalMin := getEnvInt("MEMORY_OS_ARCHIVER_INTERVAL_MIN", 60)
+
+	go func() {
+		ticker := time.NewTicker(time.Duration(archiverIntervalMin) * time.Minute)
+		defer ticker.Stop()
+		log.Printf("Archiver scheduler started (interval: %dm)", archiverIntervalMin)
+		for {
+			select {
+			case <-archiverCtx.Done():
+				log.Println("Archiver scheduler stopped")
+				return
+			case <-ticker.C:
+				count, err := memoryServer.GetSTMStore().ArchiveColdChains(archiverCtx)
+				if err != nil {
+					log.Printf("ERROR: Archiver run failed: %v", err)
+				} else if count > 0 {
+					log.Printf("INFO: Archiver run completed, archived %d chains", count)
 				}
 			}
 		}
@@ -204,6 +234,7 @@ func main() {
 	// Stop background workers and promoter
 	workerCancel()
 	promoterCancel()
+	archiverCancel()
 
 	// Graceful shutdown
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)

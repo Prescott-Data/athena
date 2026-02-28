@@ -12,7 +12,7 @@
 - **Redis** (port 6379): ✅ Accessible with authentication (`dromos_redis_2024`)
 - **MongoDB** (port 27017): ✅ Accessible with `memory_user` credentials
 - **Milvus** (port 19530/9091): ✅ Healthy and responding to API calls
-- **JanusGraph** (port 8182): ⚠️ Currently unhealthy (deferred for later)
+- **ArangoDB** (port 8529): ✅ Accessible (LTM knowledge graph)
 
 ### Infrastructure Details
 - **VM**: dromos-memory-stack-vm (Standard_D4s_v3)
@@ -40,9 +40,9 @@ Database: DatabaseConfig{
         Host: "172.190.152.215",
         Port: 19530,
     },
-    JanusGraph: JanusGraphConfig{
-        Host: "172.190.152.215",
-        Port: 8182,
+    ArangoDB: ArangoDBConfig{
+        URL:      "http://172.190.152.215:8529",
+        Database: "athena_ltm",
     },
 }
 ```
@@ -104,15 +104,17 @@ export MEMORY_OS_REDIS_HOST="172.190.152.215"
 export MEMORY_OS_REDIS_PASSWORD="dromos_redis_2024"
 export MEMORY_OS_MONGODB_URI="mongodb://memory_user:memory_password_2024@172.190.152.215:27017/memory_os?retryWrites=true&authSource=memory_os"
 export MEMORY_OS_MILVUS_HOST="172.190.152.215"
-export MEMORY_OS_JANUS_HOST="172.190.152.215"
+export ARANGODB_URL="http://172.190.152.215:8529"
+export ARANGODB_USER="root"
+export ARANGODB_PASSWORD="your-arangodb-password"
+export ARANGODB_DATABASE="athena_ltm"
 ```
 
 ## 🔧 Issues Identified
 
-1. **JanusGraph Unhealthy**: Currently showing unhealthy status
-   - **Impact**: LTM (Long-Term Memory) features may not work
-   - **Recommendation**: Investigate JanusGraph container logs and restart if needed
-   - **Workaround**: Memory OS can function with STM and MTM only
+1. **LTM Graph Backend**: JanusGraph has been fully replaced by ArangoDB.
+   - **Impact**: LTM (Long-Term Memory) is now fully operational via ArangoDB knowledge graph.
+   - **Status**: Resolved. No action needed.
 
 2. **Go Dependency Conflicts**: Some dependency version conflicts in the Memory OS go.mod
    - **Status**: Worked around by creating separate test environment
@@ -121,7 +123,7 @@ export MEMORY_OS_JANUS_HOST="172.190.152.215"
 ## 🎉 Success Metrics
 
 ✅ **Network Connectivity**: 100% success rate
-✅ **Service Health**: 75% (3/4 services healthy)
+✅ **Service Health**: 100% (4/4 services healthy)
 ✅ **Database Operations**: 100% success rate
 ✅ **API Readiness**: Ready for deployment
 
@@ -142,6 +144,6 @@ The service can handle:
 - ✅ Session management
 - ✅ Short-Term Memory (STM) via Redis
 - ✅ Mid-Term Memory (MTM) via MongoDB + Milvus
-- ⚠️ Long-Term Memory (LTM) pending JanusGraph fix
+- ✅ Long-Term Memory (LTM) via ArangoDB knowledge graph
 
 **Recommendation**: Proceed with Memory OS deployment and begin migration of docintel-api to use Memory OS as a service.

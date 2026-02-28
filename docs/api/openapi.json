@@ -16,6 +16,29 @@
     "application/json"
   ],
   "paths": {
+    "/api/v1/admin/analytics/trigger": {
+      "post": {
+        "summary": "Admin / Testing",
+        "operationId": "MemoryService_TriggerGraphAnalytics",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1TriggerGraphAnalyticsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "MemoryService"
+        ]
+      }
+    },
     "/api/v1/health": {
       "get": {
         "summary": "Health \u0026 Operations",
@@ -348,6 +371,13 @@
                 "timestamp": {
                   "type": "string",
                   "format": "date-time"
+                },
+                "payload": {
+                  "type": "string",
+                  "format": "byte"
+                },
+                "mimeType": {
+                  "type": "string"
                 }
               }
             }
@@ -595,7 +625,7 @@
         },
         "ltpm": {
           "$ref": "#/definitions/v1LTPMContext",
-          "description": "LTPM context — placeholder for Long-Term Persistent Memory (JanusGraph/ArangoDB)."
+          "description": "LTPM context — Long-Term Persistent Memory retrieved from ArangoDB knowledge graph."
         }
       }
     },
@@ -696,7 +726,7 @@
           "type": "string"
         }
       },
-      "description": "LTPMContext is a placeholder for Long-Term Persistent Memory retrieval results.\nReserved for a future Athena phase that integrates JanusGraph/ArangoDB."
+      "description": "LTPMContext holds Long-Term Persistent Memory retrieval results from the ArangoDB knowledge graph.\nContains entities, relationships, and persona data extracted and promoted from MTM cognitive chains."
     },
     "v1STMEvent": {
       "type": "object",
@@ -724,6 +754,13 @@
             "type": "string"
           },
           "description": "Optional metadata (origin_service, workflow_id, etc.)."
+        },
+        "blobUri": {
+          "type": "string",
+          "description": "External blob storage pointer if the payload was massive."
+        },
+        "blobMimeType": {
+          "type": "string"
         }
       }
     },
@@ -855,6 +892,17 @@
         "lastMentioned": {
           "type": "string",
           "format": "date-time"
+        }
+      }
+    },
+    "v1TriggerGraphAnalyticsResponse": {
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
         }
       }
     },

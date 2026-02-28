@@ -22,18 +22,20 @@ const (
 
 // CognitiveEvent represents a single event in a cognitive chain, stored in MongoDB.
 type CognitiveEvent struct {
-	ID         primitive.ObjectID     `json:"id" bson:"_id,omitempty"`
-	TenantID   string                 `json:"tenantId" bson:"tenantId"`
-	UserID     string                 `json:"userId" bson:"userId"`
-	AgentID    string                 `json:"agentId" bson:"agentId"`
-	ChainID    string                 `json:"chainId" bson:"chainId"`
-	EventIndex int                    `json:"eventIndex" bson:"eventIndex"`
-	Role       string                 `json:"role"` // "user", "agent"
-	Type       STMEventType           `json:"type"` // "message", "thought", "action", "observation"
-	Content    string                 `json:"content"`
-	Status     string                 `json:"status"` // "in_stm", "archived"
-	Metadata   map[string]interface{} `json:"metadata,omitempty" bson:"metadata,omitempty"`
-	CreatedAt  time.Time              `json:"createdAt" bson:"createdAt"`
+	ID           primitive.ObjectID     `json:"id" bson:"_id,omitempty"`
+	TenantID     string                 `json:"tenantId" bson:"tenantId"`
+	UserID       string                 `json:"userId" bson:"userId"`
+	AgentID      string                 `json:"agentId" bson:"agentId"`
+	ChainID      string                 `json:"chainId" bson:"chainId"`
+	EventIndex   int                    `json:"eventIndex" bson:"eventIndex"`
+	Role         string                 `json:"role"` // "user", "agent"
+	Type         STMEventType           `json:"type"` // "message", "thought", "action", "observation"
+	Content      string                 `json:"content"`
+	BlobURI      string                 `json:"blobUri,omitempty" bson:"blobUri,omitempty"`
+	BlobMimeType string                 `json:"blobMimeType,omitempty" bson:"blobMimeType,omitempty"`
+	Status       string                 `json:"status"` // "in_stm", "archived"
+	Metadata     map[string]interface{} `json:"metadata,omitempty" bson:"metadata,omitempty"`
+	CreatedAt    time.Time              `json:"createdAt" bson:"createdAt"`
 }
 
 // CognitiveChain represents metadata about a cognitive chain.

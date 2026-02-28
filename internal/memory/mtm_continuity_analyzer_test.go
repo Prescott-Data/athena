@@ -17,11 +17,11 @@ func setupContinuityTest(t *testing.T, mockClient *http.Client) (*ContinuityAnal
 	t.Helper()
 
 	// Mock STMStore and inject the test client.
-	mockStore := NewSTMStore(nil, nil)
-	mockStore.HTTPClient = mockClient
+	mockSTMStore := NewSTMStore(nil, nil, nil)
+	mockSTMStore.HTTPClient = mockClient
 
 	// Mock ContinuityAnalyzer, injecting the mocked store and client.
-	analyzer := NewContinuityAnalyzer(nil, mockStore)
+	analyzer := NewContinuityAnalyzer(nil, mockSTMStore)
 	analyzer.HTTPClient = mockClient
 
 	// Use default config but override thresholds for predictable tests.

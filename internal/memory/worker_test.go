@@ -37,7 +37,7 @@ func setupIntegrationWorker(t *testing.T) (*Worker, cache.Interface) {
 	}
 
 	// 3. Real STMStore (connects to Azure OpenAI for embeddings, Milvus for vectors)
-	stmStore := NewSTMStore(mongoDB, redisClient)
+	stmStore := NewSTMStore(mongoDB, redisClient, nil)
 
 	// 4. Real TaskQueue (Redis-backed)
 	taskQueue := NewTaskQueue(redisClient)
@@ -64,7 +64,7 @@ func cleanupSTMKey(t *testing.T, redis cache.Interface, tenantID, userID, agentI
 
 // MockSTMStore for testing worker failure scenarios
 type MockSTMStore struct {
-	STMStorer // Embed interface to allow partial implementation
+	STMStorer                  // Embed interface to allow partial implementation
 	MockCreateEmbedding        func(ctx context.Context, text string) (*models.EmbeddingData, error)
 	MockProcessMTMFormation    func(ctx context.Context, tenantID, userID, agentID string, events []models.CognitiveEvent) error
 	MockAnalyzeTopicContinuity func(ctx context.Context, userID, prev, curr string) (bool, error)
@@ -95,6 +95,7 @@ func (m *MockSTMStore) analyzeTopicContinuity(ctx context.Context, userID, prev,
 func (m *MockSTMStore) StoreCognitiveEvent(ctx context.Context, event *models.CognitiveEvent) (primitive.ObjectID, error) {
 	return primitive.NilObjectID, nil
 }
+
 // Wait, StoreCognitiveEvent returns (primitive.ObjectID, error). I need to import go.mongodb.org/mongo-driver/bson/primitive.
 // Or I can just omit it if I don't use it, but `STMStorer` interface requires it.
 // I'll add the import.

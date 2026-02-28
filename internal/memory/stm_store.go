@@ -20,6 +20,7 @@ import (
 	"bitbucket.org/dromos/memory-os/internal/cache"
 	"bitbucket.org/dromos/memory-os/internal/llm"
 	"bitbucket.org/dromos/memory-os/internal/models"
+	"bitbucket.org/dromos/memory-os/internal/storage"
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.mongodb.org/mongo-driver/bson"
@@ -208,6 +209,7 @@ type STMStore struct {
 	llmConfig   LLMConfig
 	HTTPClient  *http.Client
 	llmProvider llm.Provider
+	blobStore   storage.BlobStore
 
 	// MTM Components
 	qualityValidator  *QualityValidator
@@ -217,7 +219,7 @@ type STMStore struct {
 }
 
 // NewSTMStore creates a new STM store instance
-func NewSTMStore(database *mongo.Database, redisClient cache.Interface) *STMStore {
+func NewSTMStore(database *mongo.Database, redisClient cache.Interface, blobStore storage.BlobStore) *STMStore {
 	MilvusHost := os.Getenv("MILVUS_HOST")
 	MilvusPort := os.Getenv("MILVUS_PORT")
 
@@ -257,8 +259,9 @@ func NewSTMStore(database *mongo.Database, redisClient cache.Interface) *STMStor
 		llmGuards: &LLMGuardrails{
 			redis: redisClient,
 		},
-		HTTPClient:  &http.Client{},
+		HTTPClient:  &http.Client{Timeout: 30 * time.Second},
 		llmProvider: llmProvider,
+		blobStore:   blobStore,
 	}
 
 	// Initialize MTM components
@@ -1176,6 +1179,26 @@ func (s *STMStore) ArchiveColdChains(ctx context.Context) (int, error) {
 				slog.Error("Failed to update status for chain in MongoDB", slog.String("chain_id", chain.ChainID), slog.String("error", err.Error()))
 			} else {
 				archivedCount++
+			}
+
+			// C. Cleanup orphaned blobs
+			if s.blobStore != nil {
+				eventFilter := bson.M{"chainId": chain.ChainID, "blobUri": bson.M{"$exists": true, "$ne": ""}}
+				eventCursor, err := s.db.Collection(CognitiveEventsCollection).Find(ctx, eventFilter)
+				if err == nil {
+					var evts []models.CognitiveEvent
+					if err := eventCursor.All(ctx, &evts); err == nil {
+						for _, evt := range evts {
+							if err := s.blobStore.Delete(ctx, evt.BlobURI); err != nil {
+								BlobStorageOps.WithLabelValues("delete", "configured", "error").Inc()
+								slog.Warn("Failed to delete blob for archived chain", slog.String("uri", evt.BlobURI))
+							} else {
+								BlobStorageOps.WithLabelValues("delete", "configured", "success").Inc()
+								slog.Info("Deleted blob for archived chain", slog.String("uri", evt.BlobURI))
+							}
+						}
+					}
+				}
 			}
 		}
 	}

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"bitbucket.org/dromos/memory-os/pkg/memory"
 	"github.com/arangodb/go-driver"
 	"github.com/arangodb/go-driver/http"
 	"github.com/prometheus/client_golang/prometheus"
@@ -13,7 +14,8 @@ import (
 
 // LTMWriter handles writing extracted graph data to ArangoDB.
 type LTMWriter struct {
-	db driver.Database
+	db        driver.Database
+	analytics *memory.AnalyticsEngine
 }
 
 // NewLTMWriter creates a new LTMWriter connected to the specified ArangoDB instance.
@@ -47,7 +49,22 @@ func NewLTMWriter(ctx context.Context, dbURL, user, pass, dbName string) (*LTMWr
 		return nil, fmt.Errorf("failed to open database %s: %w", dbName, err)
 	}
 
-	return &LTMWriter{db: db}, nil
+	return &LTMWriter{
+		db:        db,
+		analytics: memory.NewAnalyticsEngine(db),
+	}, nil
+}
+
+// TriggerCommunityDetection starts a background community detection job across the LTM graph,
+// and if successful, immediately follows up by calculating the bridge entities.
+func (w *LTMWriter) TriggerCommunityDetection(ctx context.Context) error {
+	err := w.analytics.RunCommunityDetection(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Synchronously calculate bridge entities based on the new community identifiers
+	return w.analytics.CalculateBridgeEntities(ctx)
 }
 
 // WriteExtractionToGraph takes a parsed graph extraction and upserts nodes and edges into ArangoDB.
