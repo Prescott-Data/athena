@@ -39,9 +39,17 @@ services:
       MINIO_SECRET_KEY: minioadmin
     command: minio server /minio_data --console-address ":9001"
     ports:
+      - "9000:9000"
       - "9001:9001"
     volumes:
       - minio_data:/minio_data
+
+  minio-setup:
+    image: minio/mc
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c " /usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadmin; /usr/bin/mc mb myminio/athena-blobs || true; /usr/bin/mc policy set public myminio/athena-blobs; exit 0; "
 
   milvus:
     image: milvusdb/milvus:v2.3.4

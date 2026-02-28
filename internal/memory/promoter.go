@@ -151,3 +151,20 @@ func (p *Promoter) promoteChainToLPM(ctx context.Context, chain *models.Cognitiv
 	slog.Info("Successfully promoted chain to LTM Graph", slog.String("chain_id", chain.ChainID))
 	return nil
 }
+
+// TriggerAnalytics manually triggers a background graph analytics job (Community Detection).
+func (p *Promoter) TriggerAnalytics(ctx context.Context) error {
+	if p.writer == nil {
+		return fmt.Errorf("promoter writer is not configured")
+	}
+
+	// The writer is stored as a GraphWriter interface.
+	// We must type assert it to *LTMWriter to access the analytics functions.
+	ltmWriter, ok := p.writer.(*LTMWriter)
+	if !ok {
+		return fmt.Errorf("underlying writer does not support graph analytics (not an LTMWriter)")
+	}
+
+	slog.Info("Manually triggering graph analytics job...")
+	return ltmWriter.TriggerCommunityDetection(ctx)
+}

@@ -82,6 +82,23 @@ var (
 		Name: "memos_ltm_edge_interceptions_total",
 		Help: "Total number of rogue LLM verbs intercepted and auto-corrected to RELATES_TO",
 	})
+
+	// Blob Storage Metrics
+	BlobStorageOps = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "memos_blob_storage_ops_total",
+			Help: "Total number of Blob Storage operations",
+		},
+		[]string{"operation", "provider", "status"}, // operation: upload/download/delete, provider: s3/minio/gcs/local, status: success/error
+	)
+	BlobPayloadBytes = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "memos_blob_payload_bytes",
+			Help:    "Size of payloads written to Blob Storage",
+			Buckets: []float64{1024, 10240, 102400, 1048576, 5242880, 10485760}, // 1KB, 10KB, 100KB, 1MB, 5MB, 10MB
+		},
+		[]string{"provider"},
+	)
 )
 
 func init() {
@@ -102,5 +119,7 @@ func init() {
 		LTMNodesWritten,
 		LTMEdgesWritten,
 		LTMEdgeInterceptions,
+		BlobStorageOps,
+		BlobPayloadBytes,
 	)
 }

@@ -190,11 +190,25 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 	var allEvents []models.CognitiveEvent
 
 	for i, eventStr := range eventStrings {
-		var evt models.CognitiveEvent
-		if err := json.Unmarshal([]byte(eventStr), &evt); err != nil {
+		var stmEvt STMEvent
+		if err := json.Unmarshal([]byte(eventStr), &stmEvt); err != nil {
 			log.Printf("WARNING: Failed to unmarshal event at index %d: %v", i, err)
 			continue
 		}
+
+		meta := make(map[string]interface{})
+		for k, v := range stmEvt.Metadata {
+			meta[k] = v
+		}
+
+		evt := models.CognitiveEvent{
+			Role:      stmEvt.Role,
+			Type:      stmEvt.Type,
+			Content:   stmEvt.Content,
+			CreatedAt: stmEvt.Timestamp,
+			Metadata:  meta,
+		}
+
 		allEvents = append(allEvents, evt)
 		if evt.Role == "user" {
 			userMessages = append(userMessages, parsedEvent{event: evt, index: i})
@@ -304,10 +318,21 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 		var oldChainEvents []models.CognitiveEvent
 		// Iterate in reverse to maintain chronological order (LPUSH makes newest first)
 		for i := len(oldChainStrings) - 1; i >= 0; i-- {
-			var event models.CognitiveEvent
-			if err := json.Unmarshal([]byte(oldChainStrings[i]), &event); err != nil {
+			var stmEvt STMEvent
+			if err := json.Unmarshal([]byte(oldChainStrings[i]), &stmEvt); err != nil {
 				log.Printf("WARNING: Failed to unmarshal event in old chain: %v", err)
 				continue
+			}
+			meta := make(map[string]interface{})
+			for k, v := range stmEvt.Metadata {
+				meta[k] = v
+			}
+			event := models.CognitiveEvent{
+				Role:      stmEvt.Role,
+				Type:      stmEvt.Type,
+				Content:   stmEvt.Content,
+				CreatedAt: stmEvt.Timestamp,
+				Metadata:  meta,
 			}
 			oldChainEvents = append(oldChainEvents, event)
 		}

@@ -69,8 +69,7 @@ func (s *STMStore) ExtractGraphFromSummary(ctx context.Context, summary string) 
 								"type": "string",
 							},
 						},
-						"required":             []string{"id", "label", "name"},
-						"additionalProperties": false,
+						"required": []string{"id", "label", "name"},
 					},
 				},
 				"edges": map[string]interface{}{
@@ -107,13 +106,11 @@ func (s *STMStore) ExtractGraphFromSummary(ctx context.Context, summary string) 
 								"description": "Confidence score 0.0 to 1.0",
 							},
 						},
-						"required":             []string{"from", "to", "relation", "confidence"},
-						"additionalProperties": false,
+						"required": []string{"from", "to", "relation", "confidence"},
 					},
 				},
 			},
-			"required":             []string{"nodes", "edges"},
-			"additionalProperties": false,
+			"required": []string{"nodes", "edges"},
 		},
 	}
 
@@ -166,7 +163,7 @@ Return the JSON in this exact structure:
 	req := llm.CompletionRequest{
 		SystemPrompt: systemPrompt,
 		Prompt:       summary,
-		MaxTokens:    1500,
+		MaxTokens:    4000,
 		Temperature:  0.1,
 		JSONSchema:   jsonSchema,
 	}

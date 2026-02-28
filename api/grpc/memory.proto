@@ -82,6 +82,13 @@ service MemoryService {
       get: "/api/v1/health"
     };
   }
+
+  // Admin / Testing
+  rpc TriggerGraphAnalytics(TriggerGraphAnalyticsRequest) returns (TriggerGraphAnalyticsResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/admin/analytics/trigger"
+    };
+  }
 }
 
 // Request/Response Messages
@@ -134,6 +141,8 @@ message StoreEventRequest {
   string content = 4;
   map<string, string> metadata = 5;
   google.protobuf.Timestamp timestamp = 6;
+  bytes payload = 7;
+  string mime_type = 8;
 }
 
 message StoreEventResponse {
@@ -156,12 +165,12 @@ message GetContextResponse {
   repeated DialoguePage relevant_pages = 2;
   repeated Segment segments = 3;
   UserPersona user_persona = 4;
-  // LTPM context — placeholder for Long-Term Persistent Memory (JanusGraph/ArangoDB).
+  // LTPM context — Long-Term Persistent Memory retrieved from ArangoDB knowledge graph.
   LTPMContext ltpm = 5;
 }
 
-// LTPMContext is a placeholder for Long-Term Persistent Memory retrieval results.
-// Reserved for a future Athena phase that integrates JanusGraph/ArangoDB.
+// LTPMContext holds Long-Term Persistent Memory retrieval results from the ArangoDB knowledge graph.
+// Contains entities, relationships, and persona data extracted and promoted from MTM cognitive chains.
 message LTPMContext {
   string status = 1;
 }
@@ -235,6 +244,9 @@ message STMEvent {
   google.protobuf.Timestamp timestamp = 4;
   // Optional metadata (origin_service, workflow_id, etc.).
   map<string, string> metadata = 5;
+  // External blob storage pointer if the payload was massive.
+  string blob_uri = 6;
+  string blob_mime_type = 7;
 }
 
 message DialoguePage {
@@ -294,4 +306,11 @@ message SearchResult {
   string source_type = 3; // "dialogue_page", "segment", etc.
   string source_id = 4;
   google.protobuf.Timestamp timestamp = 5;
+}
+
+message TriggerGraphAnalyticsRequest {}
+
+message TriggerGraphAnalyticsResponse {
+  bool success = 1;
+  string message = 2;
 }

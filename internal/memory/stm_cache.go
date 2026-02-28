@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"strconv"
 	"time"
@@ -24,7 +24,7 @@ func parseDurationEnv(key string, defHours int) time.Duration {
 		if parsed, err := strconv.Atoi(ttlStr); err == nil {
 			ttlHours = parsed
 		} else {
-			log.Printf("WARN: Invalid %s value: %s, using default: %d hours", key, ttlStr, defHours)
+			slog.Warn("Invalid TTL value", slog.String("key", key), slog.String("value", ttlStr), slog.Int("default_hours", defHours))
 		}
 	}
 	return time.Duration(ttlHours) * time.Hour
@@ -33,14 +33,16 @@ func parseDurationEnv(key string, defHours int) time.Duration {
 // STMEvent represents a single event in the short-term memory cache.
 // This can be a conversation turn, an agent's thought, an action, or an observation.
 type STMEvent struct {
-	Role      string              `json:"role"`                // Who the event belongs to (e.g., "user", "agent")
-	Type      models.STMEventType `json:"type"`                // Type of the event (e.g., "message", "thought")
-	Content   string              `json:"content"`             // The content of the event
-	Timestamp time.Time           `json:"timestamp"`           // When the event occurred
-	Metadata  map[string]string   `json:"metadata,omitempty"`  // Optional metadata (origin_service, context_type, etc.)
+	Role         string              `json:"role"`    // Who the event belongs to (e.g., "user", "agent")
+	Type         models.STMEventType `json:"type"`    // Type of the event (e.g., "message", "thought")
+	Content      string              `json:"content"` // The content of the event
+	BlobURI      string              `json:"blobUri,omitempty"`
+	BlobMimeType string              `json:"blobMimeType,omitempty"`
+	Timestamp    time.Time           `json:"timestamp"`          // When the event occurred
+	Metadata     map[string]string   `json:"metadata,omitempty"` // Optional metadata (origin_service, context_type, etc.)
 	// ChainID ties this event to its session chain so the worker can associate
 	// events with the correct chain without generating a new random ID.
-	ChainID   string              `json:"chainId,omitempty"`
+	ChainID string `json:"chainId,omitempty"`
 }
 
 // STMCache provides Short-Term Memory caching for conversations and agent events.
@@ -67,7 +69,7 @@ func (s *STMCache) GetSTMContext(ctx context.Context, tenantID, userID, agentID 
 	rawEvents, err := s.redis.LRange(cacheKey, 0, StmCacheMaxTurns-1)
 	if err != nil {
 		MetricSTMCacheOps.WithLabelValues("get", "error").Inc()
-		log.Printf("WARN: Failed to retrieve STM cache for user %s: %v", userID, err)
+		slog.Warn("Failed to retrieve STM cache", slog.String("user_id", userID), slog.String("error", err.Error()))
 		return []STMEvent{}, nil // Return empty on cache miss, don't fail
 	}
 
@@ -75,15 +77,18 @@ func (s *STMCache) GetSTMContext(ctx context.Context, tenantID, userID, agentID 
 	for _, rawEvent := range rawEvents {
 		var event STMEvent
 		if err := json.Unmarshal([]byte(rawEvent), &event); err != nil {
-			log.Printf("WARN: Failed to unmarshal STM event for user %s: %v", userID, err)
+			slog.Warn("Failed to unmarshal STM event", slog.String("user_id", userID), slog.String("error", err.Error()))
 			continue
 		}
 		events = append(events, event)
 	}
 
 	duration := time.Since(start)
-	log.Printf("INFO: STM cache retrieval completed - UserID: %s, Duration: %v, Events: %d",
-		userID, duration, len(events))
+	slog.Info("STM cache retrieval completed",
+		slog.String("user_id", userID),
+		slog.Duration("duration", duration),
+		slog.Int("event_count", len(events)),
+	)
 	MetricSTMCacheOps.WithLabelValues("get", "ok").Inc()
 
 	return events, nil
@@ -144,8 +149,11 @@ func (s *STMCache) AddSTMEvent(ctx context.Context, tenantID, userID, agentID st
 									_ = s.redis.Expire(cacheKey, StmCacheTTL)
 
 									duration := time.Since(start)
-									log.Printf("INFO: STM cache event coalesced - UserID: %s, Duration: %v, Count: %d",
-										userID, duration, newCount)
+									slog.Info("STM cache event coalesced",
+										slog.String("user_id", userID),
+										slog.Duration("duration", duration),
+										slog.Int("coalesced_count", newCount),
+									)
 									MetricSTMCacheOps.WithLabelValues("append", "coalesced").Inc()
 									return nil
 								}
@@ -171,12 +179,15 @@ func (s *STMCache) AddSTMEvent(ctx context.Context, tenantID, userID, agentID st
 
 	// Set expiration on the key to auto-cleanup stale conversations
 	if err := s.redis.Expire(cacheKey, StmCacheTTL); err != nil {
-		log.Printf("WARN: Failed to set expiration on STM cache for user %s: %v", userID, err)
+		slog.Warn("Failed to set expiration on STM cache", slog.String("user_id", userID), slog.String("error", err.Error()))
 	}
 
 	duration := time.Since(start)
-	log.Printf("INFO: STM cache event added - UserID: %s, Duration: %v, Type: %s",
-		userID, duration, event.Type)
+	slog.Info("STM cache event added",
+		slog.String("user_id", userID),
+		slog.Duration("duration", duration),
+		slog.String("type", string(event.Type)),
+	)
 	MetricSTMCacheOps.WithLabelValues("append", "ok").Inc()
 
 	return nil
@@ -194,7 +205,7 @@ func (s *STMCache) UpdateSTMEntries(ctx context.Context, tenantID, userID, agent
 
 	// Clear existing cache
 	if err := s.redis.Delete(cacheKey); err != nil {
-		log.Printf("WARN: Failed to clear existing STM cache for user %s: %v", userID, err)
+		slog.Warn("Failed to clear existing STM cache", slog.String("user_id", userID), slog.String("error", err.Error()))
 	}
 
 	// Add events in reverse order (newest first) to maintain chronological order
@@ -202,29 +213,32 @@ func (s *STMCache) UpdateSTMEntries(ctx context.Context, tenantID, userID, agent
 		event := events[i]
 		eventJSON, err := json.Marshal(event)
 		if err != nil {
-			log.Printf("WARN: Failed to marshal event for user %s: %v", userID, err)
+			slog.Warn("Failed to marshal event", slog.String("user_id", userID), slog.String("error", err.Error()))
 			continue
 		}
 
 		if err := s.redis.LPush(cacheKey, string(eventJSON)); err != nil {
-			log.Printf("WARN: Failed to push event to cache for user %s: %v", userID, err)
+			slog.Warn("Failed to push event to cache", slog.String("user_id", userID), slog.String("error", err.Error()))
 			continue
 		}
 	}
 
 	// Ensure we don't exceed max events
 	if err := s.redis.LTrim(cacheKey, 0, StmCacheMaxTurns-1); err != nil {
-		log.Printf("WARN: Failed to trim STM cache for user %s: %v", userID, err)
+		slog.Warn("Failed to trim STM cache", slog.String("user_id", userID), slog.String("error", err.Error()))
 	}
 
 	// Set expiration
 	if err := s.redis.Expire(cacheKey, StmCacheTTL); err != nil {
-		log.Printf("WARN: Failed to set expiration on STM cache for user %s: %v", userID, err)
+		slog.Warn("Failed to set expiration on STM cache", slog.String("user_id", userID), slog.String("error", err.Error()))
 	}
 
 	duration := time.Since(start)
-	log.Printf("INFO: STM cache updated - UserID: %s, Duration: %v, Events: %d",
-		userID, duration, len(events))
+	slog.Info("STM cache updated",
+		slog.String("user_id", userID),
+		slog.Duration("duration", duration),
+		slog.Int("event_count", len(events)),
+	)
 
 	return nil
 }
