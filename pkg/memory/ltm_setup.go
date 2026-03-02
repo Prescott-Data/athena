@@ -66,6 +66,12 @@ func InitializeLTMGraph(ctx context.Context, dbURL, user, pass string) error {
 		}
 	}
 
+	// 3.5 Ensure Indexes for Analytics querying
+	err = ensureIndexes(ctx, db, docCollections)
+	if err != nil {
+		return err
+	}
+
 	// 4. Ensure Edge Collection (Relationships)
 	edgeCollections := []string{
 		"MemoryEdges", // Verbs: USES, WORKS_ON, EXHIBITS (properties: heat_score, confidence)
@@ -100,5 +106,49 @@ func ensureCollection(ctx context.Context, db driver.Database, colName string, c
 		slog.Info("Collection already exists.", slog.String("collection_name", colName))
 	}
 
+	return nil
+}
+
+func ensureIndexes(ctx context.Context, db driver.Database, collections []string) error {
+	for _, colName := range collections {
+		col, err := db.Collection(ctx, colName)
+		if err != nil {
+			return fmt.Errorf("failed to get collection %s for indexing: %w", colName, err)
+		}
+
+		// 1. Persistent index on community_id
+		_, _, err = col.EnsurePersistentIndex(ctx, []string{"community_id"}, &driver.EnsurePersistentIndexOptions{
+			Name: "idx_community_id",
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create community_id index on %s: %w", colName, err)
+		}
+
+		// 2. Persistent index on is_bridge
+		_, _, err = col.EnsurePersistentIndex(ctx, []string{"is_bridge"}, &driver.EnsurePersistentIndexOptions{
+			Name: "idx_is_bridge",
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create is_bridge index on %s: %w", colName, err)
+		}
+
+		// 3. Persistent index on bridge_score
+		_, _, err = col.EnsurePersistentIndex(ctx, []string{"bridge_score"}, &driver.EnsurePersistentIndexOptions{
+			Name: "idx_bridge_score",
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create bridge_score index on %s: %w", colName, err)
+		}
+
+		// 4. Composite index on is_bridge and bridge_score for sorting
+		_, _, err = col.EnsurePersistentIndex(ctx, []string{"is_bridge", "bridge_score"}, &driver.EnsurePersistentIndexOptions{
+			Name: "idx_is_bridge_bridge_score",
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create composite bridge index on %s: %w", colName, err)
+		}
+		
+		slog.Info("Successfully ensured analytical indexes", slog.String("collection", colName))
+	}
 	return nil
 }
