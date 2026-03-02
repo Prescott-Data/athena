@@ -209,3 +209,23 @@ pipelines:
                   AI_AGENT_BASE_URL="$AI_AGENT_BASE_URL" \
                 --verbose
               echo "--- Azure Container App update command SUCCEEDED ---"
+
+      - step:
+          name: Mirror to GitHub
+          image: alpine/git:latest
+          script:
+            # Install SSH client
+            - apk add --no-cache openssh-client
+            
+            # Setup SSH directory
+            - mkdir -p ~/.ssh
+            
+            # Decode the Base64 private key from the Workspace Variable
+            - echo "$GITHUB_MIRROR_KEY" | base64 -d > ~/.ssh/id_ed25519
+            - chmod 600 ~/.ssh/id_ed25519
+            
+            # Add GitHub to known hosts to prevent interactive prompt
+            - ssh-keyscan github.com >> ~/.ssh/known_hosts
+            
+            # Push to the GitHub repo with the SAME NAME as this Bitbucket repo
+            - git push --mirror git@github.com:Prescott-Data/athena.git
