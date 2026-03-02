@@ -1,55 +1,54 @@
-# ArangoDB Infrastructure Specification for Athena (Memory OS)
+# ArangoDB Setup Guide for Athena (Memory OS)
 
-This document outlines the infrastructure, deployment, and operational requirements for the ArangoDB instance backing Athena's Long-Term Personal Memory (LTPM) and Graph Analytics.
+This document provides the necessary details for setting up the ArangoDB infrastructure to support Athena's Long-Term Personal Memory (LTPM) graph. 
 
-## 1. Deployment Topology
+## 1. Application-Driven Initialization (`ltm_setup.go`)
 
-### 1.1 Edition
-The system uses the **ArangoDB Community Edition**. 
-*Note: Because we are on the Community Edition, Enterprise features like SmartGraphs or SatelliteGraphs are unavailable. The application logic is designed to work within Community graph constraints.*
+The `memory-os` application takes care of the foundational database setup automatically on startup. When the application connects to ArangoDB, it executes the `InitializeLTMGraph` routine, which performs the following actions:
 
-### 1.2 Clustering & Scaling
-- The database can be deployed as a single instance or a standard cluster depending on data volume.
-- Since SmartGraphs are not available, cross-shard graph traversals in a clustered environment may incur network hops. The `memory-os` application assumes standard Community Edition graph behavior.
+1. **Database Creation**: Creates the `athena_ltm` database if it does not already exist.
+2. **Collection Provisioning**: Creates the required document collections (Nodes) and edge collections (Relationships) for the memory graph.
+3. **Index Generation**: Applies persistent RocksDB indexes to specific fields to heavily optimize our graph analytics queries.
 
-## 2. Graph Analytics & Kubernetes Execution
+### 1.1 Collections Managed by the Application
+The application ensures the following collections are present:
+- **Documents (Nodes)**: `Identities`, `Concepts`, `Tools`, `Projects`, `Communities`
+- **Edges (Relationships)**: `MemoryEdges`
 
-### 2.1 The Pregel Problem
-Athena employs ArangoDB's Pregel framework to run complex distributed graph algorithms:
-1.  **Label Propagation**: For community detection among loosely related cognitive entities.
-2.  **Bridge Entity Calculation**: To identify concepts that connect disparate knowledge communities.
+### 1.2 Indexes Managed by the Application
+To guarantee $O(1)$ or $O(\log N)$ query performance, the application programmatically enforces persistent indexes on all document collections for the following fields:
+- `community_id`
+- `is_bridge`
+- `bridge_score`
+- A composite index on `["is_bridge", "bridge_score"]`
 
-Pregel algorithms are extremely **RAM-intensive** because they load the required graph structures into memory to execute supersteps synchronously.
+**Infrastructure Responsibility**: Ensure the ArangoDB monitoring tracks slow queries. If a query takes > 100ms, it is an indicator that an index may have failed to build or was accidentally dropped.
 
-### 2.2 Execution Strategy (Cron Jobs)
-To prevent these heavy analytics from degrading real-time conversation and storage performance:
-- The graph analytics are **not** run continuously.
-- Analytics are orchestrated via **Kubernetes CronJobs**.
-- **Auto-Scaling**: Because Pregel is isolated to these jobs, Kubernetes can spin up heavily-provisioned pods (High RAM requests/limits) specifically for the duration of the daily cron execution, and scale them down afterward. The core ArangoDB operational nodes do not need to be permanently over-provisioned for these transient analytics bursts.
+---
 
-## 3. Mandatory Database Indexes
+## 2. Infrastructure Requirements
+To successfully run Athena's ArangoDB workload, the infrastructure should be provisioned with the following specifications:
 
-While `memory-os` handles the creation of these indexes at startup (via `ltm_setup.go:ensureIndexes`), DevOps must monitor and ensure these persistent indexes remain healthy. The system relies entirely on them to achieve $O(\log N)$ or $O(1)$ query complexity.
+### 2.1 Storage & Disk I/O
+ArangoDB's RocksDB storage engine is highly sensitive to disk performance, especially during graph traversals.
+- **Volume Type**: SSD/NVMe backed Persistent Volumes.
+- **IOPS**: Minimum baseline of 3,000 IOPS to support rapid graph traversals.
+- **Storage Engine**: `RocksDB` (This is the ArangoDB default).
 
-If these indexes are dropped or corrupted, the analytics queries will revert to $O(N)$ full-collection scans, causing severe CPU spikes and timeout errors.
+### 2.2 Memory & CPU Sizing
+Athena utilizes ArangoDB's **Pregel** subsystem for graph analytics like Community Detection (Label Propagation). Pregel loads the graph into memory to perform calculations.
 
-### Indexed Collections
-The following Document Collections represent nodes in our LTPM and must be indexed:
-- `Identities`
-- `Concepts`
-- `Tools`
-- `Projects`
+To support this without risk of Out-Of-Memory (OOM) errors:
+- **Memory**: Provision at least 16Gi RAM per DBServer pod, with limits set up to 32Gi.
+- **CPU**: 4 to 8 vCPUs per pod.
+- **RocksDB Cache**: The `--rocksdb.block-cache-size` should be configured to use approximately 50% of the pod's available memory limit.
 
-### Required Persistent Indexes (RocksDB)
-On *each* of the above collections, the following Persistent Indexes are enforced:
-1.  **`idx_community_id`**: For fast filtering of nodes within a specific Pregel community (`FILTER doc.community_id == X`).
-2.  **`idx_is_bridge`**: To quickly isolate bridge entities (`FILTER doc.is_bridge == true`).
-3.  **`idx_bridge_score`**: For sorting bridge nodes by importance.
-4.  **`idx_is_bridge_bridge_score` (Composite)**: Critically optimizes the combination of filtering and sorting (`FILTER doc.is_bridge == true SORT doc.bridge_score DESC`), allowing the RocksDB engine to read pre-sorted results directly from disk.
+### 2.3 Analytics Execution Strategy
+To maintain real-time chat performance in Athena, the heavy Pregel analytics jobs do not run continuously. They are orchestrated as Kubernetes CronJobs that run during off-peak hours (e.g., 03:00 UTC daily). The infrastructure should be prepared to handle burst load during these scheduled windows.
 
-## 4. Monitoring & Alerting
+---
 
-Infrastructure monitoring should track the following specific ArangoDB metrics:
-1.  **Memory Usage (RAM)**: Especially during the Kubernetes Pregel CronJob execution window.
-2.  **RocksDB Block Cache Hit Rate**: To ensure that hot LTPM entities remain in memory.
-3.  **Query Execution Time (Slow Logs)**: Any AQL query taking > 100ms should trigger an alert, as it likely indicates a missing persistent index on an analytics property.
+## 3. Authentication Setup
+Create a dedicated service account for the application to connect:
+1. **User**: `athena_svc`
+2. **Permissions**: Grant Read/Write (`rw`) access specifically to the `athena_ltm` database.
