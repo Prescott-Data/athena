@@ -63,6 +63,8 @@ type CognitiveChain struct {
 	// --- END NEW FIELDS ---
 	// Service-level metadata (e.g. origin_service, context_type) set at session creation.
 	Metadata map[string]string `json:"metadata" bson:"metadata,omitempty"`
+	// Transient — populated on vector search, not persisted to MongoDB.
+	SimilarityScore float32 `json:"similarityScore,omitempty" bson:"-"`
 }
 
 // CognitiveChainCheckTask represents a lightweight task for background processing.
