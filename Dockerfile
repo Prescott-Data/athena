@@ -13,8 +13,9 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the application
+# Build the application binaries
 RUN CGO_ENABLED=0 GOOS=linux go build -o memory-server ./cmd/memory-server/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -o init-ltm ./cmd/init-ltm/main.go
 
 # Runtime stage
 FROM alpine:latest
@@ -28,11 +29,12 @@ RUN adduser -D -s /bin/sh appuser
 # Set working directory
 WORKDIR /root/
 
-# Copy the binary from builder stage
+# Copy the binaries from builder stage
 COPY --from=builder /app/memory-server .
+COPY --from=builder /app/init-ltm .
 
 # Change ownership to non-root user
-RUN chown appuser:appuser memory-server
+RUN chown appuser:appuser memory-server init-ltm
 
 # Switch to non-root user
 USER appuser

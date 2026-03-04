@@ -16,7 +16,7 @@ import (
 func setupProcessorTest(t *testing.T, mockClient *http.Client) *ParallelProcessor {
 	t.Helper()
 	// The stmStore is needed as a dependency for the processor's analysis tasks.
-	mockStore := NewSTMStore(nil, nil)
+	mockStore := NewSTMStore(nil, nil, nil)
 	if mockClient != nil {
 		// Inject the mock client into the store, which is used by the topic analyzer.
 		mockStore.HTTPClient = mockClient
