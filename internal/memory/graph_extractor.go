@@ -45,17 +45,21 @@ func (s *STMStore) ExtractGraphFromSummary(ctx context.Context, summary string) 
 		return nil, fmt.Errorf("llm circuit breaker is open for graph extraction")
 	}
 
-	// Define strict JSON Schema for the response matching ArangoDB collections
+	// Define strict JSON Schema for the response matching ArangoDB collections.
+	// Azure OpenAI structured outputs require "additionalProperties": false on every
+	// object, and all properties must be listed in "required" when strict=true.
 	jsonSchema := map[string]interface{}{
 		"name":   "graph_extraction_schema",
 		"strict": true,
 		"schema": map[string]interface{}{
-			"type": "object",
+			"type":                 "object",
+			"additionalProperties": false,
 			"properties": map[string]interface{}{
 				"nodes": map[string]interface{}{
 					"type": "array",
 					"items": map[string]interface{}{
-						"type": "object",
+						"type":                 "object",
+						"additionalProperties": false,
 						"properties": map[string]interface{}{
 							"id": map[string]interface{}{
 								"type":        "string",
@@ -75,7 +79,8 @@ func (s *STMStore) ExtractGraphFromSummary(ctx context.Context, summary string) 
 				"edges": map[string]interface{}{
 					"type": "array",
 					"items": map[string]interface{}{
-						"type": "object",
+						"type":                 "object",
+						"additionalProperties": false,
 						"properties": map[string]interface{}{
 							"from": map[string]interface{}{
 								"type":        "string",
@@ -99,14 +104,14 @@ func (s *STMStore) ExtractGraphFromSummary(ctx context.Context, summary string) 
 							},
 							"context_nuance": map[string]interface{}{
 								"type":        "string",
-								"description": "The exact human meaning if relation is RELATES_TO",
+								"description": "The exact human meaning if relation is RELATES_TO, empty string otherwise",
 							},
 							"confidence": map[string]interface{}{
 								"type":        "number",
 								"description": "Confidence score 0.0 to 1.0",
 							},
 						},
-						"required": []string{"from", "to", "relation", "confidence"},
+						"required": []string{"from", "to", "relation", "context_nuance", "confidence"},
 					},
 				},
 			},
