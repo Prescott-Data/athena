@@ -64,7 +64,7 @@ func (w *Worker) processNextTask(ctx context.Context, workerID int) error {
 	}
 
 	// BRPop returns nil with no error when the queue is empty (timeout)
-	if result == nil || len(result) < 2 {
+	if len(result) < 2 {
 		time.Sleep(1 * time.Second)
 		return nil
 	}
@@ -130,7 +130,7 @@ func (w *Worker) processNextTask(ctx context.Context, workerID int) error {
 }
 
 // reEnqueueTask puts the failed task back into the queue system
-func (w *Worker) reEnqueueTask(ctx context.Context, scopedQueueName string, task *TaskEnvelope, payload *models.CognitiveChainCheckTask) error {
+func (w *Worker) reEnqueueTask(_ context.Context, scopedQueueName string, task *TaskEnvelope, payload *models.CognitiveChainCheckTask) error {
 	// Update payload in task envelope
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
@@ -190,11 +190,25 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 	var allEvents []models.CognitiveEvent
 
 	for i, eventStr := range eventStrings {
-		var evt models.CognitiveEvent
-		if err := json.Unmarshal([]byte(eventStr), &evt); err != nil {
+		var stmEvt STMEvent
+		if err := json.Unmarshal([]byte(eventStr), &stmEvt); err != nil {
 			log.Printf("WARNING: Failed to unmarshal event at index %d: %v", i, err)
 			continue
 		}
+
+		meta := make(map[string]interface{})
+		for k, v := range stmEvt.Metadata {
+			meta[k] = v
+		}
+
+		evt := models.CognitiveEvent{
+			Role:      stmEvt.Role,
+			Type:      stmEvt.Type,
+			Content:   stmEvt.Content,
+			CreatedAt: stmEvt.Timestamp,
+			Metadata:  meta,
+		}
+
 		allEvents = append(allEvents, evt)
 		if evt.Role == "user" {
 			userMessages = append(userMessages, parsedEvent{event: evt, index: i})
@@ -304,10 +318,21 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 		var oldChainEvents []models.CognitiveEvent
 		// Iterate in reverse to maintain chronological order (LPUSH makes newest first)
 		for i := len(oldChainStrings) - 1; i >= 0; i-- {
-			var event models.CognitiveEvent
-			if err := json.Unmarshal([]byte(oldChainStrings[i]), &event); err != nil {
+			var stmEvt STMEvent
+			if err := json.Unmarshal([]byte(oldChainStrings[i]), &stmEvt); err != nil {
 				log.Printf("WARNING: Failed to unmarshal event in old chain: %v", err)
 				continue
+			}
+			meta := make(map[string]interface{})
+			for k, v := range stmEvt.Metadata {
+				meta[k] = v
+			}
+			event := models.CognitiveEvent{
+				Role:      stmEvt.Role,
+				Type:      stmEvt.Type,
+				Content:   stmEvt.Content,
+				CreatedAt: stmEvt.Timestamp,
+				Metadata:  meta,
 			}
 			oldChainEvents = append(oldChainEvents, event)
 		}
@@ -339,4 +364,3 @@ func truncateLog(s string, max int) string {
 	}
 	return s
 }
-

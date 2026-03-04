@@ -1,10 +1,12 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"time"
 
 	"bitbucket.org/dromos/memory-os/api/grpc/gen"
@@ -13,6 +15,7 @@ import (
 	"bitbucket.org/dromos/memory-os/internal/database"
 	"bitbucket.org/dromos/memory-os/internal/memory"
 	"bitbucket.org/dromos/memory-os/internal/models"
+	"bitbucket.org/dromos/memory-os/internal/storage"
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -31,22 +34,29 @@ type stmCache interface {
 // MemoryServer represents the main Memory OS server
 type MemoryServer struct {
 	gen.UnimplementedMemoryServiceServer // Embed for forward compatibility
-	config *config.Config
-	stmStore *memory.STMStore
-	stmCache stmCache
-	taskQueue memory.TaskQueuer
-	mongoClient *mongo.Client
-	redisClient cache.Interface
+	config                               *config.Config
+	stmStore                             *memory.STMStore
+	stmCache                             stmCache
+	taskQueue                            memory.TaskQueuer
+	mongoClient                          *mongo.Client
+	redisClient                          cache.Interface
+	blobStore                            storage.BlobStore
+	promoter                             *memory.Promoter
 	// getIDsFromSessionFunc allows mocking the DB call in tests
 	getIDsFromSessionFunc func(s *MemoryServer, ctx context.Context, sessionID string) (string, string, string, error)
+}
+
+// SetPromoter injects the background Promoter so it can be manually triggered by the API
+func (s *MemoryServer) SetPromoter(p *memory.Promoter) {
+	s.promoter = p
 }
 
 // NewMemoryServer creates a new Memory OS server instance
 func NewMemoryServer(cfg *config.Config) (*MemoryServer, error) {
 	// Initialize database connections
 	mongoClient, db, err := database.ConnectMongoDB(database.ConnectionConfig{
-		URI: cfg.Database.MongoDB.URI,
-		DatabaseName: cfg.Database.MongoDB.Database,
+		URI:            cfg.Database.MongoDB.URI,
+		DatabaseName:   cfg.Database.MongoDB.Database,
 		ConnectTimeout: 30 * time.Second,
 	})
 	if err != nil {
@@ -58,18 +68,24 @@ func NewMemoryServer(cfg *config.Config) (*MemoryServer, error) {
 		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
 	}
 
+	blobStore, err := storage.NewBlobStoreFromEnv()
+	if err != nil {
+		slog.Warn("Failed to initialize blob storage", slog.String("error", err.Error()))
+	}
+
 	// Initialize memory components
-	stmStore := memory.NewSTMStore(db, redisClient)
+	stmStore := memory.NewSTMStore(db, redisClient, blobStore)
 	stmCache := memory.NewSTMCache(redisClient)
 	taskQueue := memory.NewTaskQueue(redisClient)
 
 	server := &MemoryServer{
-		config: cfg,
-		stmStore: stmStore,
-		stmCache: stmCache,
-		taskQueue: taskQueue,
+		config:      cfg,
+		stmStore:    stmStore,
+		stmCache:    stmCache,
+		taskQueue:   taskQueue,
 		mongoClient: mongoClient,
 		redisClient: redisClient,
+		blobStore:   blobStore,
 	}
 	// Point the function field to the real method
 	server.getIDsFromSessionFunc = (*MemoryServer).getIDsFromSession
@@ -84,7 +100,7 @@ func (s *MemoryServer) Close() error {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := s.mongoClient.Disconnect(ctx); err != nil {
-			log.Printf("Error closing MongoDB connection: %v", err)
+			slog.Error("Error closing MongoDB connection", slog.String("error", err.Error()))
 		}
 	}
 
@@ -123,16 +139,17 @@ func stmEventToCognitiveEvent(tenantID, userID, agentID, chainID string, event m
 		metadata[k] = v
 	}
 	return &models.CognitiveEvent{
-		TenantID:  tenantID,
-		UserID:    userID,
-		AgentID:   agentID,
-		ChainID:   chainID,
-		Role:      event.Role,
-		Type:      event.Type,
-		Content:   event.Content,
-		Status:    "in_stm",
-		Metadata:  metadata,
-		CreatedAt: event.Timestamp,
+		TenantID:     tenantID,
+		UserID:       userID,
+		AgentID:      agentID,
+		ChainID:      chainID,
+		Role:         event.Role,
+		Content:      event.Content,
+		BlobURI:      event.BlobURI,
+		BlobMimeType: event.BlobMimeType,
+		Status:       "in_stm",
+		Metadata:     metadata,
+		CreatedAt:    event.Timestamp,
 	}
 }
 
@@ -155,47 +172,47 @@ func (s *MemoryServer) StoreInteraction(ctx context.Context, req *gen.StoreInter
 
 	// Always save the user event to the STM cache
 	if err := s.stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, userEvent); err != nil {
-		log.Printf("ERROR: Failed to add user event to STM cache: %v", err)
+		slog.Error("Failed to add user event to STM cache", slog.String("error", err.Error()))
 	}
 
 	// Persist user event to MongoDB immediately for durability (P5)
 	cogEvent := stmEventToCognitiveEvent(tenantID, userID, agentID, sessionID, userEvent)
 	if _, err := s.stmStore.StoreCognitiveEvent(ctx, cogEvent); err != nil {
-		log.Printf("WARN: Failed to persist user event to MongoDB for session %s: %v", sessionID, err)
+		slog.Warn("Failed to persist user event to MongoDB", slog.String("session_id", sessionID), slog.String("error", err.Error()))
 	}
 
 	// Conditionally trigger the worker only for user messages
 	if userEvent.Role == "user" && userEvent.Type == models.STMEventTypeMessage {
 		taskPayload := models.CognitiveChainCheckTask{
-			ID: uuid.New().String(),
-			Type: memory.TaskTypeCognitiveChainCheck,
-			TenantID: tenantID,
-			UserID: userID,
-			AgentID: agentID,
+			ID:        uuid.New().String(),
+			Type:      memory.TaskTypeCognitiveChainCheck,
+			TenantID:  tenantID,
+			UserID:    userID,
+			AgentID:   agentID,
 			Timestamp: time.Now(),
 		}
 
 		payloadJSON, err := json.Marshal(taskPayload)
 		if err != nil {
-			log.Printf("ERROR: Failed to marshal cognitive check task payload: %v", err)
+			slog.Error("Failed to marshal cognitive check task payload", slog.String("error", err.Error()))
 		} else {
 			envelope := memory.TaskEnvelope{
-				ID: taskPayload.ID,
-				Type: taskPayload.Type,
-				Payload: payloadJSON,
+				ID:         taskPayload.ID,
+				Type:       taskPayload.Type,
+				Payload:    payloadJSON,
 				EnqueuedAt: time.Now(),
 			}
 
 			envelopeJSON, err := json.Marshal(envelope)
 			if err != nil {
-				log.Printf("ERROR: Failed to marshal task envelope: %v", err)
+				slog.Error("Failed to marshal task envelope", slog.String("error", err.Error()))
 			} else {
 				scopedQueueName := memory.GenerateScopedQueueName(tenantID, userID, agentID)
 				if err := s.redisClient.LPush(scopedQueueName, string(envelopeJSON)); err != nil {
-					log.Printf("ERROR: Failed to enqueue cognitive check task: %v", err)
+					slog.Error("Failed to enqueue cognitive check task", slog.String("error", err.Error()))
 				} else {
 					if err := s.redisClient.LPush(memory.GlobalWorkQueueName, scopedQueueName); err != nil {
-						log.Printf("ERROR: Failed to push to global work queue: %v", err)
+						slog.Error("Failed to push to global work queue", slog.String("error", err.Error()))
 					}
 				}
 			}
@@ -212,20 +229,20 @@ func (s *MemoryServer) StoreInteraction(ctx context.Context, req *gen.StoreInter
 			ChainID:   sessionID,
 		}
 		if err := s.stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, agentEvent); err != nil {
-			log.Printf("ERROR: Failed to add agent event to STM cache: %v", err)
+			slog.Error("Failed to add agent event to STM cache", slog.String("error", err.Error()))
 		}
 
 		// Persist agent event to MongoDB immediately for durability (P5)
 		agentCogEvent := stmEventToCognitiveEvent(tenantID, userID, agentID, sessionID, agentEvent)
 		if _, err := s.stmStore.StoreCognitiveEvent(ctx, agentCogEvent); err != nil {
-			log.Printf("WARN: Failed to persist agent event to MongoDB for session %s: %v", sessionID, err)
+			slog.Warn("Failed to persist agent event to MongoDB", slog.String("session_id", sessionID), slog.String("error", err.Error()))
 		}
 	}
 
-	log.Printf("INFO: Interaction processed successfully for SessionID: %s", sessionID)
+	slog.Info("Interaction processed successfully", slog.String("session_id", sessionID))
 
 	return &gen.StoreInteractionResponse{
-		Success: true,
+		Success:       true,
 		InteractionId: "", // The concept of a single interaction ID is now obsolete
 	}, nil
 }
@@ -254,28 +271,54 @@ func (s *MemoryServer) StoreEvent(ctx context.Context, req *gen.StoreEventReques
 		role = "system"
 	}
 
+	blobURI := ""
+	blobMimeType := ""
+
+	if len(req.Payload) > 0 {
+		if s.blobStore == nil {
+			return nil, status.Errorf(codes.FailedPrecondition, "blob storage is not configured but binary payload was provided")
+		}
+		key := fmt.Sprintf("%s/%s/%s_%d", tenantID, sessionID, time.Now().Format("20060102150405"), time.Now().UnixNano())
+		uri, err := s.blobStore.Upload(ctx, key, bytes.NewReader(req.Payload), req.MimeType)
+		if err != nil {
+			memory.BlobStorageOps.WithLabelValues("upload", "configured", "error").Inc()
+			slog.Error("Failed to upload payload to blob storage", slog.String("error", err.Error()))
+			return nil, status.Errorf(codes.Internal, "failed to upload payload: %v", err)
+		}
+		memory.BlobStorageOps.WithLabelValues("upload", "configured", "success").Inc()
+		memory.BlobPayloadBytes.WithLabelValues("configured").Observe(float64(len(req.Payload)))
+		blobURI = uri
+		blobMimeType = req.MimeType
+
+		if req.Content == "" {
+			req.Content = fmt.Sprintf("System Observation: Uploaded a %d byte payload (type: %s)", len(req.Payload), req.MimeType)
+		}
+	}
+
 	event := memory.STMEvent{
-		Role:      role,
-		Type:      eventType,
-		Content:   req.Content,
-		Timestamp: time.Now(),
-		Metadata:  req.Metadata,
+		Role:         role,
+		Type:         eventType,
+		Content:      req.Content,
+		BlobURI:      blobURI,
+		BlobMimeType: blobMimeType,
+		Timestamp:    time.Now(),
+		Metadata:     req.Metadata,
 	}
 
 	if err := s.stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, event); err != nil {
-		log.Printf("ERROR: Failed to add event to STM cache: %v", err)
+		slog.Error("Failed to add event to STM cache", slog.String("error", err.Error()))
 		return nil, status.Errorf(codes.Internal, "failed to store event: %v", err)
 	}
 
 	// Persist event to MongoDB immediately for durability (P5)
 	cogEvent := stmEventToCognitiveEvent(tenantID, userID, agentID, sessionID, event)
 	if _, err := s.stmStore.StoreCognitiveEvent(ctx, cogEvent); err != nil {
-		log.Printf("WARN: Failed to persist event to MongoDB for session %s: %v", sessionID, err)
+		slog.Warn("Failed to persist event to MongoDB", slog.String("session_id", sessionID), slog.String("error", err.Error()))
 	}
 
 	s.enqueueChainCheck(tenantID, userID, agentID)
 
-	log.Printf("INFO: Event stored (type=%s, role=%s) for session %s", req.Type, role, sessionID)
+	slog.Info("Event stored", slog.String("type", req.Type), slog.String("role", role), slog.String("session_id", sessionID))
 
 	return &gen.StoreEventResponse{
 		Success: true,
@@ -534,5 +577,35 @@ func (s *MemoryServer) SearchMemory(ctx context.Context, req *gen.SearchMemoryRe
 
 	return &gen.SearchMemoryResponse{
 		Results: results,
+	}, nil
+}
+
+// TriggerGraphAnalytics manually kicks off the background graph analytics jobs (Community Detection and Bridge Entities)
+func (s *MemoryServer) TriggerGraphAnalytics(ctx context.Context, req *gen.TriggerGraphAnalyticsRequest) (*gen.TriggerGraphAnalyticsResponse, error) {
+	log.Printf("INFO: Received request to trigger graph analytics")
+
+	if s.promoter == nil {
+		return nil, status.Errorf(codes.Internal, "graph analytics engine is not initialized or available (promoter is nil)")
+	}
+
+	// Because this can be a long-running job, we execute it in a separate goroutine
+	// and immediately return success to the caller to avoid gRPC timeouts.
+	go func() {
+		// Use a detached background context since the gRPC request context will be cancelled
+		// as soon as we return the response.
+		bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+
+		err := s.promoter.TriggerAnalytics(bgCtx)
+		if err != nil {
+			log.Printf("ERROR: Graph analytics job failed: %v", err)
+		} else {
+			log.Printf("INFO: Graph analytics job completed successfully")
+		}
+	}()
+
+	return &gen.TriggerGraphAnalyticsResponse{
+		Success: true,
+		Message: "Graph analytics job (Community Detection and Bridge Entities) has been triggered in the background.",
 	}, nil
 }

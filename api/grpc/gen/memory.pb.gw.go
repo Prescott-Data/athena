@@ -635,6 +635,24 @@ func local_request_MemoryService_HealthCheck_0(ctx context.Context, marshaler ru
 
 }
 
+func request_MemoryService_TriggerGraphAnalytics_0(ctx context.Context, marshaler runtime.Marshaler, client MemoryServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var protoReq TriggerGraphAnalyticsRequest
+	var metadata runtime.ServerMetadata
+
+	msg, err := client.TriggerGraphAnalytics(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
+	return msg, metadata, err
+
+}
+
+func local_request_MemoryService_TriggerGraphAnalytics_0(ctx context.Context, marshaler runtime.Marshaler, server MemoryServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var protoReq TriggerGraphAnalyticsRequest
+	var metadata runtime.ServerMetadata
+
+	msg, err := server.TriggerGraphAnalytics(ctx, &protoReq)
+	return msg, metadata, err
+
+}
+
 // RegisterMemoryServiceHandlerServer registers the http handlers for service MemoryService to "mux".
 // UnaryRPC     :call MemoryServiceServer directly.
 // StreamingRPC :currently unsupported pending https://github.com/grpc/grpc-go/issues/906.
@@ -902,6 +920,30 @@ func RegisterMemoryServiceHandlerServer(ctx context.Context, mux *runtime.ServeM
 		}
 
 		forward_MemoryService_HealthCheck_0(ctx, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+
+	})
+
+	mux.Handle("POST", pattern_MemoryService_TriggerGraphAnalytics_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		var stream runtime.ServerTransportStream
+		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		var err error
+		ctx, err = runtime.AnnotateIncomingContext(ctx, mux, req, "/memory.v1.MemoryService/TriggerGraphAnalytics", runtime.WithHTTPPathPattern("/api/v1/admin/analytics/trigger"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := local_request_MemoryService_TriggerGraphAnalytics_0(ctx, inboundMarshaler, server, req, pathParams)
+		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
+		ctx = runtime.NewServerMetadataContext(ctx, md)
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+
+		forward_MemoryService_TriggerGraphAnalytics_0(ctx, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 
 	})
 
@@ -1177,6 +1219,27 @@ func RegisterMemoryServiceHandlerClient(ctx context.Context, mux *runtime.ServeM
 
 	})
 
+	mux.Handle("POST", pattern_MemoryService_TriggerGraphAnalytics_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		var err error
+		ctx, err = runtime.AnnotateContext(ctx, mux, req, "/memory.v1.MemoryService/TriggerGraphAnalytics", runtime.WithHTTPPathPattern("/api/v1/admin/analytics/trigger"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := request_MemoryService_TriggerGraphAnalytics_0(ctx, inboundMarshaler, client, req, pathParams)
+		ctx = runtime.NewServerMetadataContext(ctx, md)
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+
+		forward_MemoryService_TriggerGraphAnalytics_0(ctx, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+
+	})
+
 	return nil
 }
 
@@ -1202,6 +1265,8 @@ var (
 	pattern_MemoryService_GetSegments_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3, 2, 4}, []string{"api", "v1", "sessions", "session_id", "segments"}, ""))
 
 	pattern_MemoryService_HealthCheck_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"api", "v1", "health"}, ""))
+
+	pattern_MemoryService_TriggerGraphAnalytics_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 2, 4}, []string{"api", "v1", "admin", "analytics", "trigger"}, ""))
 )
 
 var (
@@ -1226,4 +1291,6 @@ var (
 	forward_MemoryService_GetSegments_0 = runtime.ForwardResponseMessage
 
 	forward_MemoryService_HealthCheck_0 = runtime.ForwardResponseMessage
+
+	forward_MemoryService_TriggerGraphAnalytics_0 = runtime.ForwardResponseMessage
 )

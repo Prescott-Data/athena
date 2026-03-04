@@ -42,7 +42,7 @@ func TestSTMStore_LLMIntegration(t *testing.T) {
 
 	// Create STM store with test clients
 	db := mongoClient.Database("test_docintel_llm")
-	stmStore := NewSTMStore(db, redisClient)
+	stmStore := NewSTMStore(db, redisClient, nil)
 
 	// Test topic continuity analysis
 	t.Run("TopicContinuityAnalysis", func(t *testing.T) {

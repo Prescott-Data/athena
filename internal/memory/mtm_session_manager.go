@@ -128,7 +128,7 @@ func (sm *SessionManager) findRecentCandidates(ctx context.Context, newChain *mo
 	filter := bson.M{
 		"userId":    newChain.UserID,
 		"status":    "active",
-		"startedat": bson.M{"$gte": cutoffTime},
+		"startedAt": bson.M{"$gte": cutoffTime},
 		"chainId":   bson.M{"$ne": newChain.ChainID},
 	}
 
@@ -356,12 +356,13 @@ func (sm *SessionManager) mergeChains(ctx context.Context, targetChain *models.C
 
 	update := bson.M{
 		"$set": bson.M{
-			"summary":    combinedSummary,
-			"topic":      mergedTopic,
-			"eventCount": targetChain.EventCount + newChain.EventCount,
-			"lastEventAt":     newChain.LastEventAt,
-			"entities":        mergedEntities,
-			"updatedAt":       now,
+			"summary":     combinedSummary,
+			"topic":       mergedTopic,
+			"eventCount":  targetChain.EventCount + newChain.EventCount,
+			"startedAt":   targetChain.StartedAt, // typically the older one
+			"lastEventAt": newChain.LastEventAt,  // typically the newer one
+			"entities":    mergedEntities,
+			"updatedAt":   now,
 		},
 	}
 
@@ -489,7 +490,7 @@ func (sm *SessionManager) CleanupOldChains(ctx context.Context, userID string) e
 	}
 
 	excessCount := count - int64(sm.config.MaxChainsPerUser)
-	findOptions := options.Find().SetSort(bson.D{bson.E{Key: "startedat", Value: 1}}).SetLimit(excessCount)
+	findOptions := options.Find().SetSort(bson.D{bson.E{Key: "startedAt", Value: 1}}).SetLimit(excessCount)
 	cursor, err := collection.Find(ctx, filter, findOptions)
 	if err != nil {
 		return fmt.Errorf("failed to find old chains: %w", err)

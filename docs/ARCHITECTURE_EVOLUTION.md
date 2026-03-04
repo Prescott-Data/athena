@@ -57,6 +57,33 @@ Chains that lose their "gravitational tether" (Heat Score) are no longer part of
 
 ---
 
+## 5. LTM Promotion: Knowledge Graph Crystallization
+**The Nuclear Fusion Principle**
+
+### Technical Implementation
+*   **Graph Extraction:** A background Promoter evaluates cognitive chains that exceed a configurable heat threshold. Using an LLM, it extracts structured entity-relationship triples (e.g., `User → USES → Python`, `User → INTERESTED_IN → Machine Learning`).
+*   **ArangoDB Persistence:** The `LTMWriter` performs AQL `UPSERT` operations against the ArangoDB knowledge graph. Entities are typed into collections (`Identities`, `Concepts`, `Tools`, `Topics`, `Locations`) and edges are stored in `MemoryEdges`.
+*   **Balanced Merge:** When an edge already exists, the weight is incremented and confidence is averaged: `(OLD.confidence + NEW.confidence) / 2`. This stabilizes knowledge over time.
+
+### Concept: Stellar Nucleosynthesis
+Just as stars fuse lighter elements into heavier, more stable ones under immense pressure, the Promoter takes volatile, high-heat conversations and crystallizes their most important relationships into permanent graph structures. The knowledge graph is the "iron core" — the most stable, long-lived representation of what the AI has learned.
+
+---
+
+## 6. Blob Storage: The Claim Check Pattern
+**The Cargo Bay Principle**
+
+### Technical Implementation
+*   **Heavy Payload Detection:** When a `StoreEvent` request carries a binary `Payload` or an explicit `MimeType`, the server recognizes it as a heavy payload.
+*   **Stream Offloading:** Instead of storing the payload directly in Redis or MongoDB, the server streams it to the configured Blob Store (MinIO for local development, AWS S3/GCS/Azure for production).
+*   **Pointer Storage:** Only a lightweight `BlobURI` (e.g., `s3://athena-blobs/events/abc123`) and `BlobMimeType` are persisted in the `CognitiveEvent` and `STMEvent` structs.
+*   **Garbage Collection:** When the Archiver freezes cold chains, it also scans for associated `BlobURIs` and physically deletes them from the Blob Store.
+
+### Concept: Cargo vs. Manifest
+A ship doesn't store its entire cargo manifest inside the bridge's navigation computer. Heavy containers stay in the cargo bay; only their tracking numbers are on the bridge. Similarly, Redis and MongoDB remain lean and performant "bridge computers," while raw payloads sit in purpose-built "cargo bays" (S3 buckets). When a ship is decommissioned (chain archived), its cargo is offloaded too.
+
+---
+
 ## Summary of Impact
 
 | Layer | Implementation | Physical Analogy | Benefit |
@@ -64,4 +91,6 @@ Chains that lose their "gravitational tether" (Heat Score) are no longer part of
 | **Ingestion** | Dual-Write (Redis + Mongo) | Planetary Trajectory | Immutable audit + Active context |
 | **Protection** | Event Coalescing | Law of Equal Areas | Prevents context window flooding |
 | **Retention** | 12h Access Cooldown | Law of Harmonies | Prevents heat inflation (Spaced Repetition) |
-| **Optimization**| ArchiveColdChains | Escape Velocity | Milvus cost reduction + Performance |
+| **Optimization** | ArchiveColdChains | Escape Velocity | Milvus cost reduction + Performance |
+| **Knowledge** | LTM Promotion (ArangoDB) | Nuclear Fusion | Permanent structured understanding |
+| **Offloading** | Blob Storage (Claim Check) | Cargo Bay | Keeps operational DBs lightweight |
