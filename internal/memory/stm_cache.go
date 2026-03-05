@@ -117,9 +117,14 @@ func (s *STMCache) AddSTMEvent(ctx context.Context, tenantID, userID, agentID st
 			if err == nil && lastEventJSON != "" {
 				var lastEvent STMEvent
 				if err := json.Unmarshal([]byte(lastEventJSON), &lastEvent); err == nil {
-					// Check if the recent event is also an observation with the same execution_id
+					// Check if the recent event is also an observation with the same execution_id.
+					// Only coalesce if the step_id is also the same — different step_ids are
+					// sequential workflow steps and must be kept as separate events.
 					if lastEvent.Type == models.STMEventTypeObservation {
-						if lastExecID, ok := lastEvent.Metadata["execution_id"]; ok && lastExecID == execID {
+						newStepID := event.Metadata["step_id"]
+						lastStepID := lastEvent.Metadata["step_id"]
+						sameStep := newStepID == "" || newStepID == lastStepID
+						if lastExecID, ok := lastEvent.Metadata["execution_id"]; ok && lastExecID == execID && sameStep {
 							// Coalesce: Update content and merge metadata
 							lastEvent.Content = event.Content
 							lastEvent.Timestamp = event.Timestamp
