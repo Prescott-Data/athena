@@ -175,6 +175,14 @@ func main() {
 		log.Printf("WARN: Failed to initialize LTMWriter (is ArangoDB running and InitializeLTMGraph called?): %v", err)
 	}
 
+	ltmReader, err := memory.NewLTMReader(promoterCtx, dbURL, dbUser, dbPass, dbName)
+	if err != nil {
+		log.Printf("WARN: Failed to initialize LTMReader: %v", err)
+	} else {
+		memoryServer.SetLTMReader(ltmReader)
+		log.Printf("INFO: LTMReader initialized — SearchMemory will include ArangoDB graph results")
+	}
+
 	promoter := memory.NewPromoter(mongoDB, memoryServer.GetSTMStore(), ltmWriter)
 	memoryServer.SetPromoter(promoter)
 
