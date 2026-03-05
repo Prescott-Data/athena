@@ -8,6 +8,7 @@ import (
 
 	"github.com/arangodb/go-driver"
 	"github.com/arangodb/go-driver/http"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // LTMReader handles querying extracted graph data from ArangoDB.
@@ -52,22 +53,28 @@ func NewLTMReader(ctx context.Context, dbURL, user, pass, dbName string) (*LTMRe
 }
 
 // FetchContext retrieves a sub-graph starting from the provided entity node IDs.
+// It executes an AQL graph traversal (1-2 hops) from each start vertex via MemoryEdges,
+// filtering by confidence >= 0.5 and ranking by weight and heat_score.
 func (r *LTMReader) FetchContext(ctx context.Context, tenantID string, startNodeIDs []string) (*GraphExtraction, error) {
 	if len(startNodeIDs) == 0 {
 		return &GraphExtraction{Nodes: []GraphNode{}, Edges: []GraphEdge{}}, nil
 	}
 
-	// This AQL query takes the array of start nodes (e.g. ["Concepts/customer_churn", "Identities/agent_007"])
-	// and traverses OUTBOUND from them along the MemoryEdges collection up to depth 2.
-	// It filters for minimum confidence and sorts by weight/heat to get the most relevant connections.
+	slog.Debug("LTM fetch starting",
+		slog.String("tenant_id", tenantID),
+		slog.Int("start_nodes_count", len(startNodeIDs)),
+		slog.Any("start_nodes", startNodeIDs),
+	)
+
+	// AQL traversal: from each start node, hop 1-2 edges along MemoryEdges.
+	// Results are ranked by weight (frequency) and heat_score (recency).
+	// Only edges with confidence >= 0.5 are returned.
 	query := `
 		FOR startNode IN @startNodes
-			// 1..2 means depth 1 to 2 hops. ANY means outbound or inbound.
 			FOR v, e, p IN 1..2 ANY startNode MemoryEdges
 				FILTER e != null && e.confidence >= 0.5
 				SORT e.weight DESC, e.heat_score DESC
 				LIMIT 50
-				// Return the connected node and the edge that connects them
 				RETURN DISTINCT {
 					node: v,
 					edge: e
@@ -78,16 +85,21 @@ func (r *LTMReader) FetchContext(ctx context.Context, tenantID string, startNode
 		"startNodes": startNodeIDs,
 	}
 
-	// Make sure we have a metric for this
-	startTimer := time.Now()
+	fetchStart := time.Now()
+	timer := prometheus.NewTimer(LTMFetchDuration)
 	cursor, err := r.db.Query(ctx, query, bindVars)
+	timer.ObserveDuration()
+
 	if err != nil {
-		slog.Error("Failed to execute AQL fetch query", slog.String("error", err.Error()), slog.Any("query_vars", bindVars))
+		LTMFetchErrors.Inc()
+		slog.Error("LTM AQL traversal failed",
+			slog.String("tenant_id", tenantID),
+			slog.String("error", err.Error()),
+			slog.Any("start_nodes", startNodeIDs),
+		)
 		return nil, fmt.Errorf("failed to query arangodb: %w", err)
 	}
 	defer cursor.Close()
-
-	slog.Debug("AQL query executed", slog.Duration("duration", time.Since(startTimer)))
 
 	nodesMap := make(map[string]GraphNode)
 	edgesMap := make(map[string]GraphEdge)
@@ -118,10 +130,9 @@ func (r *LTMReader) FetchContext(ctx context.Context, tenantID string, startNode
 			continue
 		}
 
-		// The Node ID from ArangoDB includes the collection prefix (e.g. "Concepts/customer_churn" for _id),
-		// but `_key` is just "customer_churn". We'll use _key for ID and deduce label from _id.
+		// The full ArangoDB ID is "Collection/Key" (e.g. "Concepts/customer_churn").
+		// We store the key as ID and derive the label from the collection prefix.
 		label := determineLabelFromID(result.Node.IDFull)
-
 		nodesMap[result.Node.IDFull] = GraphNode{
 			ID:    result.Node.ID,
 			Label: label,
@@ -142,7 +153,6 @@ func (r *LTMReader) FetchContext(ctx context.Context, tenantID string, startNode
 		Nodes: make([]GraphNode, 0, len(nodesMap)),
 		Edges: make([]GraphEdge, 0, len(edgesMap)),
 	}
-
 	for _, n := range nodesMap {
 		extraction.Nodes = append(extraction.Nodes, n)
 	}
@@ -150,11 +160,33 @@ func (r *LTMReader) FetchContext(ctx context.Context, tenantID string, startNode
 		extraction.Edges = append(extraction.Edges, e)
 	}
 
+	// Record read-path metrics
+	nodeCount := len(extraction.Nodes)
+	edgeCount := len(extraction.Edges)
+	LTMNodesRead.Add(float64(nodeCount))
+	LTMEdgesRead.Add(float64(edgeCount))
+
+	if nodeCount == 0 {
+		LTMFetchNoResults.Inc()
+		slog.Warn("LTM traversal returned 0 results despite entity start nodes",
+			slog.String("tenant_id", tenantID),
+			slog.Any("start_nodes", startNodeIDs),
+		)
+	} else {
+		slog.Info("LTM fetch completed",
+			slog.String("tenant_id", tenantID),
+			slog.Int("start_nodes_count", len(startNodeIDs)),
+			slog.Int("nodes_retrieved", nodeCount),
+			slog.Int("edges_retrieved", edgeCount),
+			slog.Duration("duration", time.Since(fetchStart)),
+		)
+	}
+
 	return extraction, nil
 }
 
+// determineLabelFromID extracts the collection name from an ArangoDB full ID (e.g. "Concepts/foo" → "Concepts").
 func determineLabelFromID(fullID string) string {
-	// fullID is typically "CollectionName/Key"
 	for i, c := range fullID {
 		if c == '/' {
 			return fullID[:i]
@@ -163,6 +195,7 @@ func determineLabelFromID(fullID string) string {
 	return "Concepts" // Fallback
 }
 
+// stripCollectionPrefix removes the collection prefix from an ArangoDB full ID (e.g. "Concepts/foo" → "foo").
 func stripCollectionPrefix(fullID string) string {
 	for i, c := range fullID {
 		if c == '/' {
