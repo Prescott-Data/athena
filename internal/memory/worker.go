@@ -247,6 +247,17 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 	newestUser := userMessages[0].event
 	previousUser := userMessages[1].event
 
+	// If both events share the same workflow_id or execution_id they belong to the
+	// same execution run — skip topic analysis and keep them in one chain.
+	for _, metaKey := range []string{"workflow_id", "execution_id"} {
+		newVal, newOk := newestUser.Metadata[metaKey]
+		prevVal, prevOk := previousUser.Metadata[metaKey]
+		if newOk && prevOk && newVal != "" && newVal == prevVal {
+			log.Printf("Events share %s=%s for user %s — skipping chain-break check.", metaKey, newVal, task.UserID)
+			return nil
+		}
+	}
+
 	log.Printf("Comparing user messages for topic detection: newest='%s' vs previous='%s'",
 		truncateLog(newestUser.Content, 60), truncateLog(previousUser.Content, 60))
 
