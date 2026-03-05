@@ -972,6 +972,13 @@ func (s *STMStore) ExtractEntities(ctx context.Context, events []models.Cognitiv
 	s.llmGuards.recordLLMResult(true)
 
 	content := strings.TrimSpace(llmResp.Choices[0].Message.Content)
+	// Strip markdown fences if LLM wraps response in ```json ... ```
+	if strings.HasPrefix(content, "```") {
+		content = strings.TrimPrefix(content, "```json")
+		content = strings.TrimPrefix(content, "```")
+		content = strings.TrimSuffix(content, "```")
+		content = strings.TrimSpace(content)
+	}
 	var entities []string
 	if err := json.Unmarshal([]byte(content), &entities); err != nil {
 		// LLM returned non-JSON — log and return empty rather than fail MTM formation
