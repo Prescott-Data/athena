@@ -83,6 +83,29 @@ var (
 		Help: "Total number of rogue LLM verbs intercepted and auto-corrected to RELATES_TO",
 	})
 
+	// LTM Read Metrics
+	LTMFetchDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Name:    "memos_ltm_fetch_duration_seconds",
+		Help:    "End-to-end latency of an ArangoDB graph traversal fetch during GetContext",
+		Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0},
+	})
+	LTMNodesRead = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "memos_ltm_nodes_read_total",
+		Help: "Total number of graph nodes returned by LTM retrieval traversals",
+	})
+	LTMEdgesRead = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "memos_ltm_edges_read_total",
+		Help: "Total number of graph edges returned by LTM retrieval traversals",
+	})
+	LTMFetchErrors = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "memos_ltm_fetch_errors_total",
+		Help: "Total number of times the LTM AQL traversal returned an error",
+	})
+	LTMFetchNoResults = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "memos_ltm_fetch_no_results_total",
+		Help: "Number of times GetContext had entity start nodes but retrieved 0 results from LTM",
+	})
+
 	// Blob Storage Metrics
 	BlobStorageOps = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -119,6 +142,11 @@ func init() {
 		LTMNodesWritten,
 		LTMEdgesWritten,
 		LTMEdgeInterceptions,
+		LTMFetchDuration,
+		LTMNodesRead,
+		LTMEdgesRead,
+		LTMFetchErrors,
+		LTMFetchNoResults,
 		BlobStorageOps,
 		BlobPayloadBytes,
 	)
