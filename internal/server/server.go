@@ -42,6 +42,7 @@ type MemoryServer struct {
 	redisClient                          cache.Interface
 	blobStore                            storage.BlobStore
 	promoter                             *memory.Promoter
+	ltmReader                            *memory.LTMReader
 	// getIDsFromSessionFunc allows mocking the DB call in tests
 	getIDsFromSessionFunc func(s *MemoryServer, ctx context.Context, sessionID string) (string, string, string, error)
 }
@@ -49,6 +50,11 @@ type MemoryServer struct {
 // SetPromoter injects the background Promoter so it can be manually triggered by the API
 func (s *MemoryServer) SetPromoter(p *memory.Promoter) {
 	s.promoter = p
+}
+
+// SetLTMReader injects the LTMReader so SearchMemory can include graph results from ArangoDB
+func (s *MemoryServer) SetLTMReader(r *memory.LTMReader) {
+	s.ltmReader = r
 }
 
 // NewMemoryServer creates a new Memory OS server instance
@@ -571,6 +577,22 @@ func (s *MemoryServer) SearchMemory(ctx context.Context, req *gen.SearchMemoryRe
 			Timestamp:       timestamppb.New(chain.LastEventAt),
 		}
 		results = append(results, result)
+	}
+
+	// Augment with LTM graph results if the reader is available
+	if s.ltmReader != nil {
+		ltmExtraction, ltmErr := s.ltmReader.SearchByQuery(ctx, tenantID, query)
+		if ltmErr != nil {
+			slog.Warn("LTM SearchByQuery failed, returning MTM results only", slog.String("error", ltmErr.Error()))
+		} else {
+			for _, node := range ltmExtraction.Nodes {
+				results = append(results, &gen.SearchResult{
+					Content:    fmt.Sprintf("%s [%s]", node.Name, node.Label),
+					SourceType: "ltm_node",
+					SourceId:   node.ID,
+				})
+			}
+		}
 	}
 
 	log.Printf("INFO: SearchMemory returned %d results for query '%s' in session %s", len(results), query, sessionID)

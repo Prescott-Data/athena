@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/arangodb/go-driver"
@@ -183,6 +184,92 @@ func (r *LTMReader) FetchContext(ctx context.Context, tenantID string, startNode
 	}
 
 	return extraction, nil
+}
+
+// SearchByQuery resolves a free-text query to matching ArangoDB node IDs (via name keyword search)
+// and then calls FetchContext to retrieve the surrounding sub-graph.
+func (r *LTMReader) SearchByQuery(ctx context.Context, tenantID, query string) (*GraphExtraction, error) {
+	keywords := extractLTMKeywords(query)
+	if len(keywords) == 0 {
+		return &GraphExtraction{Nodes: []GraphNode{}, Edges: []GraphEdge{}}, nil
+	}
+
+	nodeIDSet := make(map[string]bool)
+	for _, kw := range keywords {
+		ids, err := r.findNodeIDsByKeyword(ctx, kw)
+		if err != nil {
+			slog.Warn("LTM keyword search failed", slog.String("keyword", kw), slog.String("error", err.Error()))
+			continue
+		}
+		for _, id := range ids {
+			nodeIDSet[id] = true
+		}
+	}
+
+	if len(nodeIDSet) == 0 {
+		return &GraphExtraction{Nodes: []GraphNode{}, Edges: []GraphEdge{}}, nil
+	}
+
+	startNodes := make([]string, 0, len(nodeIDSet))
+	for id := range nodeIDSet {
+		startNodes = append(startNodes, id)
+	}
+
+	return r.FetchContext(ctx, tenantID, startNodes)
+}
+
+// findNodeIDsByKeyword searches all node collections for documents whose name contains the keyword.
+func (r *LTMReader) findNodeIDsByKeyword(ctx context.Context, keyword string) ([]string, error) {
+	query := `
+		FOR doc IN UNION(
+			(FOR d IN Concepts    RETURN d),
+			(FOR d IN Identities  RETURN d),
+			(FOR d IN Projects    RETURN d),
+			(FOR d IN Tools       RETURN d)
+		)
+		FILTER CONTAINS(LOWER(doc.name), @kw)
+		LIMIT 5
+		RETURN doc._id
+	`
+	cursor, err := r.db.Query(ctx, query, map[string]interface{}{"kw": keyword})
+	if err != nil {
+		return nil, fmt.Errorf("keyword search AQL failed: %w", err)
+	}
+	defer cursor.Close()
+
+	var ids []string
+	for {
+		var id string
+		_, err := cursor.ReadDocument(ctx, &id)
+		if driver.IsNoMoreDocuments(err) {
+			break
+		}
+		if err != nil {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+// extractLTMKeywords splits a query into lowercase keywords, skipping stop words and short tokens.
+func extractLTMKeywords(query string) []string {
+	stopWords := map[string]bool{
+		"the": true, "and": true, "for": true, "with": true, "that": true,
+		"this": true, "from": true, "have": true, "been": true, "will": true,
+		"what": true, "when": true, "where": true, "which": true, "were": true,
+		"they": true, "their": true, "there": true, "about": true, "also": true,
+		"into": true, "over": true, "after": true, "before": true, "some": true,
+		"than": true, "then": true, "each": true, "such": true, "does": true,
+	}
+	var keywords []string
+	for _, w := range strings.Fields(strings.ToLower(query)) {
+		w = strings.Trim(w, ".,;:!?\"'()")
+		if len(w) >= 4 && !stopWords[w] {
+			keywords = append(keywords, w)
+		}
+	}
+	return keywords
 }
 
 // determineLabelFromID extracts the collection name from an ArangoDB full ID (e.g. "Concepts/foo" → "Concepts").
