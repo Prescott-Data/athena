@@ -345,172 +345,43 @@ The DocIntel system and Athena Memory OS each maintain their own separate Arango
 |---|---|---|---|
 | **`docintel-scout-agent`** | ❌ No | ❌ No | Fully autonomous with no user scope. Explores the Odin document graph. Athena's personal memory graph is irrelevant to its mission. |
 | **`docintel-guided-scout-agent`** | 🔶 Optional | ❌ No | Receives a `user_goal` string from the user. Can optionally query Athena's LTM to add the user's past expressed interests as seed context — useful when the goal is vague. The goal string itself is sufficient in most cases. See Section 10.5. |
-| **`docintel-analyst-agent`** | ❌ No | ✅ **Yes — mandatory** | The only DocIntel agent that must interact with Athena. Writes its final verified `Hunch` data as a `GraphExtraction` directly into Athena's LTM. One-way write. Reads from the Odin graph, writes conclusions to Athena. |
+| **`docintel-analyst-agent`** | ❌ No | ❌ No | The Analyst mathematically verifies hunches and saves its final findings back into the Odin Knowledge Graph or DocIntel's MongoDB. It does **not** write to Athena. See Section 10.3 for the federated architecture design. |
 
 ---
 
-### 10.3 Why the Analyst Writes Directly to LTM (and Not Through `StoreInteraction`)
+### 10.3 The Federated Architecture: Why the Analyst Does Not Write to Athena
 
-Athena's standard write pipeline for AI agents is:
+A common misconception is that the Analyst agent should write its verified business findings (`"Q3 Churn is 5.4%"`, `"Enterprise clients require SOC2"`) directly into Athena's Long-Term Memory (LTM). **This is an anti-pattern and must be avoided.**
 
-```
-StoreInteraction(user_message, agent_response)
-  → STM Cache (Redis)
-  → MTM Analysis (LLM-based cosine similarity, topic analysis)
-  → MTM Chain (MongoDB)
-  → Promoter (scheduled LLM extraction pass → guesses graph edges)
-  → LTM GraphExtraction in ArangoDB
-```
+Athena's schema (`Identities`, `Concepts`, `Projects`) is an **operational personal memory graph** designed to capture what a user cares about and knows. Odin is a **Business Intelligence graph** designed to capture statistical facts, temporal anchors, and document citations.
 
-**The problem with routing the Analyst's output through this pipeline:**
+Mixing these two graphs creates severe problems:
+1. **Retrieval Pollution:** If a user asks a simple conversational query, a vector search might accidentally pull in 50 rows of irrelevant business metrics from last year's Analyst runs, blowing out the LLM context window.
+2. **Schema Friction:** Athena's edge relationships (`RELATES_TO`, `IMPLIES`) cannot natively store the rich metadata (P-values, standard deviations, document spans) that the Analyst generates.
 
-The Promoter uses an LLM to *infer* graph edges from conversational prose. This is appropriate for unstructured chat, where relationships are implicit. The DocIntel Analyst is categorically different — it has already:
+#### The Federated Solution
 
-- Run Pandas statistical calculations on raw data.
-- Executed AQL queries directly against the document corpus.
-- Called `score_edge` and `retrieve_paths` to verify structural plausibility.
-- Registered `Finding` objects with explicit quantitative confidence scores.
+Instead of the Analyst writing *into* Athena, we use a federated tool approach:
 
-Running an LLM over this output to *re-infer* what the Analyst already knows with certainty would destroy its precision and introduce hallucinated relationships.
+**1. What Odin/DocIntel knows:**
+The Analyst writes its verified hunches and PDF reports back into the DocIntel infrastructure (Odin Graph or MongoDB). It stays there.
 
-**Therefore, Athena exposes a dedicated `StoreKnowledgeGraph` endpoint that allows the Analyst to bypass the STM/MTM pipeline entirely and write a `GraphExtraction` directly to ArangoDB.** The Analyst's mathematically verified output is treated as ground truth.
+**2. What Athena knows:**
+Athena's graph only tracks that the analysis *event* occurred.
+* *Node:* `Mission: Churn Analysis`
+* *Node:* `User: Sangalo`
+* *Edge:* `User -> INITIATED -> Mission: Churn Analysis`
 
-> **Note on Athena v2 (Business Intelligence):**
-> The current Athena graph schema uses `GraphNode` labels (`Identities`, `Concepts`, `Projects`) and a controlled relationship vocabulary that was designed for conversational personal memory. Storing DocIntel's quantitative findings — e.g., *"customer tenure has a 0.73 Pearson correlation with churn rate"* — within this schema requires mapping findings to `Concept` nodes and relationship types like `INFLUENCES` or `CORRELATES_WITH`.
->
-> A full Business Intelligence graph schema (with numeric edge properties, temporal anchors, statistical metadata, and richer analytical relationship types) is officially scoped for **Athena v2**. For v1, the `StoreKnowledgeGraph` endpoint serves as the bridge — it gets the Analyst's conclusions into permanant memory using the current schema, without creating a tight coupling to a schema that will evolve.
+**3. The Tool Bridge:**
+When the user asks Athena, *"What did we find out about the churn rate last week?"*, Athena's LLM realizes it needs business data. Athena invokes a Tool (e.g., `query_docintel_findings`) to ask the DocIntel API for the answer in real-time. Athena reads the findings, answers the user, and discards the business data from its own memory context.
+
+**Conclusion:** The DocIntel Analyst agent requires zero integration with the Athena Memos Graph. It should store its findings in DocIntel.
 
 ---
 
-### 10.4 The Mandatory Write Path: `publish_verified_hunch` Tool
+### 10.4 [Intentionally Blank]
 
-The Analyst must invoke this tool during its `finish_analysis` step, **only when `verdict == "VERIFIED"`**. Disproved or inconclusive hunches must not be stored in Athena — they are ephemeral.
-
-#### Mapping `AnalystState` to Athena's Schema
-
-When the Analyst reaches `finish_analysis`, the relevant state fields are:
-
-| `AnalystState` field | Maps to | Athena Schema |
-|---|---|---|
-| `state.findings[n].entities` | → | `GraphNode.name` (label: `Concepts`) |
-| `state.findings[n].description` | → | `GraphEdge.context_nuance` (truncated to 200 chars) |
-| `state.findings[n].confidence` | → | `GraphEdge.confidence` |
-| `state.findings[n].relationship_type` | → | `GraphEdge.relation` (mapped via vocabulary below) |
-| `state.mission_id` | → | `StoreKnowledgeGraphRequest.mission_id` |
-
-**Athena's controlled edge vocabulary** — choose the closest match for your findings:
-
-| Athena Relation | Use When the Finding Says |
-|---|---|
-| `INFLUENCES` | A causally drives B (e.g., `tenure influences churn`) |
-| `CORRELATES_WITH` | A statistically co-moves with B |
-| `IMPLIES` | If A is true, B is likely |
-| `CONTRADICTS` | A is in direct opposition to B |
-| `RELATES_TO` | Fallback — any association that doesn't fit the above |
-
-#### Python Tool Implementation
-
-Add to `analyst_agent/tools/athena.py`:
-
-```python
-import httpx
-import os
-from typing import Any
-
-ATHENA_BASE_URL = os.environ["ATHENA_BASE_URL"]
-ATHENA_API_KEY = os.environ["ATHENA_API_KEY"]
-
-
-async def publish_verified_hunch(
-    tenant_id: str,
-    mission_id: str,
-    findings: list[dict],
-    hunch_entities: list[str],
-) -> dict[str, Any]:
-    """
-    Write a set of mathematically verified findings directly into Athena's
-    Long-Term Memory graph, bypassing the STM/MTM distillation pipeline entirely.
-
-    Only call this when verdict == 'VERIFIED'. Do NOT call for disproved or
-    inconclusive hunches — only confirmed facts belong in permanent memory.
-
-    Args:
-        tenant_id: The tenant scope this knowledge belongs to.
-        mission_id: The docintel mission ID, used for traceability.
-        findings: List of Finding dicts from AnalystState.findings.
-                  Each dict must have: 'entities', 'description',
-                  'confidence', 'relationship_type'.
-        hunch_entities: List of entity ArangoDB IDs from Hunch.supporting_evidence.
-                        e.g. ["ExtractedEntities/customer_tenure",
-                              "ExtractedEntities/churn_rate"]
-
-    Returns:
-        dict with 'nodes_written' (int) and 'edges_written' (int).
-
-    Raises:
-        httpx.HTTPStatusError: if Athena returns a non-2xx response.
-    """
-    # Build Athena GraphNode objects from Hunch's supporting evidence.
-    # ArangoDB IDs are "Collection/key" format — we strip the collection prefix.
-    nodes = []
-    seen_names: set[str] = set()
-    for entity_id in hunch_entities:
-        key = entity_id.split("/")[-1]
-        name = key.replace("_", " ").title()
-        if name not in seen_names:
-            nodes.append({"id": key, "label": "Concepts", "name": name})
-            seen_names.add(name)
-
-    # Build Athena GraphEdge objects from each verified Finding.
-    edges = []
-    for finding in findings:
-        entities = finding.get("entities", [])
-        if len(entities) < 2:
-            continue  # An edge needs at least two endpoints
-
-        from_key = entities[0].split("/")[-1]
-        to_key = entities[1].split("/")[-1]
-        relation = _map_relation(finding.get("relationship_type", ""))
-
-        edges.append({
-            "from": from_key,
-            "to": to_key,
-            "relation": relation,
-            "context_nuance": finding["description"][:200],
-            "confidence": finding["confidence"],
-        })
-
-    payload = {
-        "tenant_id": tenant_id,
-        "source_agent_id": "docintel-analyst",
-        "mission_id": mission_id,
-        "nodes": nodes,
-        "edges": edges,
-        "base_heat_score": 0.9,  # Verified findings start with high recency heat
-    }
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            f"{ATHENA_BASE_URL}/v1/memory/kg",
-            json=payload,
-            headers={"Authorization": f"Bearer {ATHENA_API_KEY}"},
-        )
-        response.raise_for_status()
-        return response.json()
-
-
-def _map_relation(relationship_type: str) -> str:
-    """Map an analyst finding's relationship type to Athena's controlled vocabulary."""
-    mapping = {
-        "causal": "INFLUENCES",
-        "correlation": "CORRELATES_WITH",
-        "implication": "IMPLIES",
-        "contradiction": "CONTRADICTS",
-    }
-    return mapping.get(relationship_type.lower(), "RELATES_TO")
-```
-
-Register this in `analyst_agent/tools/__init__.py` alongside the existing tools (`aql_query`, `run_python`, `register_finding`, etc.). The OODA loop LLM will decide when to call it before calling `finish_analysis`.
+*This section previously detailed a direct LTM write path for the Analyst agent via a `publish_verified_hunch` tool. This approach has been deprecated in favor of the federated architecture described in Section 10.3.*
 
 ---
 
@@ -573,18 +444,17 @@ Pass `mission_state.athena_session_id` into the tool call. **Do not hardcode a s
 
 ### 10.6 Environment Variables for the DocIntel Agents
 
-Add to each agent's `.env` / `docker-compose.yml`. The Scout agent requires none of these since it does not interact with Athena.
+Add to each agent's `.env` / `docker-compose.yml`. The Scout and Analyst agents require none of these since they do not interact with Athena.
 
 ```bash
 # ── Athena Memory OS ──────────────────────────────────────────────────────────
-# Required by: docintel-analyst-agent
-# Optional for: docintel-guided-scout-agent (Section 10.5 only)
-# Not needed by: docintel-scout-agent
+# Required by: docintel-guided-scout-agent (Section 10.5 optional only)
+# Not needed by: docintel-scout-agent, docintel-analyst-agent
 ATHENA_BASE_URL=http://memory-os:8080   # Internal K8s/Docker service name for Athena
-ATHENA_API_KEY=<service-api-key>        # Provisioned by the Athena team (Blocker A2)
+ATHENA_API_KEY=<service-api-key>        # Provisioned by the Athena team (Blocker A1)
 ```
 
-No other Athena configuration is needed. The agents do **not** connect directly to Athena's internal infrastructure (Redis, Milvus, MongoDB, or ArangoDB). All communication with Athena goes through its HTTP/gRPC API layer exclusively.
+No other Athena configuration is needed.
 
 ---
 
@@ -592,8 +462,7 @@ No other Athena configuration is needed. The agents do **not** connect directly 
 
 | # | Blocker | Blocks Which Agent | Who Resolves It |
 |---|---------|-------------------|-----------------|
-| A1 | `StoreKnowledgeGraph` gRPC/REST endpoint implemented in Athena's `server.go` | Analyst (write path) | **Athena team** — the endpoint that bypasses STM/MTM and writes `GraphExtraction` directly to ArangoDB. |
-| A2 | `ATHENA_API_KEY` provisioned for `docintel-analyst` service | Analyst | **Athena team** — a dedicated service-level API key must be issued. |
-| A3 | Agreement on `tenant_id` value for DocIntel agents | Analyst, Guided Scout | **Both teams** — static platform ID (`"dromos"`) or a per-organisation claim from the request JWT. |
-| A4 | Session ID plumbing in the Guided Scout HTTP handler | Guided Scout (Section 10.5 optional) | **DocIntel team** — the `/scout` handler must call `CreateSession` and pass the returned `session_id` into the mission state before launching the OODA loop. |
+| A1 | `ATHENA_API_KEY` provisioned for `docintel-guided-scout` service | Guided Scout | **Athena team** — a dedicated service-level API key must be issued. |
+| A2 | Agreement on `tenant_id` value | Guided Scout | **Both teams** — static platform ID (`"dromos"`) or a per-organisation claim from the request JWT. |
+| A3 | Session ID plumbing in the Guided Scout HTTP handler | Guided Scout (Section 10.5 optional) | **DocIntel team** — the `/scout` handler must call `CreateSession` and pass the returned `session_id` into the mission state before launching the OODA loop. |
 
