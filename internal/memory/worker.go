@@ -171,12 +171,22 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 	// Use the shared key generation function from stm_cache.go
 	key := GenerateSTMKey(task.TenantID, task.UserID, task.AgentID)
 
-	// 1. Get recent events from STM — we need enough to find two different user messages.
+	// Check total STM size before fetching — if a flush will be triggered we must
+	// fetch all events, not just the most recent 10, to avoid silently losing older ones.
+	maxSTMEvents := parseIntEnv("STM_MAX_EVENTS_BEFORE_FLUSH", 20)
+	totalSTMCount, _ := w.redis.LLen(key)
+
+	fetchCount := int64(10)
+	if totalSTMCount >= int64(maxSTMEvents) {
+		fetchCount = totalSTMCount
+	}
+
+	// 1. Get events from STM — we need enough to find two different user messages.
 	//    LPUSH means index 0 is newest. A StoreInteraction pushes user then agent,
 	//    so events alternate: [agent_new, user_new, agent_prev, user_prev, ...]
 	//    We need to compare the newest user message against the previous user message
 	//    to detect topic changes across interaction boundaries (not within a single turn).
-	eventStrings, err := w.redis.LRange(key, 0, 9) // get up to 10 most recent
+	eventStrings, err := w.redis.LRange(key, 0, fetchCount-1)
 	if err != nil {
 		return fmt.Errorf("failed to get recent events from STM: %w", err)
 	}
@@ -223,8 +233,6 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 	// Force chain formation if STM has accumulated too many events.
 	// This ensures chains form even for long single-topic conversations
 	// (e.g., automation logs, extended workflow design sessions).
-	maxSTMEvents := parseIntEnv("STM_MAX_EVENTS_BEFORE_FLUSH", 20)
-	totalSTMCount, _ := w.redis.LLen(key)
 	if totalSTMCount >= int64(maxSTMEvents) {
 		log.Printf("STM event count (%d) exceeds threshold (%d) for user %s. Forcing chain formation.", totalSTMCount, maxSTMEvents, task.UserID)
 		// Treat the oldest half of events as a completed chain
