@@ -149,23 +149,28 @@ func (w *LTMWriter) WriteExtractionToGraph(ctx context.Context, extraction *Grap
 
 		query := `
 			UPSERT { _from: @from, _to: @to, relation: @relation }
-			INSERT { 
-				_from: @from, 
-				_to: @to, 
-				relation: @relation, 
+			INSERT {
+				_from: @from,
+				_to: @to,
+				relation: @relation,
 				context_nuance: @context_nuance,
-				confidence: @confidence, 
-				heat_score: @heat, 
-				weight: 1, 
-				created_at: @now, 
-				last_seen: @now 
+				context_history: [],
+				confidence: @confidence,
+				heat_score: @heat,
+				weight: 1,
+				created_at: @now,
+				last_seen: @now
 			}
-			UPDATE { 
+			UPDATE {
 				context_nuance: @context_nuance,
-				confidence: (OLD.confidence + @confidence) / 2, 
+				context_history: SLICE(
+					PUSH(IS_LIST(OLD.context_history) ? OLD.context_history : [], OLD.context_nuance, true),
+					-5
+				),
+				confidence: OLD.confidence + (@confidence - OLD.confidence) * 0.4,
 				weight: OLD.weight + 1,
 				heat_score: @heat,
-				last_seen: @now 
+				last_seen: @now
 			}
 			IN MemoryEdges
 		`

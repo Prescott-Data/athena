@@ -203,6 +203,30 @@ func main() {
 		}
 	}()
 
+	// Start Community Detection scheduler (Pregel Label Propagation)
+	// Runs less frequently than the promoter since it's a graph-wide operation.
+	if ltmWriter != nil {
+		analyticsIntervalMin := getEnvInt("MEMORY_OS_ANALYTICS_INTERVAL_MIN", 360) // default: every 6 hours
+		go func() {
+			ticker := time.NewTicker(time.Duration(analyticsIntervalMin) * time.Minute)
+			defer ticker.Stop()
+			log.Printf("Community Detection scheduler started (interval: %dm)", analyticsIntervalMin)
+			for {
+				select {
+				case <-promoterCtx.Done():
+					log.Println("Community Detection scheduler stopped")
+					return
+				case <-ticker.C:
+					if err := promoter.TriggerAnalytics(promoterCtx); err != nil {
+						log.Printf("WARN: Community detection run failed: %v", err)
+					} else {
+						log.Printf("INFO: Community detection completed successfully")
+					}
+				}
+			}
+		}()
+	}
+
 	// Start Archiver scheduler
 	archiverCtx, archiverCancel := context.WithCancel(context.Background())
 	archiverIntervalMin := getEnvInt("MEMORY_OS_ARCHIVER_INTERVAL_MIN", 60)
