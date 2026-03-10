@@ -10,6 +10,19 @@ pipelines:
   branches:
     # DEV BRANCH - Deploy to Azure Container Apps
     dev:
+      - step:
+          name: "Generate Protobuf"
+          caches:
+            - godeps
+          script:
+            - apt-get update -qq && apt-get install -y -qq protobuf-compiler
+            - go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.28
+            - go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.2
+            - go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@v2.10.0
+            - chmod +x ./scripts/generate.sh && ./scripts/generate.sh
+          artifacts:
+            - api/grpc/gen/*.go
+
       - parallel:
           - step:
               name: "Lint Code"
@@ -215,6 +228,19 @@ pipelines:
 
     # STAGING BRANCH - Deploy to AKS Staging Cluster
     staging:
+      - step:
+          name: "Generate Protobuf"
+          caches:
+            - godeps
+          script:
+            - apt-get update -qq && apt-get install -y -qq protobuf-compiler
+            - go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.28
+            - go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.2
+            - go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@v2.10.0
+            - chmod +x ./scripts/generate.sh && ./scripts/generate.sh
+          artifacts:
+            - api/grpc/gen/*.go
+
       - parallel:
           - step:
               name: "Lint Code"
@@ -326,6 +352,19 @@ pipelines:
 
     # MAIN BRANCH - Deploy to AKS Production Cluster
     main:
+      - step:
+          name: "Generate Protobuf"
+          caches:
+            - godeps
+          script:
+            - apt-get update -qq && apt-get install -y -qq protobuf-compiler
+            - go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.28
+            - go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.2
+            - go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@v2.10.0
+            - chmod +x ./scripts/generate.sh && ./scripts/generate.sh
+          artifacts:
+            - api/grpc/gen/*.go
+
       - parallel:
           - step:
               name: "Lint Code"
