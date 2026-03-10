@@ -70,6 +70,10 @@ dist/
 build/
 /memory-server
 
+# Generated protobuf / gRPC files (regenerate with `make proto`)
+*.pb.go
+*.pb.gw.go
+
 Paper-MemoryOS.pdf
 Paper-MemoryOS.pdf:Zone.Identifier
 
