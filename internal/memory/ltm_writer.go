@@ -154,7 +154,6 @@ func (w *LTMWriter) WriteExtractionToGraph(ctx context.Context, extraction *Grap
 				_to: @to,
 				relation: @relation,
 				context_nuance: @context_nuance,
-				context_history: [],
 				confidence: @confidence,
 				heat_score: @heat,
 				weight: 1,
@@ -163,11 +162,7 @@ func (w *LTMWriter) WriteExtractionToGraph(ctx context.Context, extraction *Grap
 			}
 			UPDATE {
 				context_nuance: @context_nuance,
-				context_history: SLICE(
-					PUSH(IS_LIST(OLD.context_history) ? OLD.context_history : [], OLD.context_nuance, true),
-					-5
-				),
-				confidence: OLD.confidence + (@confidence - OLD.confidence) * 0.4,
+				confidence: (OLD.confidence + @confidence) / 2,
 				weight: OLD.weight + 1,
 				heat_score: @heat,
 				last_seen: @now
