@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"bitbucket.org/dromos/memory-os/internal/models"
+	"bitbucket.org/dromos/athena-memos/internal/models"
 )
 
 func TestHeatScorer_ComputeSegmentHeat_BaseImportance(t *testing.T) {

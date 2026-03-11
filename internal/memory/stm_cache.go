@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"time"
 
-	"bitbucket.org/dromos/memory-os/internal/cache"
-	"bitbucket.org/dromos/memory-os/internal/models"
-	memmodels "bitbucket.org/dromos/memory-os/models/memory"
+	"bitbucket.org/dromos/athena-memos/internal/cache"
+	"bitbucket.org/dromos/athena-memos/internal/models"
+	memmodels "bitbucket.org/dromos/athena-memos/models/memory"
 
 	// Load environment variables from .env file
 	_ "github.com/joho/godotenv/autoload"

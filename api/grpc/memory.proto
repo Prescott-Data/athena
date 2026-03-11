@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package memory.v1;
 
-option go_package = "bitbucket.org/dromos/memory-os/api/grpc/gen;gen";
+option go_package = "bitbucket.org/dromos/athena-memos/api/grpc/gen;gen";
 
 import "google/api/annotations.proto";
 import "google/protobuf/timestamp.proto";

@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"bitbucket.org/dromos/memory-os/internal/llm"
+	"bitbucket.org/dromos/athena-memos/internal/llm"
 	// Load environment variables from .env file
 	_ "github.com/joho/godotenv/autoload"
 )

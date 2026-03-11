@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"bitbucket.org/dromos/memory-os/internal/cache"
+	"bitbucket.org/dromos/athena-memos/internal/cache"
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"

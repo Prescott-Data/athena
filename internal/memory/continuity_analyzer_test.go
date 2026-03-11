@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"bitbucket.org/dromos/memory-os/internal/models"
+	"bitbucket.org/dromos/athena-memos/internal/models"
 )
 
 // TestContinuityAnalyzerLowSemantic verifies that two semantically unrelated chains are marked discontinuous.

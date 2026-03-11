@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"bitbucket.org/dromos/memory-os/internal/cache"
-	"bitbucket.org/dromos/memory-os/internal/models"
+	"bitbucket.org/dromos/athena-memos/internal/cache"
+	"bitbucket.org/dromos/athena-memos/internal/models"
 	"github.com/joho/godotenv"
 	"github.com/stretchr/testify/assert"
 )

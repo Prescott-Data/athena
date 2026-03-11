@@ -150,7 +150,7 @@ results, err := athenaClient.SearchMemory(ctx, &memoryos.SearchMemoryRequest{
 Add to `cmd/api/main.go` (or `InitAPIClient` in `controllers/agent.go`):
 
 ```go
-import "bitbucket.org/dromos/memory-os/pkg/memoryos"
+import "bitbucket.org/dromos/athena-memos/pkg/memoryos"
 
 athenaClient = memoryos.NewClient(memoryos.ClientConfig{
     BaseURL: os.Getenv("ATHENA_BASE_URL"),
@@ -265,7 +265,7 @@ A consolidated checklist of every action required from the `docintel-api` team t
 
 | # | Requirement | Location | Phase |
 |---|-------------|----------|-------|
-| R1 | Add `bitbucket.org/dromos/memory-os/pkg/memoryos` as a Go module dependency | `go.mod` | 1 |
+| R1 | Add `bitbucket.org/dromos/athena-memos/pkg/memoryos` as a Go module dependency | `go.mod` | 1 |
 | R2 | Initialise `AthenaClient` at startup with `ATHENA_BASE_URL` and `ATHENA_API_KEY` | `controllers/agent.go` → `InitAPIClient()` | 1 |
 | R3 | Add `AthenaSessionID string` field to the Conversation MongoDB model | conversation model struct | 1 |
 | R4 | Call `athenaClient.CreateSession(...)` when a new conversation is created; persist the returned `session_id` on the conversation document | conversation creation handler | 1 |

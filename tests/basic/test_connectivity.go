@@ -6,8 +6,8 @@ import (
 	"log"
 	"time"
 
-	"bitbucket.org/dromos/memory-os/internal/config"
-	"bitbucket.org/dromos/memory-os/internal/database"
+	"bitbucket.org/dromos/athena-memos/internal/config"
+	"bitbucket.org/dromos/athena-memos/internal/database"
 )
 
 func testConnectivity() {
