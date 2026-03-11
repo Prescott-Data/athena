@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	gen "bitbucket.org/dromos/memory-os/api/grpc/gen"
-	"bitbucket.org/dromos/memory-os/internal/cache"
-	"bitbucket.org/dromos/memory-os/internal/memory"
+	gen "bitbucket.org/dromos/athena-memos/api/grpc/gen"
+	"bitbucket.org/dromos/athena-memos/internal/cache"
+	"bitbucket.org/dromos/athena-memos/internal/memory"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )

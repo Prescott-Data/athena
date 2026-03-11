@@ -17,9 +17,6 @@ A 6-hour in-process goroutine was introduced to call `promoter.TriggerAnalytics`
 ### Generated Protobuf Files in Git (fixed March 10, 2026)
 `api/grpc/gen/*.pb.go` and `*.pb.gw.go` were accidentally committed. Removed from tracking, added `*.pb.go` and `*.pb.gw.go` to `.gitignore`. CI now generates them fresh via the `Generate Protobuf` pipeline step. Do not re-add these files to git.
 
-### Pipeline Test Step Was a No-Op (fixed March 10, 2026)
-The `Run Tests` step in all three branch pipelines called `go test ./pkg/memoryos ./api/middleware`, both of which have no test files. Tests never ran. The pipeline still runs unit tests only (same packages for now) — see open item below.
-
 ---
 
 ## OPEN ⚠️

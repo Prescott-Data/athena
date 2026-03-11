@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	"bitbucket.org/dromos/memory-os/internal/models"
+	"bitbucket.org/dromos/athena-memos/internal/models"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"

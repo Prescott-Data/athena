@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"bitbucket.org/dromos/memory-os/internal/models"
+	"bitbucket.org/dromos/athena-memos/internal/models"
 )
 
 // QualityValidator assesses and validates the quality of a cognitive chain before storage

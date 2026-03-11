@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"bitbucket.org/dromos/memory-os/internal/models"
+	"bitbucket.org/dromos/athena-memos/internal/models"
 )
 
 // TopicAnalyzer provides advanced topic analysis and multi-summary generation

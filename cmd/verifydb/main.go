@@ -4,7 +4,7 @@ import (
 	"context"
 	"log"
 
-	"bitbucket.org/dromos/memory-os/internal/models"
+	"bitbucket.org/dromos/athena-memos/internal/models"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"

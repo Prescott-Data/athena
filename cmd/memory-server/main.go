@@ -19,11 +19,11 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	gw "bitbucket.org/dromos/memory-os/api/grpc/gen"
-	"bitbucket.org/dromos/memory-os/api/middleware"
-	"bitbucket.org/dromos/memory-os/internal/config"
-	"bitbucket.org/dromos/memory-os/internal/memory"
-	"bitbucket.org/dromos/memory-os/internal/server"
+	gw "bitbucket.org/dromos/athena-memos/api/grpc/gen"
+	"bitbucket.org/dromos/athena-memos/api/middleware"
+	"bitbucket.org/dromos/athena-memos/internal/config"
+	"bitbucket.org/dromos/athena-memos/internal/memory"
+	"bitbucket.org/dromos/athena-memos/internal/server"
 )
 
 func main() {

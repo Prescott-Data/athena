@@ -2,11 +2,11 @@ module stm-benchmark
 
 go 1.23.0
 
-replace bitbucket.org/dromos/memory-os => ../../
+replace bitbucket.org/dromos/athena-memos => ../../
 
 require (
 
-	bitbucket.org/dromos/memory-os v0.0.0-00010101000000-000000000000
+	bitbucket.org/dromos/athena-memos v0.0.0-00010101000000-000000000000
 	go.mongodb.org/mongo-driver v1.17.1
 )
 

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"bitbucket.org/dromos/memory-os/internal/models"
+	"bitbucket.org/dromos/athena-memos/internal/models"
 	"github.com/stretchr/testify/assert"
 )
 

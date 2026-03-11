@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"time"
 
-	"bitbucket.org/dromos/memory-os/internal/cache"
+	"bitbucket.org/dromos/athena-memos/internal/cache"
 )
 
 // TaskQueuer defines the interface for task queue operations.

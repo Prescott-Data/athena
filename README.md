@@ -795,7 +795,7 @@ go run cmd/verify_analytics/main.go
 ## 12. Go Client SDK
 
 ```go
-import "bitbucket.org/dromos/memory-os/pkg/memoryos"
+import "bitbucket.org/dromos/athena-memos/pkg/memoryos"
 
 client := memoryos.NewClient(memoryos.ClientConfig{
     BaseURL:  "https://memory-os.yourdomain.com",

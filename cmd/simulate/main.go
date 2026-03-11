@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	gw "bitbucket.org/dromos/memory-os/api/grpc/gen"
+	gw "bitbucket.org/dromos/athena-memos/api/grpc/gen"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"

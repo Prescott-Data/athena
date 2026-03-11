@@ -5,8 +5,8 @@ import (
 	"log"
 	"time"
 
-	"bitbucket.org/dromos/memory-os/internal/config"
-	"bitbucket.org/dromos/memory-os/pkg/memoryos"
+	"bitbucket.org/dromos/athena-memos/internal/config"
+	"bitbucket.org/dromos/athena-memos/pkg/memoryos"
 )
 
 func main() {

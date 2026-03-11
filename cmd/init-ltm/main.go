@@ -5,7 +5,7 @@ import (
 	"log"
 	"os"
 
-	"bitbucket.org/dromos/memory-os/pkg/memory"
+	"bitbucket.org/dromos/athena-memos/pkg/memory"
 )
 
 func main() {
