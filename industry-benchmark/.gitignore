@@ -1,0 +1,9 @@
+RESEARCH_HYPOTHESES.md
+results/
+data/h5/
+data/h1/*.json
+__pycache__/
+*.pyc
+venv/
+.env
+*.egg-info/

@@ -9,9 +9,6 @@
       "name": "MemoryService"
     }
   ],
-  "host": "api.console.dromos.prescottdata.io",
-  "basePath": "/memory",
-  "schemes": ["https"],
   "consumes": [
     "application/json"
   ],

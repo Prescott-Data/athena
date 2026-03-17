@@ -6,11 +6,20 @@ definitions:
     docker:
       memory: 2048
 
+  # Skip any step when the only changed files are under industry-benchmark/.
+  # Apply to a step with:  <<: *skip-if-benchmark-only
+  skip-if-benchmark-only: &skip-if-benchmark-only
+    condition:
+      changesets:
+        excludePaths:
+          - "industry-benchmark/**"
+
 pipelines:
   branches:
     # DEV BRANCH - Deploy to Azure Container Apps
     dev:
       - step:
+          <<: *skip-if-benchmark-only
           name: "Generate Protobuf"
           caches:
             - godeps
@@ -229,6 +238,7 @@ pipelines:
     # STAGING BRANCH - Deploy to AKS Staging Cluster
     staging:
       - step:
+          <<: *skip-if-benchmark-only
           name: "Generate Protobuf"
           caches:
             - godeps
@@ -353,6 +363,7 @@ pipelines:
     # MAIN BRANCH - Deploy to AKS Production Cluster
     main:
       - step:
+          <<: *skip-if-benchmark-only
           name: "Generate Protobuf"
           caches:
             - godeps
