@@ -11,7 +11,15 @@ import (
 func main() {
 	dbURL := os.Getenv("ARANGODB_URL")
 	if dbURL == "" {
-		dbURL = "http://localhost:8529"
+		arangoHost := os.Getenv("ARANGODB_HOST")
+		arangoPort := os.Getenv("ARANGODB_PORT")
+		if arangoHost == "" {
+			log.Fatal("ARANGODB_HOST or ARANGODB_URL must be set")
+		}
+		if arangoPort == "" {
+			arangoPort = "8529"
+		}
+		dbURL = "http://" + arangoHost + ":" + arangoPort
 	}
 
 	user := os.Getenv("ARANGODB_USER")
@@ -19,9 +27,12 @@ func main() {
 		user = "root"
 	}
 
-	pass := os.Getenv("ARANGODB_PASSWORD")
+	pass := os.Getenv("ARANGO_ROOT_PASSWORD")
 	if pass == "" {
-		log.Fatal("ARANGODB_PASSWORD env var is required")
+		pass = os.Getenv("ARANGODB_PASSWORD")
+	}
+	if pass == "" {
+		log.Fatal("ARANGO_ROOT_PASSWORD or ARANGODB_PASSWORD env var is required")
 	}
 
 	log.Printf("Initializing ArangoDB LTM Graph at %s...", dbURL)

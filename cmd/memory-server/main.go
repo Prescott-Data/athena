@@ -152,18 +152,29 @@ func main() {
 	promoterThreshold := getEnvFloat("MEMORY_OS_PROMOTER_THRESHOLD", 0.3)
 	mongoDB := memoryServer.GetMongoClient().Database(cfg.Database.MongoDB.Database)
 
-	// Initialize LTMWriter
+	// Initialize LTMWriter — all values must come from the environment (no localhost fallback in prod).
 	dbURL := os.Getenv("ARANGODB_URL")
 	if dbURL == "" {
-		dbURL = "http://localhost:8529"
+		arangoHost := os.Getenv("ARANGODB_HOST")
+		arangoPort := os.Getenv("ARANGODB_PORT")
+		if arangoHost == "" {
+			log.Fatal("ARANGODB_HOST or ARANGODB_URL must be set")
+		}
+		if arangoPort == "" {
+			arangoPort = "8529"
+		}
+		dbURL = fmt.Sprintf("http://%s:%s", arangoHost, arangoPort)
 	}
 	dbUser := os.Getenv("ARANGODB_USER")
 	if dbUser == "" {
 		dbUser = "root"
 	}
-	dbPass := os.Getenv("ARANGODB_PASSWORD")
+	dbPass := os.Getenv("ARANGO_ROOT_PASSWORD")
 	if dbPass == "" {
-		dbPass = "athena_dev"
+		dbPass = os.Getenv("ARANGODB_PASSWORD")
+	}
+	if dbPass == "" {
+		log.Fatal("ARANGO_ROOT_PASSWORD or ARANGODB_PASSWORD must be set")
 	}
 	dbName := os.Getenv("ARANGODB_DATABASE")
 	if dbName == "" {
