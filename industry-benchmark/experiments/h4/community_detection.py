@@ -42,6 +42,72 @@ def connect(url: str, password: str):
     return client.db(DATABASE, username="root", password=password)
 
 
+def _export_collection_paginated(db_factory, col: str, path: str, fields: str = "doc",
+                                  max_retries: int = 20, retry_delay: int = 60):
+    """Export a single collection to JSONL using key-based pagination with auto-retry.
+    On connection failure, waits retry_delay seconds and reconnects — ArangoDB may have
+    been OOM-killed and is restarting. Continues from the last successfully written _key.
+    """
+    PAGE = 10_000
+    last_key = ""
+    count = 0
+    retries = 0
+    db = db_factory()
+    with open(path, "w") as f:
+        while True:
+            try:
+                cursor = db.aql.execute(
+                    f"FOR doc IN {col} FILTER doc._key > @lk SORT doc._key "
+                    f"LIMIT {PAGE} RETURN {fields}",
+                    bind_vars={"lk": last_key},
+                    batch_size=PAGE,
+                )
+                batch = list(cursor)
+                if not batch:
+                    break
+                for doc in batch:
+                    f.write(json.dumps(doc) + "\n")
+                last_key = batch[-1]["_key"]
+                count += len(batch)
+                retries = 0
+                if count % 500_000 == 0:
+                    print(f"      {count:,} written...", flush=True)
+            except Exception as e:
+                retries += 1
+                if retries > max_retries:
+                    raise RuntimeError(f"Gave up after {max_retries} retries at {count:,} docs") from e
+                print(f"      [{count:,} written] Error: {e}. "
+                      f"Retry {retries}/{max_retries} — waiting {retry_delay}s for ArangoDB to recover...",
+                      flush=True)
+                time.sleep(retry_delay)
+                try:
+                    db = db_factory()
+                except Exception:
+                    pass  # will retry on next loop iteration
+    return count
+
+
+def export_to_dir(url: str, password: str, output_dir: str):
+    """Export node + edge collections to local JSONL using key-based pagination.
+    Passes a db_factory so each retry gets a fresh connection.
+    """
+    import os
+    db_factory = lambda: connect(url, password)
+    os.makedirs(output_dir, exist_ok=True)
+    for col in NODE_COLLECTIONS:
+        path = os.path.join(output_dir, f"{col}.jsonl")
+        print(f"    Exporting {col} → {path}")
+        count = _export_collection_paginated(db_factory, col, path)
+        print(f"      {count:,} documents written")
+    edge_path = os.path.join(output_dir, "MemoryEdges.jsonl")
+    print(f"    Exporting MemoryEdges → {edge_path}")
+    count = _export_collection_paginated(
+        db_factory, EDGE_COLLECTION, edge_path,
+        fields="{_key: doc._key, _from: doc._from, _to: doc._to}",
+    )
+    print(f"      {count:,} edges written")
+
+
 def fetch_nodes(db, verbose=True) -> dict:
     """Returns {full_id: {community_id, svm_cluster}} for all node collections."""
     nodes = {}
@@ -343,6 +409,7 @@ def main():
     parser.add_argument("--url",        default="http://localhost:8529", help="ArangoDB URL")
     parser.add_argument("--pass",       dest="password", default=None,   help="ArangoDB root password (required unless --local-dir + --dry-run)")
     parser.add_argument("--local-dir",  dest="local_dir", default=None,  help="Read nodes+edges from local JSONL files instead of ArangoDB")
+    parser.add_argument("--fetch-to-dir", dest="fetch_to_dir", default=None, help="Stream ArangoDB → local JSONL files in this dir, then run igraph Louvain on them (best for large in-cluster runs)")
     parser.add_argument("--sample",     type=int, default=0, help="Run on a proportional sample of N nodes (0 = full graph)")
     parser.add_argument("--dry-run",    action="store_true", help="Skip writing community_id back to ArangoDB")
     parser.add_argument("--no-silhouette", action="store_true", help="Skip silhouette score (slow on large graphs)")
@@ -356,6 +423,15 @@ def main():
     print(f"  Database : {DATABASE}")
     print(f"  Dry run  : {args.dry_run}")
     print()
+
+    if args.fetch_to_dir:
+        # ── Export path: stream ArangoDB → JSONL, then use igraph fast path ──
+        print(f"  Connecting to ArangoDB to export graph...")
+        db = connect(args.url, args.password)
+        print(f"  Streaming collections to {args.fetch_to_dir}/...")
+        export_to_dir(db, args.fetch_to_dir)
+        print()
+        args.local_dir = args.fetch_to_dir  # hand off to igraph path below
 
     if args.local_dir:
         # ── Fast path: igraph directly from JSONL (no NetworkX, half the RAM) ──
