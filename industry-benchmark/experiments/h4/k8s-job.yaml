@@ -1,0 +1,89 @@
+# H4 Community Detection — Kubernetes Job
+#
+# Runs igraph Louvain community detection on the full 1M-node ArangoDB graph
+# inside the cluster. No port-forward, no laptop RAM limit.
+#
+# Steps to run:
+#   1. Create the ConfigMap from the local script:
+#      kubectl create configmap community-detection-script \
+#        --from-file=community_detection.py=./community_detection.py \
+#        -n dromos-memory-os
+#
+#   2. Create the password secret (skip if already exists):
+#      kubectl create secret generic arango-root-pass \
+#        --from-literal=password='32mQkj3FIvTKp2sUNesNtB76E6lI4Mr#' \
+#        -n dromos-memory-os
+#
+#   3. Apply the job:
+#      kubectl apply -f k8s-job.yaml
+#
+#   4. Watch logs:
+#      kubectl logs -f job/h4-community-detection -n dromos-memory-os
+#
+#   5. Copy results out when done:
+#      kubectl cp dromos-memory-os/<pod-name>:/tmp/h4_results_full.json ./h4_results_full.json
+#
+#   6. Clean up:
+#      kubectl delete job h4-community-detection -n dromos-memory-os
+#      kubectl delete configmap community-detection-script -n dromos-memory-os
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: h4-community-detection
+  namespace: dromos-memory-os
+spec:
+  ttlSecondsAfterFinished: 7200   # auto-delete pod 2 hours after completion
+  backoffLimit: 0                  # don't retry on failure — surface errors immediately
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: community-detection
+          image: python:3.11-slim
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              echo "=== Installing dependencies ==="
+              pip install --quiet python-arango igraph networkx scikit-learn numpy
+
+              echo "=== Waiting for JSONL files to be copied in ==="
+              echo "    kubectl cp each file into this pod now (see job comments)"
+              echo "    Then create /tmp/graph_data/ready to start detection"
+              mkdir -p /tmp/graph_data
+              while [ ! -f /tmp/graph_data/ready ]; do
+                sleep 10
+              done
+              echo "=== Ready file detected — starting community detection ==="
+
+              python /scripts/community_detection.py \
+                --url http://memory-os-arangodb:8529 \
+                --pass "$(ARANGO_PASS)" \
+                --local-dir /tmp/graph_data \
+                --no-silhouette \
+                --output /tmp/h4_results_full.json
+
+              echo "=== Results ==="
+              cat /tmp/h4_results_full.json
+          env:
+            - name: ARANGO_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: arango-root-pass
+                  key: password
+          resources:
+            requests:
+              memory: "12Gi"
+              cpu: "2"
+            limits:
+              memory: "14Gi"
+              cpu: "4"
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+      volumes:
+        - name: script
+          configMap:
+            name: community-detection-script
