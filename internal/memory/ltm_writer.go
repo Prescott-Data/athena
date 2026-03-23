@@ -67,6 +67,7 @@ func (w *LTMWriter) TriggerCommunityDetection(ctx context.Context) error {
 	}
 
 	// Synchronously calculate bridge entities based on existing community_id values.
+	// To re-run community detection, use the H4 K8s job (industry-benchmark/experiments/h4/k8s-job.yaml).
 	return w.analytics.CalculateBridgeEntities(ctx)
 }
 
