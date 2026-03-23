@@ -55,15 +55,18 @@ func NewLTMWriter(ctx context.Context, dbURL, user, pass, dbName string) (*LTMWr
 	}, nil
 }
 
-// TriggerCommunityDetection starts a background community detection job across the LTM graph,
-// and if successful, immediately follows up by calculating the bridge entities.
+// TriggerCommunityDetection runs bridge entity calculation across the LTM graph.
+// Community detection via Pregel is attempted first; if it fails (e.g. ArangoDB 3.12+
+// removed the Pregel API), we log a warning and proceed — community_id values are
+// assumed to be pre-populated by the external igraph/Louvain K8s job from H4.
 func (w *LTMWriter) TriggerCommunityDetection(ctx context.Context) error {
-	err := w.analytics.RunCommunityDetection(ctx)
-	if err != nil {
-		return err
+	if err := w.analytics.RunCommunityDetection(ctx); err != nil {
+		slog.Warn("Pregel community detection unavailable — proceeding with pre-populated community_id values",
+			slog.String("reason", err.Error()),
+		)
 	}
 
-	// Synchronously calculate bridge entities based on the new community identifiers
+	// Synchronously calculate bridge entities based on existing community_id values.
 	return w.analytics.CalculateBridgeEntities(ctx)
 }
 
