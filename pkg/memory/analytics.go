@@ -124,64 +124,54 @@ func (e *AnalyticsEngine) RunCommunityDetection(ctx context.Context) error {
 // CalculateBridgeEntities iterates through all graph nodes to determine if they act as
 // bridges between different communities, updating them with a bridge_score.
 // This should be run synchronously after community detection completes.
+//
+// ArangoDB does not support dynamic collection names in DML statements, so we run one
+// query per node collection instead of a single UNION query with a dynamic UPDATE target.
 func (e *AnalyticsEngine) CalculateBridgeEntities(ctx context.Context) error {
 	slog.Info("Starting LTM Bridge Entity Calculation...")
 
-	// We calculate the bridge score by finding all distinct community IDs a node touches
-	// via its incoming or outgoing MemoryEdges. A node is a bridge if it connects to communities
-	// other than its own. The score is the number of distinct *other* communities it touches.
-	// Since node IDs span multiple collections, we can query them dynamically or iteratively.
-	// ArangoDB's traversal allows us to do this across all nodes.
-
-	query := `
-		// Collect all nodes from the four node collections
-		FOR node IN UNION(Identities, Concepts, Tools, Projects)
-			// Filter out nodes that don't have a community_id
-			FILTER HAS(node, "community_id") AND node.community_id != null
-			
-			// Find all distinct communities this node connects to (both incoming and outgoing)
-			LET connected_communities = (
-				FOR v, edge IN 1..1 ANY node MemoryEdges
-					FILTER HAS(v, "community_id") AND v.community_id != null AND v.community_id != node.community_id
-					RETURN DISTINCT v.community_id
-			)
-			
-			LET bridge_score = LENGTH(connected_communities)
-			LET is_bridge = bridge_score > 0
-			
-			// Update the node depending on its collection
-			// We parse the collection part of the node's _id
-			LET col = PARSE_IDENTIFIER(node._id).collection
-			
-			// Only perform update if the node is actually a bridge to avoid massive write ops
-			FILTER is_bridge == true
-			
-			// Execute the dynamic update
-			UPDATE node._key WITH { 
-				is_bridge: true, 
-				bridge_score: bridge_score 
-			} IN col
-			
-			RETURN { id: node._id, bridge_score: bridge_score }
-	`
+	// bridgeQuery runs for a single named collection. ArangoDB requires the collection
+	// name in UPDATE to be a string literal, not a variable — hence one query per collection.
+	bridgeQuery := func(collection string) string {
+		return fmt.Sprintf(`
+			FOR node IN %s
+				FILTER HAS(node, "community_id") AND node.community_id != null
+				LET connected_communities = (
+					FOR v, edge IN 1..1 ANY node MemoryEdges
+						FILTER HAS(v, "community_id") AND v.community_id != null
+							AND v.community_id != node.community_id
+						RETURN DISTINCT v.community_id
+				)
+				LET bridge_score = LENGTH(connected_communities)
+				FILTER bridge_score > 0
+				UPDATE node._key WITH { is_bridge: true, bridge_score: bridge_score } IN %s
+				RETURN { id: node._id, bridge_score: bridge_score }
+		`, collection, collection)
+	}
 
 	timer := time.Now()
-
-	// Start an AQL query
-	cursor, err := e.db.Query(ctx, query, nil)
-	if err != nil {
-		return fmt.Errorf("failed to execute bridge calculation AQL: %w", err)
-	}
-	defer cursor.Close()
-
 	bridgeCount := 0
-	for cursor.HasMore() {
-		var doc map[string]interface{}
-		_, err := cursor.ReadDocument(ctx, &doc)
+
+	for _, col := range []string{"Concepts", "Identities", "Projects", "Tools"} {
+		cursor, err := e.db.Query(ctx, bridgeQuery(col), nil)
 		if err != nil {
-			return fmt.Errorf("failed to read cursor document: %w", err)
+			return fmt.Errorf("bridge calculation failed for collection %s: %w", col, err)
 		}
-		bridgeCount++
+
+		for cursor.HasMore() {
+			var doc map[string]interface{}
+			_, err := cursor.ReadDocument(ctx, &doc)
+			if err != nil {
+				cursor.Close()
+				return fmt.Errorf("failed to read bridge result from %s: %w", col, err)
+			}
+			bridgeCount++
+		}
+		cursor.Close()
+
+		slog.Info("Bridge calculation complete for collection",
+			slog.String("collection", col),
+		)
 	}
 
 	duration := time.Since(timer)
