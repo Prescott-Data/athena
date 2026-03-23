@@ -1,0 +1,3 @@
+h3_results_*json
+h3_sample_nodes_*.json
+load_test_h3.js
