@@ -1,6 +1,6 @@
-# Onboarding Guide — dromos-core
+# Onboarding Guide — Athena MemOS
 
-Welcome to dromos-core. This guide gives you a structured reading trail so you understand the system in the right order — no wandering through files wondering what matters.
+Welcome to **Athena MemOS**. This guide gives you a structured reading trail so you understand the service architecture without getting lost in the codebase.
 
 Estimated time to complete the core trail: **2–3 hours** (reading + local setup).
 
@@ -11,10 +11,9 @@ Estimated time to complete the core trail: **2–3 hours** (reading + local setu
 Read [`OVERVIEW.md`](./OVERVIEW.md) in this directory.
 
 By the end you should be able to answer:
-- What does Athena MemOS do, and how does it differ from the Odin KG service?
+- What does Athena MemOS do?
 - What do the three memory tiers (STM / MTM / LTM) stand for?
-- Which services are written in Go vs Python?
-- What are the two separate ArangoDB databases used in this platform?
+- How does data flow between Redis, MongoDB, and ArangoDB?
 
 ---
 
@@ -28,7 +27,7 @@ Key things to understand:
 - Why is STM dual-written to both Redis **and** MongoDB?
 - What triggers a "chain break" and how does the Worker decide?
 - What is a heat score and how does it decay over time?
-- Why does Pregel run as a Kubernetes CronJob rather than in-process?
+- Why does Pregel (community detection) run as an intermittent CronJob rather than an active go routine?
 
 ---
 
@@ -44,10 +43,12 @@ This explains the "orbital mechanics" metaphor behind the architecture decisions
 
 Read [`docs/ATHENA_UNIFIED_ARCHITECTURE.md`](./docs/ATHENA_UNIFIED_ARCHITECTURE.md).
 
-This is the most important document for understanding how Athena relates to every other service. Key sections:
-- **§3 — Athena-Odin Synergy**: How the Promoter feeds into the Odin KG pipeline, and why the two graphs are kept separate
-- **§4 — Hybrid Retrieval Model**: Why LTPM is cached per-session but STM/MTM is fetched per-message
-- **§5 — Workflow Storage**: Why large workflow JSON lives in Azure Blob and only a pointer lives in Athena
+Since Athena acts as the central hub for other Dromos services (like `arango-db` and Python agents), this doc explains those integration boundaries.
+
+Key sections:
+- **§3 — Athena-Odin Synergy**: How the Promoter feeds into the external `arango-db` (Odin KG) pipeline.
+- **§4 — Hybrid Retrieval Model**: Why LTPM is cached per-session but STM/MTM is fetched per-message.
+- **§5 — Workflow Storage**: Why large workflow JSON lives in Azure Blob and only a pointer lives in Athena.
 
 ---
 
@@ -58,88 +59,40 @@ Follow [`docs/QUICKSTART.md`](./docs/QUICKSTART.md).
 At the end of this step you will have:
 - All infrastructure containers running (`Redis`, `MongoDB`, `Milvus`, `ArangoDB`, `MinIO`)
 - The Athena server running on `localhost:8080` and `localhost:9090`
-- Successfully created a session, stored an interaction, and retrieved context via curl
+- Successfully created a session, stored an interaction, and retrieved context via `curl`.
 
 ---
 
-## Step 6 — Read for Your Role
+## Step 6 — Digging into the Code
 
-Once you've completed Steps 1–5, continue with the documents most relevant to what you'll be working on.
+Once you've completed Steps 1–5, here are the best entry points in the source code:
 
-### If you're working on `athena-memos` (Go)
+- `cmd/memory-server/main.go` — Server startup, dependency injection wiring.
+- `internal/server/server.go` — The gRPC service handler containing all API methods.
+- `internal/memory/stm_store.go` — The core logic for Short-Term Memory operations.
+- `internal/memory/worker.go` — Background chain-break detection logic.
+- `internal/memory/promoter.go` — The background goroutine responsible for heat-based LTM promotion.
+- `pkg/memoryos/` — The Go client SDK used by external sibling services.
 
-| Document | What it covers |
-|---|---|
-| [`README.md`](./README.md) **§6–13** | Auth, all config env vars, database schemas, Prometheus metrics, CI/CD, SDK, deployment |
-| [`docs/ARANGODB_INFRA_SPEC.md`](./docs/ARANGODB_INFRA_SPEC.md) | ArangoDB infra sizing, indexes, security model, alerting |
-| [`techdebt.md`](./techdebt.md) | All known open issues — read this before starting any new feature |
+Read [`README.md`](./README.md) **§6–13** for deep-dive references on Auth, Environment Variables, Database Schemas, Prometheus Metrics, and Deployment.
 
-**Entry points in code:**
-- `cmd/memory-server/main.go` — server startup, wiring of all dependencies
-- `internal/server/server.go` — gRPC service handler (all API methods)
-- `internal/memory/stm_store.go` — core STM logic
-- `internal/memory/worker.go` — background chain-break detection
-- `internal/memory/promoter.go` — heat-based LTM promotion
-- `pkg/memoryos/` — Go client SDK (used by other Dromos services)
-
----
-
-### If you're working on `arango-db` (Odin KG service — Python)
-
-| Document | What it covers |
-|---|---|
-| [`../arango-db/README.md`](../arango-db/README.md) | Full Odin service overview: graph schema, embedding storage, KG extraction, performance |
-| [`../arango-db/CONTRIBUTING.md`](../arango-db/CONTRIBUTING.md) | Local setup, env vars, how to run and test |
-| [`docs/ATHENA_UNIFIED_ARCHITECTURE.md`](./docs/ATHENA_UNIFIED_ARCHITECTURE.md) **§8.1** | What Athena needs from the Odin team: HTTP endpoint, custom entity types, `origin_source` tagging |
-
-**Entry points in code:**
-- `main.py` — FastAPI + gRPC server startup
-- `storage/kg_extractor.py` — LLM-powered entity/relationship extraction
-- `storage_client.py` — ArangoDB connection management and batch operations
-- `grpc_service/` — gRPC service handler
-
----
-
-### If you're working on a DocIntel agent (Python)
-
-| Document | What it covers |
-|---|---|
-| [`docs/docintel-api-integration-spec.md`](./docs/docintel-api-integration-spec.md) | Definitive integration contract: 3 Athena calls, what to delete, migration phases |
-| [`docs/docintel-api-integration-spec.md`](./docs/docintel-api-integration-spec.md) **§10** | Agent-by-agent Athena integration matrix: Scout, Guided Scout, Analyst |
-| [`../docintel-chat-agent/README.md`](../docintel-chat-agent/README.md) | Chat agent architecture and P2P communication |
-
-**Key architecture decisions to understand from §10:**
-- The Scout agent does **not** interact with Athena at all — it queries the Odin graph only
-- The Guided Scout **optionally** calls Athena `GetContext` when a user goal is vague
-- The Analyst agent writes findings to DocIntel/Odin, **not** Athena — see the Federated Architecture in §10.3
-
----
-
-### If you're setting up infrastructure or DevOps
-
-| Document | What it covers |
-|---|---|
-| [`README.md`](./README.md) **§10 CI/CD** | Pipeline steps, protobuf generation, Docker build |
-| [`README.md`](./README.md) **§13 Deployment** | Docker, AKS resource sizing, required K8s CronJob manifest |
-| [`docs/ARANGODB_INFRA_SPEC.md`](./docs/ARANGODB_INFRA_SPEC.md) | ArangoDB storage (SSD/NVMe, 3000 IOPS), compute (16–32Gi RAM), security (`athena_svc` account), monitoring alerts |
+Read [`docs/ARANGODB_INFRA_SPEC.md`](./docs/ARANGODB_INFRA_SPEC.md) for ArangoDB infrastructure sizing and security model expectations.
 
 ---
 
 ## Common Gotchas
 
-> Read these before writing any code.
+> Read these before submitting a PR.
 
 1. **Never commit generated protobuf files.** `api/grpc/gen/*.pb.go` and `*.pb.gw.go` are in `.gitignore` and are generated fresh by CI. Run `make generate` locally if you need them, but do not `git add` them.
 
-2. **Pregel must never run in-process.** A previous PR added an in-process goroutine for community detection — it was reverted because Pregel loads the full graph into memory and will OOM large tenants. Always trigger via the K8s CronJob at `POST /api/v1/admin/analytics/trigger`.
+2. **Pregel must never run in-process.** A previous PR added an in-process goroutine for community detection — it was reverted because Pregel loads the full graph into memory and will OOM large tenants. Always trigger via the remote K8s CronJob at `POST /api/v1/admin/analytics/trigger`.
 
 3. **`GetContext` does not yet return LTM data.** The `ltpm` field in the response is hardcoded to `{status: "not_implemented"}`. This is a known open issue in `techdebt.md §2`. If you're building an integration that needs LTM data, use `SearchMemory` instead.
 
-4. **Two ArangoDB databases.** `athena_ltm` belongs to Athena. The Odin KG database belongs to `arango-db`. They are separate instances with separate schemas. Do not write Athena data into the Odin graph or vice versa.
+4. **STM env var naming inconsistency.** `MEMORY_OS_STM_CACHE_MAX_TURNS` (in `config.go`) and `STM_CACHE_MAX_TURNS` (in `stm_cache.go`) are logically the same setting but read from different env vars. Set **both** until this is resolved (tracked in `techdebt.md §5`).
 
-5. **STM env var naming inconsistency.** `MEMORY_OS_STM_CACHE_MAX_TURNS` (in `config.go`) and `STM_CACHE_MAX_TURNS` (in `stm_cache.go`) are logically the same setting but read from different env vars. Set **both** until this is resolved (tracked in `techdebt.md §5`).
-
-6. **Edges with EMA-skewed confidence in production.** Edges written between ~March 9–10, 2026 may have `confidence` values drift-skewed below 0.5. An AQL migration is pending — see `techdebt.md §7`.
+5. **Edges with EMA-skewed confidence in production.** Edges written between ~March 9–10, 2026 may have `confidence` values drift-skewed below 0.5. An AQL migration is pending — see `techdebt.md §7`.
 
 ---
 
