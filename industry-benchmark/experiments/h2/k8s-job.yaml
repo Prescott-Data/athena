@@ -1,0 +1,87 @@
+# H2 Anti-Tunneling — Kubernetes Job
+#
+# Runs the H2 cross-service bridge experiment inside the AKS cluster.
+# Connects to memory-os and ArangoDB via ClusterIP services — no port-forward needed.
+#
+# Prerequisite: community_id must be populated on LTM nodes (H4 K8s job must have run).
+#
+# Steps to run:
+#   1. Create the ConfigMap from the local script:
+#      kubectl create configmap h2-experiment-script \
+#        --from-file=h2_experiment.py=./h2_experiment.py \
+#        -n dromos-memory-os
+#
+#   2. Ensure the password secret exists (created by H4 setup, skip if already present):
+#      kubectl create secret generic arango-root-pass \
+#        --from-literal=password='<arango-root-password>' \
+#        -n dromos-memory-os
+#
+#   3. Apply the job:
+#      kubectl apply -f k8s-job.yaml -n dromos-memory-os
+#
+#   4. Watch logs:
+#      kubectl logs -f job/h2-anti-tunneling -n dromos-memory-os
+#
+#   5. Copy results out when done:
+#      POD=$(kubectl get pods -n dromos-memory-os -l job-name=h2-anti-tunneling -o jsonpath='{.items[0].metadata.name}')
+#      kubectl cp dromos-memory-os/${POD}:/tmp/h2_results.json ./h2_results.json
+#
+#   6. Clean up:
+#      kubectl delete job h2-anti-tunneling -n dromos-memory-os
+#      kubectl delete configmap h2-experiment-script -n dromos-memory-os
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: h2-anti-tunneling
+  namespace: dromos-memory-os
+spec:
+  ttlSecondsAfterFinished: 7200   # auto-delete pod 2 hours after completion
+  backoffLimit: 0                  # don't retry on failure — surface errors immediately
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: h2-experiment
+          image: python:3.11-slim
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              echo "=== Installing dependencies ==="
+              pip install --quiet python-arango requests
+
+              echo "=== Starting H2 Anti-Tunneling Experiment ==="
+              python /scripts/h2_experiment.py \
+                --athena-url  http://memory-os:8080 \
+                --arango-url  http://memory-os-arangodb:8529 \
+                --arango-pass "$(ARANGO_PASS)" \
+                --arango-db   athena_ltm \
+                --api-key     dev-api-key \
+                --tenant-id   tenant_dromos_research \
+                --user-id     user_athena_benchmark \
+                --output      /tmp/h2_results.json
+
+              echo "=== Results ==="
+              cat /tmp/h2_results.json
+          env:
+            - name: ARANGO_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: arango-root-pass
+                  key: password
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "1"
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+      volumes:
+        - name: script
+          configMap:
+            name: h2-experiment-script

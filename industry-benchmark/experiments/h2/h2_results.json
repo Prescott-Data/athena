@@ -1,0 +1,1037 @@
+{
+  "hypothesis": "H2 \u2014 Cross-Service Bridge (Anti-Tunneling)",
+  "timestamp": "2026-03-23T19:05:32.612978+00:00",
+  "tenant_id": "tenant_dromos_research",
+  "user_id": "user_athena_benchmark",
+  "phases": {
+    "phase_1_community_discovery": {
+      "clinical_community_id": 2,
+      "infra_community_id": 1
+    },
+    "phase_2_clinical_injection": {
+      "session_id": "93cdba12-4435-440d-aa81-eb6bef2e6ed3",
+      "interactions_stored": 5
+    },
+    "phase_3_infra_injection": {
+      "session_id": "1a9a8914-72e3-4b5f-aeb0-51dab48184e4",
+      "interactions_stored": 5
+    },
+    "phase_4_ltm_injection": {
+      "nodes": {
+        "ampath_dm2_guidelines": "Concepts/ampath_dm2_guidelines",
+        "covid19_treatment_protocol": "Concepts/covid19_treatment_protocol",
+        "clinical_diabetes_management": "Concepts/clinical_diabetes_management",
+        "kubernetes_deployment_pipeline": "Concepts/kubernetes_deployment_pipeline",
+        "helm_chart_configuration": "Concepts/helm_chart_configuration",
+        "cluster_autoscaling_policy": "Concepts/cluster_autoscaling_policy"
+      },
+      "cross_community_edges_before_bridge": 1
+    },
+    "phase_5_baseline": {
+      "query": "How do we scale the AMPATH deployment?",
+      "raw_results": [
+        {
+          "content": "The conversation discusses treatment protocols for COVID-19 patients with pre-existing diabetes, emphasizing HbA1c monitoring, insulin adjustments, and hyperglycemia management in hospitalized patients as per AMPATH guidelines.",
+          "similarityScore": 1.3102778196334839,
+          "sourceType": "cognitive_chain",
+          "sourceId": "a19cea28-da27-4cf8-8c6f-cb747391b40d",
+          "timestamp": "2026-03-23T18:53:38.367Z"
+        },
+        {
+          "content": "The conversation discusses AMPATH guidelines for managing COVID-19 patients with diabetes, covering acute care protocols, hyperglycemia management, and post-discharge follow-up plans.",
+          "similarityScore": 1.166149616241455,
+          "sourceType": "cognitive_chain",
+          "sourceId": "f95477ce-d087-4782-8f59-41f133105856",
+          "timestamp": "2026-03-23T18:53:39.601Z"
+        },
+        {
+          "content": "The conversation involves configuring Kubernetes clusters for production, including horizontal pod autoscaling, Helm chart recommendations, secrets management, and monitoring stack deployment. Key recommendations include setting HPA targets, using specific Helm chart versions, integrating Azure Key Vault for secrets, and deploying the kube-prometheus-stack for monitoring.",
+          "similarityScore": 1.348607063293457,
+          "sourceType": "cognitive_chain",
+          "sourceId": "368c5723-8130-4d26-bd0d-e66646c500da",
+          "timestamp": "2026-03-23T18:53:49.527Z"
+        },
+        {
+          "content": "The conversation involves configuring Kubernetes features for a production environment, including horizontal pod autoscaling, Helm chart recommendations, secrets management, and monitoring stack deployment, with specific technical details provided for each topic.",
+          "similarityScore": 1.3477704524993896,
+          "sourceType": "cognitive_chain",
+          "sourceId": "b47f735c-9678-4831-b689-5b089f1cd8d5",
+          "timestamp": "2026-03-23T18:53:49.527Z"
+        },
+        {
+          "content": "The conversation segment discusses clinical biomarkers predicting severe COVID-19 outcomes in diabetic patients, treatment protocols for diabetic COVID-19 patients, and management of hyperglycemia in hospitalized COVID-19 patients, referencing AMPATH clinical guidelines and protocols.",
+          "similarityScore": 1.4319050312042236,
+          "sourceType": "cognitive_chain",
+          "sourceId": "2b2be0f6-f357-4eb0-b3c3-9a77dad9af57",
+          "timestamp": "2026-03-23T18:57:42.800Z"
+        },
+        {
+          "content": "The conversation centers on advanced Kubernetes configurations: namespace isolation using NetworkPolicy, RBAC, and node taints; horizontal pod autoscaling with defined resource requests; and deploying a pipeline using a specific Helm chart version with safe rollout practices.",
+          "similarityScore": 1.4182982444763184,
+          "sourceType": "cognitive_chain",
+          "sourceId": "8879f53a-d2fc-415a-882b-ac5a1ab8ff20",
+          "timestamp": "2026-03-23T18:57:51.608Z"
+        },
+        {
+          "content": "The conversation involves configuring and deploying a Kubernetes cluster, covering horizontal pod autoscaling, Helm chart versions, secrets management, and monitoring stack setup, with detailed recommendations for each topic.",
+          "similarityScore": 1.3342244625091553,
+          "sourceType": "cognitive_chain",
+          "sourceId": "89827af5-2105-47e0-a36a-d719c3ee53ae",
+          "timestamp": "2026-03-23T18:57:54.886Z"
+        },
+        {
+          "content": "The user plans to deploy the AMPATH-DM2 clinical guidelines on a Kubernetes cluster. The agent advises packaging the guideline engine as a container, using the dromos-pipeline Helm chart with a custom values.yaml for the AMPATH-DM2 image tag, mounting clinical data volumes as PVCs backed by Azure Disk with GRS redundancy, and applying a NetworkPolicy to restrict access to the clinical namespace.",
+          "similarityScore": 1.0609040260314941,
+          "sourceType": "cognitive_chain",
+          "sourceId": "c5f2cc5d-bd5e-4ffc-bb8d-1c5c6edde606",
+          "timestamp": "2026-03-23T18:58:16.591Z"
+        },
+        {
+          "content": "The conversation discusses deploying AMPATH-DM2 clinical guidelines onto a Kubernetes cluster, including technical specifics like containerization and Helm chart configurations. Additionally, it covers treatment protocols for COVID-19 patients with diabetes, emphasizing HbA1c monitoring, insulin adjustments, and hyperglycemia management in hospitalized patients.",
+          "similarityScore": 0.9473376274108887,
+          "sourceType": "cognitive_chain",
+          "sourceId": "6023cba7-ebb0-4805-8ea0-f417073d6531",
+          "timestamp": "2026-03-23T19:05:39.890Z"
+        },
+        {
+          "content": "The conversation segment discusses technical configurations for Kubernetes environments, including namespace isolation, horizontal pod autoscaling, and Helm chart deployment, providing specific recommendations and configurations for each topic.",
+          "similarityScore": 1.4357531070709229,
+          "sourceType": "cognitive_chain",
+          "sourceId": "c5dc755f-9a01-4907-84c0-ab28b25473d8",
+          "timestamp": "2026-03-23T19:05:49.108Z"
+        },
+        {
+          "content": "personal_milestone_743309 [Identities]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "identities_00743309",
+          "timestamp": null
+        },
+        {
+          "content": "network_policy_573431 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00573431",
+          "timestamp": null
+        },
+        {
+          "content": "patient_history_114726 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00114726",
+          "timestamp": null
+        },
+        {
+          "content": "api_gateway_509134 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00509134",
+          "timestamp": null
+        },
+        {
+          "content": "stakeholder_relationship_923847 [Tools]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "tools_00923847",
+          "timestamp": null
+        },
+        {
+          "content": "auto_scaling_policy_413607 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00413607",
+          "timestamp": null
+        },
+        {
+          "content": "disaster_recovery_525089 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00525089",
+          "timestamp": null
+        },
+        {
+          "content": "patient_history_154386 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00154386",
+          "timestamp": null
+        },
+        {
+          "content": "rehabilitation_plan_80754 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00080754",
+          "timestamp": null
+        },
+        {
+          "content": "stakeholder_relationship_691842 [Identities]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "identities_00691842",
+          "timestamp": null
+        },
+        {
+          "content": "kubernetes_cluster_574425 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00574425",
+          "timestamp": null
+        },
+        {
+          "content": "ci_cd_workflow_602468 [Identities]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "identities_00602468",
+          "timestamp": null
+        },
+        {
+          "content": "skill_profile_974508 [Tools]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "tools_00974508",
+          "timestamp": null
+        },
+        {
+          "content": "infection_control_328210 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00328210",
+          "timestamp": null
+        },
+        {
+          "content": "monitoring_dashboard_634342 [Identities]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "identities_00634342",
+          "timestamp": null
+        },
+        {
+          "content": "secret_management_537985 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00537985",
+          "timestamp": null
+        },
+        {
+          "content": "stakeholder_relationship_789387 [Identities]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "identities_00789387",
+          "timestamp": null
+        },
+        {
+          "content": "action_item_869308 [Projects]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "projects_00869308",
+          "timestamp": null
+        },
+        {
+          "content": "disaster_recovery_642374 [Identities]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "identities_00642374",
+          "timestamp": null
+        },
+        {
+          "content": "kubernetes_cluster_452205 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00452205",
+          "timestamp": null
+        },
+        {
+          "content": "container_registry_588231 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00588231",
+          "timestamp": null
+        },
+        {
+          "content": "auto_scaling_policy_340932 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00340932",
+          "timestamp": null
+        },
+        {
+          "content": "backup_strategy_394663 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00394663",
+          "timestamp": null
+        },
+        {
+          "content": "patient_history_277311 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00277311",
+          "timestamp": null
+        },
+        {
+          "content": "load_balancer_504017 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00504017",
+          "timestamp": null
+        },
+        {
+          "content": "disaster_recovery_566744 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00566744",
+          "timestamp": null
+        },
+        {
+          "content": "container_registry_660891 [Identities]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "identities_00660891",
+          "timestamp": null
+        },
+        {
+          "content": "api_gateway_571114 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00571114",
+          "timestamp": null
+        },
+        {
+          "content": "kubernetes_cluster_543555 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00543555",
+          "timestamp": null
+        },
+        {
+          "content": "auto_scaling_policy_546252 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00546252",
+          "timestamp": null
+        },
+        {
+          "content": "ci_cd_workflow_515948 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00515948",
+          "timestamp": null
+        },
+        {
+          "content": "infrastructure_as_code_625704 [Identities]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "identities_00625704",
+          "timestamp": null
+        },
+        {
+          "content": "auto_scaling_policy_379032 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00379032",
+          "timestamp": null
+        },
+        {
+          "content": "meeting_notes_975698 [Tools]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "tools_00975698",
+          "timestamp": null
+        },
+        {
+          "content": "ci_cd_workflow_519143 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00519143",
+          "timestamp": null
+        },
+        {
+          "content": "database_migration_393513 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00393513",
+          "timestamp": null
+        },
+        {
+          "content": "secret_management_539185 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00539185",
+          "timestamp": null
+        },
+        {
+          "content": "database_migration_427833 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00427833",
+          "timestamp": null
+        },
+        {
+          "content": "deployment_pipeline_403666 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00403666",
+          "timestamp": null
+        },
+        {
+          "content": "container_registry_448401 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00448401",
+          "timestamp": null
+        },
+        {
+          "content": "container_registry_416436 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00416436",
+          "timestamp": null
+        },
+        {
+          "content": "performance_review_735671 [Identities]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "identities_00735671",
+          "timestamp": null
+        },
+        {
+          "content": "kubernetes_cluster_578130 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00578130",
+          "timestamp": null
+        },
+        {
+          "content": "meeting_notes_981203 [Tools]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "tools_00981203",
+          "timestamp": null
+        },
+        {
+          "content": "work_schedule_912635 [Tools]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "tools_00912635",
+          "timestamp": null
+        },
+        {
+          "content": "nursing_care_plan_247259 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00247259",
+          "timestamp": null
+        },
+        {
+          "content": "secret_management_437875 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00437875",
+          "timestamp": null
+        },
+        {
+          "content": "ci_cd_workflow_485933 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00485933",
+          "timestamp": null
+        },
+        {
+          "content": "backup_strategy_546523 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00546523",
+          "timestamp": null
+        },
+        {
+          "content": "goal_tracking_873262 [Projects]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "projects_00873262",
+          "timestamp": null
+        }
+      ],
+      "milvus_chain_count": 10,
+      "ltm_node_count": 50,
+      "ltm_node_keys": [
+        "identities_00743309",
+        "concepts_00573431",
+        "concepts_00114726",
+        "concepts_00509134",
+        "tools_00923847",
+        "concepts_00413607",
+        "concepts_00525089",
+        "concepts_00154386",
+        "concepts_00080754",
+        "identities_00691842",
+        "concepts_00574425",
+        "identities_00602468",
+        "tools_00974508",
+        "concepts_00328210",
+        "identities_00634342",
+        "concepts_00537985",
+        "identities_00789387",
+        "projects_00869308",
+        "identities_00642374",
+        "concepts_00452205",
+        "concepts_00588231",
+        "concepts_00340932",
+        "concepts_00394663",
+        "concepts_00277311",
+        "concepts_00504017",
+        "concepts_00566744",
+        "identities_00660891",
+        "concepts_00571114",
+        "concepts_00543555",
+        "concepts_00546252",
+        "concepts_00515948",
+        "identities_00625704",
+        "concepts_00379032",
+        "tools_00975698",
+        "concepts_00519143",
+        "concepts_00393513",
+        "concepts_00539185",
+        "concepts_00427833",
+        "concepts_00403666",
+        "concepts_00448401",
+        "concepts_00416436",
+        "identities_00735671",
+        "concepts_00578130",
+        "tools_00981203",
+        "tools_00912635",
+        "concepts_00247259",
+        "concepts_00437875",
+        "concepts_00485933",
+        "concepts_00546523",
+        "projects_00873262"
+      ]
+    },
+    "phase_6_bridge_injection": {
+      "bridge_session_id": "82c4e60c-9d2f-482c-928c-22579688b4a8",
+      "bridge_node_id": "Concepts/ampath_kubernetes_deployment",
+      "cross_community_edges_after_bridge": 2
+    },
+    "phase_7_bridge_activation": {
+      "trigger_response": {
+        "success": true,
+        "message": "Graph analytics job (Community Detection and Bridge Entities) has been triggered in the background."
+      },
+      "bridge_node_status": {
+        "found": true,
+        "is_bridge": false,
+        "bridge_score": 0,
+        "community_id": 2
+      },
+      "is_bridge_pass": false,
+      "bridge_score_pass": false
+    },
+    "phase_8_post_bridge": {
+      "query": "How do we scale the AMPATH deployment?",
+      "raw_results": [
+        {
+          "content": "The conversation discusses treatment protocols for COVID-19 patients with pre-existing diabetes, emphasizing HbA1c monitoring, insulin adjustments, and hyperglycemia management in hospitalized patients as per AMPATH guidelines.",
+          "similarityScore": 1.3102778196334839,
+          "sourceType": "cognitive_chain",
+          "sourceId": "a19cea28-da27-4cf8-8c6f-cb747391b40d",
+          "timestamp": "2026-03-23T18:53:38.367Z"
+        },
+        {
+          "content": "The conversation discusses AMPATH guidelines for managing COVID-19 patients with diabetes, covering acute care protocols, hyperglycemia management, and post-discharge follow-up plans.",
+          "similarityScore": 1.166149616241455,
+          "sourceType": "cognitive_chain",
+          "sourceId": "f95477ce-d087-4782-8f59-41f133105856",
+          "timestamp": "2026-03-23T18:53:39.601Z"
+        },
+        {
+          "content": "The conversation involves configuring Kubernetes clusters for production, including horizontal pod autoscaling, Helm chart recommendations, secrets management, and monitoring stack deployment. Key recommendations include setting HPA targets, using specific Helm chart versions, integrating Azure Key Vault for secrets, and deploying the kube-prometheus-stack for monitoring.",
+          "similarityScore": 1.348607063293457,
+          "sourceType": "cognitive_chain",
+          "sourceId": "368c5723-8130-4d26-bd0d-e66646c500da",
+          "timestamp": "2026-03-23T18:53:49.527Z"
+        },
+        {
+          "content": "The conversation involves configuring Kubernetes features for a production environment, including horizontal pod autoscaling, Helm chart recommendations, secrets management, and monitoring stack deployment, with specific technical details provided for each topic.",
+          "similarityScore": 1.3477704524993896,
+          "sourceType": "cognitive_chain",
+          "sourceId": "b47f735c-9678-4831-b689-5b089f1cd8d5",
+          "timestamp": "2026-03-23T18:53:49.527Z"
+        },
+        {
+          "content": "The conversation segment discusses clinical biomarkers predicting severe COVID-19 outcomes in diabetic patients, treatment protocols for diabetic COVID-19 patients, and management of hyperglycemia in hospitalized COVID-19 patients, referencing AMPATH clinical guidelines and protocols.",
+          "similarityScore": 1.4319050312042236,
+          "sourceType": "cognitive_chain",
+          "sourceId": "2b2be0f6-f357-4eb0-b3c3-9a77dad9af57",
+          "timestamp": "2026-03-23T18:57:42.800Z"
+        },
+        {
+          "content": "The conversation centers on advanced Kubernetes configurations: namespace isolation using NetworkPolicy, RBAC, and node taints; horizontal pod autoscaling with defined resource requests; and deploying a pipeline using a specific Helm chart version with safe rollout practices.",
+          "similarityScore": 1.4182982444763184,
+          "sourceType": "cognitive_chain",
+          "sourceId": "8879f53a-d2fc-415a-882b-ac5a1ab8ff20",
+          "timestamp": "2026-03-23T18:57:51.608Z"
+        },
+        {
+          "content": "The conversation involves configuring and deploying a Kubernetes cluster, covering horizontal pod autoscaling, Helm chart versions, secrets management, and monitoring stack setup, with detailed recommendations for each topic.",
+          "similarityScore": 1.3342244625091553,
+          "sourceType": "cognitive_chain",
+          "sourceId": "89827af5-2105-47e0-a36a-d719c3ee53ae",
+          "timestamp": "2026-03-23T18:57:54.886Z"
+        },
+        {
+          "content": "The user plans to deploy the AMPATH-DM2 clinical guidelines on a Kubernetes cluster. The agent advises packaging the guideline engine as a container, using the dromos-pipeline Helm chart with a custom values.yaml for the AMPATH-DM2 image tag, mounting clinical data volumes as PVCs backed by Azure Disk with GRS redundancy, and applying a NetworkPolicy to restrict access to the clinical namespace.",
+          "similarityScore": 1.0609040260314941,
+          "sourceType": "cognitive_chain",
+          "sourceId": "c5f2cc5d-bd5e-4ffc-bb8d-1c5c6edde606",
+          "timestamp": "2026-03-23T18:58:16.591Z"
+        },
+        {
+          "content": "The conversation discusses deploying AMPATH-DM2 clinical guidelines onto a Kubernetes cluster, including technical specifics like containerization and Helm chart configurations. Additionally, it covers treatment protocols for COVID-19 patients with diabetes, emphasizing HbA1c monitoring, insulin adjustments, and hyperglycemia management in hospitalized patients.",
+          "similarityScore": 0.9473376274108887,
+          "sourceType": "cognitive_chain",
+          "sourceId": "6023cba7-ebb0-4805-8ea0-f417073d6531",
+          "timestamp": "2026-03-23T19:05:39.890Z"
+        },
+        {
+          "content": "The conversation discusses best practices and configurations for deploying and managing a Kubernetes cluster, including horizontal pod autoscaling, Helm chart versions, secrets management, and monitoring stack deployment.",
+          "similarityScore": 1.3085081577301025,
+          "sourceType": "cognitive_chain",
+          "sourceId": "c25acca8-3ede-4021-8821-036ab519c9d5",
+          "timestamp": "2026-03-23T19:05:52.382Z"
+        },
+        {
+          "content": "load_balancer_504017 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00504017",
+          "timestamp": null
+        },
+        {
+          "content": "patient_history_114726 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00114726",
+          "timestamp": null
+        },
+        {
+          "content": "personal_milestone_743309 [Identities]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "identities_00743309",
+          "timestamp": null
+        },
+        {
+          "content": "api_gateway_509134 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00509134",
+          "timestamp": null
+        },
+        {
+          "content": "kubernetes_cluster_543555 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00543555",
+          "timestamp": null
+        },
+        {
+          "content": "stakeholder_relationship_691842 [Identities]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "identities_00691842",
+          "timestamp": null
+        },
+        {
+          "content": "ci_cd_workflow_515948 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00515948",
+          "timestamp": null
+        },
+        {
+          "content": "infrastructure_as_code_625704 [Identities]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "identities_00625704",
+          "timestamp": null
+        },
+        {
+          "content": "backup_strategy_394663 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00394663",
+          "timestamp": null
+        },
+        {
+          "content": "container_registry_448401 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00448401",
+          "timestamp": null
+        },
+        {
+          "content": "container_registry_588231 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00588231",
+          "timestamp": null
+        },
+        {
+          "content": "auto_scaling_policy_340932 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00340932",
+          "timestamp": null
+        },
+        {
+          "content": "performance_review_735671 [Identities]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "identities_00735671",
+          "timestamp": null
+        },
+        {
+          "content": "secret_management_437875 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00437875",
+          "timestamp": null
+        },
+        {
+          "content": "kubernetes_cluster_578130 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00578130",
+          "timestamp": null
+        },
+        {
+          "content": "database_migration_427833 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00427833",
+          "timestamp": null
+        },
+        {
+          "content": "skill_profile_974508 [Tools]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "tools_00974508",
+          "timestamp": null
+        },
+        {
+          "content": "network_policy_573431 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00573431",
+          "timestamp": null
+        },
+        {
+          "content": "patient_history_277311 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00277311",
+          "timestamp": null
+        },
+        {
+          "content": "disaster_recovery_566744 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00566744",
+          "timestamp": null
+        },
+        {
+          "content": "disaster_recovery_525089 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00525089",
+          "timestamp": null
+        },
+        {
+          "content": "patient_history_154386 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00154386",
+          "timestamp": null
+        },
+        {
+          "content": "rehabilitation_plan_80754 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00080754",
+          "timestamp": null
+        },
+        {
+          "content": "meeting_notes_981203 [Tools]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "tools_00981203",
+          "timestamp": null
+        },
+        {
+          "content": "api_gateway_571114 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00571114",
+          "timestamp": null
+        },
+        {
+          "content": "kubernetes_cluster_452205 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00452205",
+          "timestamp": null
+        },
+        {
+          "content": "meeting_notes_975698 [Tools]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "tools_00975698",
+          "timestamp": null
+        },
+        {
+          "content": "auto_scaling_policy_413607 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00413607",
+          "timestamp": null
+        },
+        {
+          "content": "ci_cd_workflow_519143 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00519143",
+          "timestamp": null
+        },
+        {
+          "content": "auto_scaling_policy_546252 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00546252",
+          "timestamp": null
+        },
+        {
+          "content": "secret_management_539185 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00539185",
+          "timestamp": null
+        },
+        {
+          "content": "stakeholder_relationship_789387 [Identities]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "identities_00789387",
+          "timestamp": null
+        },
+        {
+          "content": "ci_cd_workflow_602468 [Identities]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "identities_00602468",
+          "timestamp": null
+        },
+        {
+          "content": "backup_strategy_546523 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00546523",
+          "timestamp": null
+        },
+        {
+          "content": "goal_tracking_873262 [Projects]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "projects_00873262",
+          "timestamp": null
+        },
+        {
+          "content": "container_registry_660891 [Identities]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "identities_00660891",
+          "timestamp": null
+        },
+        {
+          "content": "deployment_pipeline_403666 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00403666",
+          "timestamp": null
+        },
+        {
+          "content": "work_schedule_912635 [Tools]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "tools_00912635",
+          "timestamp": null
+        },
+        {
+          "content": "disaster_recovery_642374 [Identities]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "identities_00642374",
+          "timestamp": null
+        },
+        {
+          "content": "container_registry_416436 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00416436",
+          "timestamp": null
+        },
+        {
+          "content": "ci_cd_workflow_485933 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00485933",
+          "timestamp": null
+        },
+        {
+          "content": "monitoring_dashboard_634342 [Identities]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "identities_00634342",
+          "timestamp": null
+        },
+        {
+          "content": "nursing_care_plan_247259 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00247259",
+          "timestamp": null
+        },
+        {
+          "content": "kubernetes_cluster_574425 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00574425",
+          "timestamp": null
+        },
+        {
+          "content": "action_item_869308 [Projects]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "projects_00869308",
+          "timestamp": null
+        },
+        {
+          "content": "infection_control_328210 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00328210",
+          "timestamp": null
+        },
+        {
+          "content": "stakeholder_relationship_923847 [Tools]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "tools_00923847",
+          "timestamp": null
+        },
+        {
+          "content": "secret_management_537985 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00537985",
+          "timestamp": null
+        },
+        {
+          "content": "database_migration_393513 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00393513",
+          "timestamp": null
+        },
+        {
+          "content": "auto_scaling_policy_379032 [Concepts]",
+          "similarityScore": 0,
+          "sourceType": "ltm_node",
+          "sourceId": "concepts_00379032",
+          "timestamp": null
+        }
+      ],
+      "milvus_chain_count": 10,
+      "ltm_node_count": 50,
+      "ltm_node_keys": [
+        "concepts_00504017",
+        "concepts_00114726",
+        "identities_00743309",
+        "concepts_00509134",
+        "concepts_00543555",
+        "identities_00691842",
+        "concepts_00515948",
+        "identities_00625704",
+        "concepts_00394663",
+        "concepts_00448401",
+        "concepts_00588231",
+        "concepts_00340932",
+        "identities_00735671",
+        "concepts_00437875",
+        "concepts_00578130",
+        "concepts_00427833",
+        "tools_00974508",
+        "concepts_00573431",
+        "concepts_00277311",
+        "concepts_00566744",
+        "concepts_00525089",
+        "concepts_00154386",
+        "concepts_00080754",
+        "tools_00981203",
+        "concepts_00571114",
+        "concepts_00452205",
+        "tools_00975698",
+        "concepts_00413607",
+        "concepts_00519143",
+        "concepts_00546252",
+        "concepts_00539185",
+        "identities_00789387",
+        "identities_00602468",
+        "concepts_00546523",
+        "projects_00873262",
+        "identities_00660891",
+        "concepts_00403666",
+        "tools_00912635",
+        "identities_00642374",
+        "concepts_00416436",
+        "concepts_00485933",
+        "identities_00634342",
+        "concepts_00247259",
+        "concepts_00574425",
+        "projects_00869308",
+        "concepts_00328210",
+        "tools_00923847",
+        "concepts_00537985",
+        "concepts_00393513",
+        "concepts_00379032"
+      ],
+      "baseline_ltm_domains": [
+        "clinical"
+      ],
+      "postbridge_ltm_domains": [],
+      "cross_domain_recall": false
+    },
+    "phase_9_milvus_verification": {
+      "milvus_domains_baseline": [
+        "clinical",
+        "infra"
+      ],
+      "milvus_domains_postbridge": [
+        "clinical",
+        "infra"
+      ],
+      "milvus_crosses_domains": true,
+      "milvus_domain_coverage_changed_after_bridge": false,
+      "athena_ltm_baseline_domains": [
+        "clinical"
+      ],
+      "athena_ltm_postbridge_domains": [],
+      "athena_cross_domain_pass": false
+    }
+  },
+  "verdict": {
+    "is_bridge_pass": false,
+    "bridge_score_pass": false,
+    "milvus_unaffected_by_bridge": true,
+    "athena_cross_domain_pass": false,
+    "overall": "FAIL"
+  }
+}
