@@ -68,7 +68,7 @@ temp/
 # Build outputs
 dist/
 build/
-/memory-server
+memory-server
 
 # Generated protobuf / gRPC files (regenerate with `make proto`)
 *.pb.go
