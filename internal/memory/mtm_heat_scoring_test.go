@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"bitbucket.org/dromos/athena-memos/internal/models"
+	"github.com/Prescott-Data/athena/internal/models"
 )
 
 func TestHeatScorer_ComputeSegmentHeat_BaseImportance(t *testing.T) {

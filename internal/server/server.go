@@ -9,13 +9,13 @@ import (
 	"log/slog"
 	"time"
 
-	"bitbucket.org/dromos/athena-memos/api/grpc/gen"
-	"bitbucket.org/dromos/athena-memos/internal/cache"
-	"bitbucket.org/dromos/athena-memos/internal/config"
-	"bitbucket.org/dromos/athena-memos/internal/database"
-	"bitbucket.org/dromos/athena-memos/internal/memory"
-	"bitbucket.org/dromos/athena-memos/internal/models"
-	"bitbucket.org/dromos/athena-memos/internal/storage"
+	"github.com/Prescott-Data/athena/api/grpc/gen"
+	"github.com/Prescott-Data/athena/internal/cache"
+	"github.com/Prescott-Data/athena/internal/config"
+	"github.com/Prescott-Data/athena/internal/database"
+	"github.com/Prescott-Data/athena/internal/memory"
+	"github.com/Prescott-Data/athena/internal/models"
+	"github.com/Prescott-Data/athena/internal/storage"
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -183,8 +183,10 @@ func (s *MemoryServer) StoreInteraction(ctx context.Context, req *gen.StoreInter
 
 	// Persist user event to MongoDB immediately for durability (P5)
 	cogEvent := stmEventToCognitiveEvent(tenantID, userID, agentID, sessionID, userEvent)
-	if _, err := s.stmStore.StoreCognitiveEvent(ctx, cogEvent); err != nil {
-		slog.Warn("Failed to persist user event to MongoDB", slog.String("session_id", sessionID), slog.String("error", err.Error()))
+	if s.stmStore != nil {
+		if _, err := s.stmStore.StoreCognitiveEvent(ctx, cogEvent); err != nil {
+			slog.Warn("Failed to persist user event to MongoDB", slog.String("session_id", sessionID), slog.String("error", err.Error()))
+		}
 	}
 
 	// Conditionally trigger the worker only for user messages
@@ -240,8 +242,10 @@ func (s *MemoryServer) StoreInteraction(ctx context.Context, req *gen.StoreInter
 
 		// Persist agent event to MongoDB immediately for durability (P5)
 		agentCogEvent := stmEventToCognitiveEvent(tenantID, userID, agentID, sessionID, agentEvent)
-		if _, err := s.stmStore.StoreCognitiveEvent(ctx, agentCogEvent); err != nil {
-			slog.Warn("Failed to persist agent event to MongoDB", slog.String("session_id", sessionID), slog.String("error", err.Error()))
+		if s.stmStore != nil {
+			if _, err := s.stmStore.StoreCognitiveEvent(ctx, agentCogEvent); err != nil {
+				slog.Warn("Failed to persist agent event to MongoDB", slog.String("session_id", sessionID), slog.String("error", err.Error()))
+			}
 		}
 	}
 

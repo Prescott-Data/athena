@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"bitbucket.org/dromos/athena-memos/internal/models"
+	"github.com/Prescott-Data/athena/internal/models"
 )
 
 // ParallelProcessor handles concurrent LLM operations for better performance

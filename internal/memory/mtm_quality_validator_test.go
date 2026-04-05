@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"bitbucket.org/dromos/athena-memos/internal/models"
+	"github.com/Prescott-Data/athena/internal/models"
 )
 
 func TestQualityValidator_ValidateSegment_HighQuality(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"bitbucket.org/dromos/athena-memos/internal/llm"
+	"github.com/Prescott-Data/athena/internal/llm"
 	// Load environment variables from .env file
 	_ "github.com/joho/godotenv/autoload"
 )

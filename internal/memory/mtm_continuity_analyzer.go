@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"bitbucket.org/dromos/athena-memos/internal/models"
+	"github.com/Prescott-Data/athena/internal/models"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
@@ -232,7 +232,9 @@ func (c *ContinuityAnalyzer) callLLMAPI(ctx context.Context, url, apiKey string,
 func (c *ContinuityAnalyzer) parseLLMContinuityResponse(responseBody []byte) (float64, string, error) {
 	var llmResponse struct {
 		Choices []struct {
-			Text string `json:"text"`
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
 		} `json:"choices"`
 	}
 
@@ -249,7 +251,7 @@ func (c *ContinuityAnalyzer) parseLLMContinuityResponse(responseBody []byte) (fl
 		Reasoning string  `json:"reasoning"`
 	}
 
-	responseText := strings.TrimSpace(llmResponse.Choices[0].Text)
+	responseText := strings.TrimSpace(llmResponse.Choices[0].Message.Content)
 	if err := json.Unmarshal([]byte(responseText), &continuityResponse); err != nil {
 		return 0.5, "Could not parse structured response", nil
 	}

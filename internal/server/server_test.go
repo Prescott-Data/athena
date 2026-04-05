@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	gen "bitbucket.org/dromos/athena-memos/api/grpc/gen"
-	"bitbucket.org/dromos/athena-memos/internal/cache"
-	"bitbucket.org/dromos/athena-memos/internal/memory"
+	gen "github.com/Prescott-Data/athena/api/grpc/gen"
+	"github.com/Prescott-Data/athena/internal/cache"
+	"github.com/Prescott-Data/athena/internal/memory"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )

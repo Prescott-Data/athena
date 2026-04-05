@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	"bitbucket.org/dromos/athena-memos/pkg/memory"
+	"github.com/Prescott-Data/athena/pkg/memory"
 	"github.com/arangodb/go-driver"
 	"github.com/arangodb/go-driver/http"
 	"github.com/prometheus/client_golang/prometheus"

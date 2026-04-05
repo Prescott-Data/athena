@@ -6,8 +6,8 @@ import (
 	"log"
 	"time"
 
-	"bitbucket.org/dromos/athena-memos/internal/config"
-	"bitbucket.org/dromos/athena-memos/internal/database"
+	"github.com/Prescott-Data/athena/internal/config"
+	"github.com/Prescott-Data/athena/internal/database"
 )
 
 func testConnectivity() {

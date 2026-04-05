@@ -1,4 +1,4 @@
-module bitbucket.org/dromos/athena-memos
+module github.com/Prescott-Data/athena
 
 go 1.24.0
 

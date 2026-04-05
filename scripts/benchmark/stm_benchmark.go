@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"bitbucket.org/dromos/athena-memos/internal/cache"
-	"bitbucket.org/dromos/athena-memos/internal/memory"
+	"github.com/Prescott-Data/athena/internal/cache"
+	"github.com/Prescott-Data/athena/internal/memory"
 	"github.com/joho/godotenv/autoload"
 )
 

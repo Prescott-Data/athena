@@ -132,19 +132,19 @@ func LoadConfig() (*Config, error) {
 		},
 		Database: DatabaseConfig{
 			Redis: RedisConfig{
-				Host:     getEnv("MEMORY_OS_REDIS_HOST", "172.190.152.215"),
+				Host:     getEnv("MEMORY_OS_REDIS_HOST", "localhost"),
 				Port:     getEnvInt("MEMORY_OS_REDIS_PORT", 6379),
-				Password: getEnv("MEMORY_OS_REDIS_PASSWORD", "dromos_redis_2024"),
+				Password: getEnv("MEMORY_OS_REDIS_PASSWORD", ""),
 				DB:       getEnvInt("MEMORY_OS_REDIS_DB", 0),
 			},
 			MongoDB: MongoDBConfig{
-				URI:      getEnv("MEMORY_OS_MONGODB_URI", "mongodb://memory_user:memory_password_2024@172.190.152.215:27017/memory_os?retryWrites=true&authSource=memory_os"),
+				URI:      getEnv("MEMORY_OS_MONGODB_URI", "mongodb://localhost:27017/memory_os?retryWrites=true&authSource=memory_os"),
 				Database: getEnv("MEMORY_OS_MONGODB_DATABASE", "memory_os"),
-				Username: getEnv("MEMORY_OS_MONGODB_USERNAME", "memory_user"),
-				Password: getEnv("MEMORY_OS_MONGODB_PASSWORD", "memory_password_2024"),
+				Username: getEnv("MEMORY_OS_MONGODB_USERNAME", ""),
+				Password: getEnv("MEMORY_OS_MONGODB_PASSWORD", ""),
 			},
 			Milvus: MilvusConfig{
-				Host: getEnv("MEMORY_OS_MILVUS_HOST", "172.190.152.215"),
+				Host: getEnv("MEMORY_OS_MILVUS_HOST", "localhost"),
 				Port: getEnvInt("MEMORY_OS_MILVUS_PORT", 19530),
 			},
 		},

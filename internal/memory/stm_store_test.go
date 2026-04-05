@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"bitbucket.org/dromos/athena-memos/internal/models"
+	"github.com/Prescott-Data/athena/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -263,6 +263,8 @@ func TestSTMStore_EmbeddingCache_HitAndMiss(t *testing.T) {
 
 	// Test 1: Cache MISS - should call API
 	t.Run("Cache Miss", func(t *testing.T) {
+		t.Setenv("EMBEDDING_BASE_URL", "http://test")
+		t.Setenv("AZURE_OPENAI_API_KEY", "test")
 		// Mock embedding cache miss - Get(key string, dest interface{})
 		mockRedis.On("Get", mock.AnythingOfType("string"), mock.AnythingOfType("*models.EmbeddingData")).Return(io.EOF).Once()
 
@@ -293,6 +295,8 @@ func TestSTMStore_EmbeddingCache_HitAndMiss(t *testing.T) {
 
 	// Test 2: Cache HIT - should NOT call API
 	t.Run("Cache Hit", func(t *testing.T) {
+		t.Setenv("EMBEDDING_BASE_URL", "http://test")
+		t.Setenv("AZURE_OPENAI_API_KEY", "test")
 		// Reset mock for clean test
 		mockTripper2 := new(MockTestifyRoundTripper)
 		mockRedis2 := new(MockRedisCache)

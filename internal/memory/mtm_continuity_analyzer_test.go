@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"testing"
 )
@@ -114,7 +113,7 @@ func TestContinuityAnalyzer_AnalyzeContinuity_LLMFallback(t *testing.T) {
 		}
 		// LLM endpoint: return a positive continuity response.
 		// The path check here should match the LLM endpoint used in the code.
-		if strings.Contains(req.URL.Path, "gpt-4o") || req.URL.Path == os.Getenv("LLM_BASE_URL") {
+		if strings.Contains(req.URL.Path, "gpt-4o") || strings.Contains(req.URL.Path, "llm") {
 			llmCalled = true
 			// Note: The analyzer expects a JSON string inside the 'text' field.
 			llmContent := `{"score": 0.9, "reasoning": "Topics are closely related."}`

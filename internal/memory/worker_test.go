@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"bitbucket.org/dromos/athena-memos/internal/cache"
-	"bitbucket.org/dromos/athena-memos/internal/database"
-	"bitbucket.org/dromos/athena-memos/internal/models"
+	"github.com/Prescott-Data/athena/internal/cache"
+	"github.com/Prescott-Data/athena/internal/database"
+	"github.com/Prescott-Data/athena/internal/models"
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )

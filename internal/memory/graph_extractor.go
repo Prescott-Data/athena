@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"bitbucket.org/dromos/athena-memos/internal/llm"
+	"github.com/Prescott-Data/athena/internal/llm"
 	"github.com/prometheus/client_golang/prometheus"
 )
 

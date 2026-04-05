@@ -7,19 +7,33 @@ import (
 	"testing"
 	"time"
 
-	"bitbucket.org/dromos/athena-memos/internal/cache"
-	"bitbucket.org/dromos/athena-memos/internal/models"
+	"github.com/Prescott-Data/athena/internal/cache"
+	"github.com/Prescott-Data/athena/internal/models"
 	"github.com/joho/godotenv"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestMain(m *testing.M) {
-	// Load .env.dev from the project root (two levels up from internal/memory/)
+	// Try to load .env.dev, but don't fail if it's missing (CI might not have it)
 	err := godotenv.Load("../../.env.dev")
 	if err != nil {
-		log.Fatalf("FATAL: Could not find .env.dev file at project root. Error: %v", err)
+		log.Printf("INFO: Could not find .env.dev file, relying on environment variables. Error: %v", err)
 	} else {
 		log.Println("INFO: Loaded .env.dev file for testing")
+	}
+
+	// Provide defaults for tests to prevent them from failing when variables are missing
+	if os.Getenv("EMBEDDING_BASE_URL") == "" {
+		os.Setenv("EMBEDDING_BASE_URL", "http://localhost:8080/embedding")
+	}
+	if os.Getenv("LLM_BASE_URL") == "" {
+		os.Setenv("LLM_BASE_URL", "http://localhost:8080/llm")
+	}
+	if os.Getenv("AZURE_OPENAI_API_KEY") == "" {
+		os.Setenv("AZURE_OPENAI_API_KEY", "test-key")
+	}
+	if os.Getenv("EMBEDDING_MODEL_NAME") == "" {
+		os.Setenv("EMBEDDING_MODEL_NAME", "test-embedding")
 	}
 
 	// Run all the tests in the package

@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"bitbucket.org/dromos/athena-memos/internal/models"
+	"github.com/Prescott-Data/athena/internal/models"
 )
 
 // --- Mock HTTP Client ---
@@ -63,12 +63,24 @@ func mockEmbeddingResponse(vector []float64) interface{} {
 func mockLLMChoiceResponse(content string) interface{} {
 	return struct {
 		Choices []struct {
-			Text string `json:"text"`
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
 		} `json:"choices"`
 	}{
 		Choices: []struct {
-			Text string `json:"text"`
-		}{{Text: content}},
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		}{
+			{
+				Message: struct {
+					Content string `json:"content"`
+				}{
+					Content: content,
+				},
+			},
+		},
 	}
 }
 
