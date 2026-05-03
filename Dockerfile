@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.24-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 # Set working directory
 WORKDIR /app
@@ -26,8 +26,7 @@ RUN apk --no-cache add ca-certificates
 # Create non-root user
 RUN adduser -D -s /bin/sh appuser
 
-# Set working directory
-WORKDIR /root/
+WORKDIR /app
 
 # Copy the binaries from builder stage
 COPY --from=builder /app/memory-server .
