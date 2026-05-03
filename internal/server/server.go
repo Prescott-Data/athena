@@ -57,6 +57,45 @@ func (s *MemoryServer) SetLTMReader(r *memory.LTMReader) {
 	s.ltmReader = r
 }
 
+// HealthCheck implements the HealthCheck RPC.
+// Returns the server's health status along with individual dependency checks.
+func (s *MemoryServer) HealthCheck(ctx context.Context, req *gen.HealthCheckRequest) (*gen.HealthCheckResponse, error) {
+	deps := make(map[string]string)
+	overallStatus := "healthy"
+
+	// Check Redis
+	if s.redisClient != nil {
+		if err := s.redisClient.Health(); err != nil {
+			deps["redis"] = fmt.Sprintf("unhealthy: %v", err)
+			overallStatus = "degraded"
+		} else {
+			deps["redis"] = "healthy"
+		}
+	} else {
+		deps["redis"] = "not_configured"
+	}
+
+	// Check MongoDB
+	if s.mongoClient != nil {
+		pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		if err := s.mongoClient.Ping(pingCtx, nil); err != nil {
+			deps["mongodb"] = fmt.Sprintf("unhealthy: %v", err)
+			overallStatus = "degraded"
+		} else {
+			deps["mongodb"] = "healthy"
+		}
+	} else {
+		deps["mongodb"] = "not_configured"
+	}
+
+	return &gen.HealthCheckResponse{
+		Status:       overallStatus,
+		Dependencies: deps,
+		Timestamp:    timestamppb.Now(),
+	}, nil
+}
+
 // NewMemoryServer creates a new Memory OS server instance
 func NewMemoryServer(cfg *config.Config) (*MemoryServer, error) {
 	// Initialize database connections
