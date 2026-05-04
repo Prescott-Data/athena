@@ -26,7 +26,7 @@ Athena implements memory in three layers, resembling human cognitive structures:
 
 ## Dromos Ecosystem Integration
 
-Athena is written in **Go 1.24** and acts as the stateful hub for several downstream Python-based services (like `docintel-*` agents, workflow automations, and the `arango-db` Odin KG extraction service).
+Athena is written in **Go 1.26** and acts as the stateful hub for several downstream Python-based services (like `docintel-*` agents, workflow automations, and the `arango-db` Odin KG extraction service).
 
 ```mermaid
 flowchart TB

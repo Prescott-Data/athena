@@ -685,7 +685,7 @@ All three branch pipelines (`dev`, `staging`, `main`) follow the same structure.
 
 ### Prerequisites
 
-- Go 1.24+
+- Go 1.26+
 - Docker & Docker Compose
 - `protoc` (for proto regeneration): `brew install protobuf`
 - An LLM provider (Azure OpenAI **or** Google Gemini)
@@ -841,7 +841,7 @@ The production Dockerfile uses a multi-stage build:
 
 ```dockerfile
 # Stage 1: Build
-FROM golang:1.24-alpine AS builder
+FROM golang:1.26-alpine AS builder
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download

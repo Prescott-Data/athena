@@ -52,7 +52,7 @@ The `LTPMContext` field in the `GetContext` response is hardcoded to `status: "n
 **Severity:** Medium  
 **File:** `bitbucket-pipelines.yml`
 
-The test step runs `go test ./pkg/memoryos ./api/middleware`. Both packages currently have **no test files**, so CI tests pass vacuously. The real test suite lives in `internal/memory/` and `internal/database/`, but these require Docker infrastructure and cannot run in the base `golang:1.24` CI image without service containers.
+The test step runs `go test ./pkg/memoryos ./api/middleware`. Both packages currently have **no test files**, so CI tests pass vacuously. The real test suite lives in `internal/memory/` and `internal/database/`, but these require Docker infrastructure and cannot run in the base `golang:1.26` CI image without service containers.
 
 **Action (Option A — Short-term):** Add Bitbucket `services:` blocks for Redis, MongoDB, Milvus, and ArangoDB to the test step and run `go test -short ./internal/...`. The `-short` flag skips integration tests that make external LLM calls.
 

@@ -7,7 +7,7 @@ This guide will get the Athena MemOS server and all its infrastructure databases
 ## 1. Prerequisites
 
 You need the following installed:
-- **Go 1.24+**
+- **Go 1.26+**
 - **Docker** and **Docker Compose**
 - **protoc** (Protocol Buffers compiler): `brew install protobuf`
 - Make sure ports `8080`, `9090`, `6379`, `27017`, `19530`, `8529`, and `9000` are free.
