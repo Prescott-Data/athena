@@ -1,10 +1,11 @@
 # Release workflow — creates a git tag and GitHub Release when a PR
 # that changes the VERSION file is merged to main.
+# It also builds and publishes the Docker image to GitHub Container Registry.
 #
 # HOW TO RELEASE:
 #   1. Bump the version in the VERSION file on your feature branch
 #   2. Merge the PR to main
-#   3. This workflow automatically creates the tag + release
+#   3. This workflow automatically creates the tag, release, and docker image!
 #
 # This eliminates manual tagging entirely. The VERSION file is the
 # single source of truth.
@@ -15,9 +16,11 @@ on:
   push:
     branches: [main]
     paths: [VERSION]
+  workflow_dispatch: # Allows manual triggering if needed
 
 permissions:
   contents: write
+  packages: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -90,3 +93,27 @@ jobs:
           name: ${{ steps.version.outputs.tag }}
           body_path: /tmp/release_notes.md
           generate_release_notes: false
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/memory-os
+          tags: |
+            type=raw,value=${{ steps.version.outputs.tag }}
+            type=raw,value=latest
+      
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
