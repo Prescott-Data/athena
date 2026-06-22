@@ -4,7 +4,7 @@ go 1.24.0
 
 require (
 	github.com/redis/go-redis/v9 v9.12.1
-	go.mongodb.org/mongo-driver v1.17.4
+	go.mongodb.org/mongo-driver v1.17.7
 )
 
 require (
