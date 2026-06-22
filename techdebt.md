@@ -130,3 +130,79 @@ Review the audit results and determine if any edges should be manually boosted b
 These failures pre-date PR #7 and indicate tests were written to match a former config or were never fully wired. They do not indicate production bugs but inflate noise in test runs.
 
 **Action:** Update `stm_store_azure_integration_test.go` to match current embedding config. Fix mock interceptor wiring in `mtm_parallel_processor_test.go`. Add MongoDB mock (e.g., `mongotest`) to `server_test.go` to prevent nil pointer.
+
+---
+
+### 8. LTM Belief Revision — No Contradiction Detection or Fact Retraction
+
+**Severity:** Medium (silent correctness risk over long-lived graphs)
+**Files:** `internal/memory/ltm_writer.go`, `internal/memory/graph_extractor.go`, `pkg/memory/analytics.go`
+
+The LTM write path is purely additive. The UPSERT logic can only do two things: insert a new edge or reinforce an existing one. There is no mechanism for:
+
+- **Contradiction detection** — the system cannot recognize that a newly promoted episode ("the user no longer uses Go") semantically negates an existing, heavily reinforced edge (`user → USES → go`).
+- **Edge retraction** — there is no operation to remove or negate a triple. The graph only grows.
+- **Temporal scoping** — edges carry a `last_seen` timestamp but have no validity window. A fact that was true two years ago is treated identically to a fact observed yesterday.
+- **Confidence decay on edges** — unlike Cognitive Chains, which decay via the Ebbinghaus curve, edges in LTM have no time-based decay. A stale edge with high weight from past reinforcement will continue to rank highly in traversals indefinitely.
+
+**Why it matters:** A user preference, tool choice, or project assignment that changes over time will accumulate contradictory edges. The old edge will not be demoted; it will coexist alongside the new one. Over a long-lived graph, this produces a retrieval layer that mixes current facts with outdated ones without any indication of which is more recent or more reliable.
+
+**Current partial mitigation:** None. The confidence averaging (`(OLD + NEW) / 2`) would marginally dilute a strong edge if a new extraction assigned a low confidence to the same relationship — but a contradictory episode typically produces a *different* triple (e.g., `user → EXPRESSED_INTEREST → plant_based_diet`), not a low-confidence re-assertion of the old one. The two coexist rather than one superseding the other.
+
+**Approaches to address:**
+1. **Temporal edge semantics** — add a validity window to edges (`valid_from`, `valid_until`) and emit a retraction triple when contradictions are detected at extraction time.
+2. **Contradiction detection at extraction** — the graph extractor receives the current entity neighborhood alongside the episode summary and is prompted to identify retractions explicitly, not just assertions.
+3. **Edge decay** — extend the Ebbinghaus heat model to edges, so relationships that are never reinforced across new promotions gradually lose retrieval ranking even if their absolute weight is high.
+
+**Note:** This gap is also documented as a research limitation in the paper (§2.5) pending resolution before publication.
+
+---
+
+## RESEARCH DEBT 📋
+
+*Questions that must be answered in §6 (Empirical Evaluation) before the paper can be submitted. These are not engineering bugs — they are empirical claims made implicitly by the architecture description that require experimental substantiation.*
+
+---
+
+### R1. Dual-Threshold Calibration — Chain-Break Detection
+
+**Raised in:** §2.6 (The Consolidation Arc)
+**Blocking:** §6
+
+The architecture describes a dual-threshold approach to topic boundary detection using cosine similarity, with a gray zone handled by LLM arbitration. The current implementation uses specific threshold values that were set by engineering judgment. The paper must provide empirical justification before these can be stated as design choices rather than arbitrary configuration.
+
+**Questions §6 must answer:**
+1. How were the high and low thresholds selected? Were they tuned on a labeled dataset of topic transitions, or derived analytically?
+2. What is the overall accuracy of the chain-break detector (precision, recall, F1) against a ground-truth set of manually labeled topic boundaries?
+3. What percentage of cases are resolved by cosine similarity alone vs. requiring LLM arbitration? What does this distribution look like across different interaction types (dialogue, agentic workflows, mixed)?
+4. What is the sensitivity of the system to threshold choice — how much does performance degrade if the thresholds are shifted ±0.05?
+
+---
+
+### R2. LLM Model Sensitivity — Gray-Zone Binary Classifier
+
+**Raised in:** §2.6 (The Consolidation Arc)
+**Blocking:** §6
+
+The gray-zone classifier sends both messages to an LLM with a binary classification prompt. The paper asserts (by design rationale) that this task is well-suited to a small, low-latency model. This claim requires empirical support.
+
+**Questions §6 must answer:**
+1. Was the binary classifier evaluated across different model sizes (e.g., small instruction-tuned model vs. mid-size vs. large reasoning model)?
+2. Is there a measurable accuracy difference between model sizes on this specific task?
+3. What is the latency cost of LLM arbitration per gray-zone call, and how does it vary by model size?
+4. What is the token cost per arbitration call, and what does that imply for production operating cost at scale?
+
+---
+
+### R3. Cosine Similarity Accuracy — Embedding Model Choice
+
+**Raised in:** §2.6 (The Consolidation Arc)
+**Blocking:** §6
+
+The chain-break detection relies on embedding vectors for semantic similarity. The quality of these embeddings directly determines the reliability of the high-confidence regions of the dual-threshold algorithm.
+
+**Questions §6 must answer:**
+1. Which embedding model is used? Was the choice evaluated against alternatives?
+2. What is the false positive rate (same-topic pairs classified as breaks) and false negative rate (topic shifts missed entirely) at the chosen threshold pair?
+3. Are there interaction types (e.g., highly technical agentic workflows vs. conversational dialogue) where cosine similarity performs significantly better or worse?
+
