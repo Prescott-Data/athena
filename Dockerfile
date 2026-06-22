@@ -24,7 +24,7 @@ FROM alpine:latest
 RUN apk --no-cache add ca-certificates
 
 # Create non-root user
-RUN adduser -D -s /bin/sh appuser
+RUN adduser -D -u 1000 -s /bin/sh appuser
 
 WORKDIR /app
 
@@ -36,7 +36,7 @@ COPY --from=builder /app/init-ltm .
 RUN chown appuser:appuser memory-server init-ltm
 
 # Switch to non-root user
-USER appuser
+USER 1000
 
 # Expose port
 EXPOSE 8080
