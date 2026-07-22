@@ -225,14 +225,12 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 		}
 	}
 
-	if len(userMessages) < 2 {
-		log.Printf("Not enough user messages for chain analysis for user %s (found %d). Assuming new chain.", task.UserID, len(userMessages))
-		return nil // Not enough data to compare topics
-	}
-
 	// Force chain formation if STM has accumulated too many events.
 	// This ensures chains form even for long single-topic conversations
 	// (e.g., automation logs, extended workflow design sessions).
+	// NOTE: this must run BEFORE the user-message-count guard — agent-heavy
+	// streams (autonomous agents emitting thought/action events) may have few
+	// or no user-role events in the window, but still need periodic flushing.
 	if totalSTMCount >= int64(maxSTMEvents) {
 		log.Printf("STM event count (%d) exceeds threshold (%d) for user %s. Forcing chain formation.", totalSTMCount, maxSTMEvents, task.UserID)
 		// Treat the oldest half of events as a completed chain
@@ -250,6 +248,12 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 		log.Printf("Forced chain formation complete for user %s. Kept %d recent events.", task.UserID, splitPoint)
 		return nil
 	}
+
+	if len(userMessages) < 2 {
+		log.Printf("Not enough user messages for chain analysis for user %s (found %d). Assuming new chain.", task.UserID, len(userMessages))
+		return nil // Not enough data to compare topics
+	}
+
 
 	// The newest user message vs the previous user message
 	newestUser := userMessages[0].event
@@ -270,6 +274,13 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 		truncateLog(newestUser.Content, 60), truncateLog(previousUser.Content, 60))
 
 	// 3. Get embeddings for the two user messages
+	// Guard: skip embedding if either message has empty content (can happen
+	// when the REST gateway maps events without a content field).
+	if newestUser.Content == "" || previousUser.Content == "" {
+		log.Printf("Skipping chain analysis for user %s: one or both user messages have empty content (newest=%d chars, previous=%d chars)",
+			task.UserID, len(newestUser.Content), len(previousUser.Content))
+		return nil
+	}
 	embeddingNew, err := w.stmStore.CreateEmbedding(ctx, newestUser.Content)
 	if err != nil {
 		return fmt.Errorf("failed to create embedding for newest user message: %w", err)
