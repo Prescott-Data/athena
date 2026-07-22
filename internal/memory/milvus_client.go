@@ -134,6 +134,15 @@ func (mc *MilvusClient) initializeCollection(ctx context.Context) error {
 		}
 
 		if exists {
+			// Collections are NOT auto-loaded: after any Milvus restart an
+			// existing collection sits unloaded and every search fails with
+			// "collection not loaded". Load idempotently on startup — but bounded
+			// and non-fatal: a sick Milvus must degrade search, never hang boot.
+			loadCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+			if err := mc.client.LoadCollection(loadCtx, STMCollectionName, true); err != nil {
+				log.Printf("WARN: failed to request load of collection '%s' (search may fail until loaded): %v", STMCollectionName, err)
+			}
 			log.Printf("INFO: Milvus collection '%s' already exists with correct dimensions", STMCollectionName)
 			return nil
 		}
@@ -238,6 +247,13 @@ func (mc *MilvusClient) initializeSegmentCollection(ctx context.Context) error {
 			}
 		}
 		if exists {
+			// Same restart hazard as the STM collection: request an async load
+			// (bounded, non-fatal) so search works after a Milvus restart.
+			loadCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+			if err := mc.client.LoadCollection(loadCtx, SegmentCollectionName, true); err != nil {
+				log.Printf("WARN: failed to request load of segment collection '%s' (search may fail until loaded): %v", SegmentCollectionName, err)
+			}
 			log.Printf("INFO: Milvus collection '%s' already exists with correct dimensions", SegmentCollectionName)
 			return nil
 		}
