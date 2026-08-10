@@ -4,9 +4,9 @@ icon: material/home
 
 <div class="nx-hero" markdown>
 
-# Athena
+<img src="assets/combo-brand.svg" class="nx-hero-logo" alt="Athena Logo" />
 
-### The Memory Operating System for AI agents.
+# The Memory Operating System for AI agents
 
 Perfect cross-session memory for every agent in your fleet. Athena captures every interaction, distills it into cognitive chains, and promotes what matters into a persistent knowledge graph. Your agents remember users, projects, and context across sessions, forever.
 

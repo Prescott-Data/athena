@@ -55,28 +55,21 @@
 
 /* ---------- Logo ---------- */
 .md-header__button.md-logo {
-  height: auto !important;
-  padding: 0.25rem 0.5rem !important;
-  margin: 0 0.2rem 0 0 !important;
-  display: flex !important;
-  align-items: center !important;
+  padding: 0 !important;
+  margin-right: 1.2rem;
+  display: flex;
+  align-items: center;
+  width: auto !important;
 }
 
-.md-header__button.md-logo img {
-  height: 2.2rem !important;
-  width: 2.2rem !important;
-  max-width: none !important;
-  max-height: none !important;
-  display: block !important;
-  object-fit: cover !important;
-  border-radius: 8px !important;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15) !important;
-  transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+.md-header__button.md-logo img,
+.md-header__button.md-logo svg {
+  height: 20px !important;
+  width: auto !important;
 }
 
-.md-header__button.md-logo img:hover {
-  transform: scale(1.06);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25) !important;
+[data-md-color-scheme="slate"] .md-header__button.md-logo img {
+  content: url("../assets/wordmark-white.svg");
 }
 
 [data-md-color-scheme="slate"] {
@@ -242,33 +235,16 @@ body,
   align-items: center;
 }
 
-/* Prevent title from collapsing due to flex rules */
-.md-header__title {
-  flex-grow: 0 !important;
-  flex-shrink: 0 !important;
-  min-width: max-content !important;
-  font-family: 'Inter', sans-serif;
-  font-size: 0.9375rem;
-  font-weight: 700;
-  letter-spacing: -0.025em;
-  color: #0c0c0e !important;
-  margin-left: 0.45rem;
-}
-
-/* On mobile the title must shrink to fit next to hamburger + logo */
+/* On mobile shrink the wordmark so it fits next to the hamburger */
 @media screen and (max-width: 76.1875em) {
-  .md-header__title {
-    min-width: 0 !important;
-    flex-shrink: 1 !important;
-    font-size: 0.8rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .md-header__button.md-logo img,
+  .md-header__button.md-logo svg {
+    height: 17px !important;
   }
-}
 
-[data-md-color-scheme="slate"] .md-header__title {
-  color: #fff !important;
+  .md-header__button.md-logo {
+    margin-right: 0.5rem !important;
+  }
 }
 
 /* Center the search bar absolutely in the header — desktop only.
@@ -2437,36 +2413,27 @@ body,
 
 
 /* ============================================================
-   ATHENA OVERRIDES — wordmark instead of image logo
+   ATHENA OVERRIDES — wordmark image is the logo
    ============================================================ */
 
-/* No image logo — hide Material's logo button (default icon) */
-.md-header__button.md-logo {
+/* The wordmark image says "Athena" — hide the duplicate site-name text */
+.md-header__title {
   display: none !important;
 }
 
-/* The word "Athena" in brand blue IS the logo */
-.md-header__title,
-.md-header__title .md-header__topic,
-.md-header__title .md-header__topic a {
-  color: var(--nx-brand) !important;
-  font-weight: 800;
-  letter-spacing: -0.03em;
+/* Hide "Athena" site name text in the mobile drawer — logo in topbar is enough.
+   The .md-ellipsis span inside the primary title holds the site name. */
+.md-nav--primary > .md-nav__title .md-ellipsis {
+  display: none !important;
 }
 
-[data-md-color-scheme="slate"] .md-header__title,
-[data-md-color-scheme="slate"] .md-header__title .md-header__topic,
-[data-md-color-scheme="slate"] .md-header__title .md-header__topic a {
-  color: var(--nx-brand-light) !important;
-}
-
-/* Hero title in brand blue to match */
+/* Hero headline stays neutral ink — the combo logo above it carries the brand */
 .nx-hero h1 {
-  color: var(--nx-brand) !important;
+  color: inherit !important;
 }
 
 [data-md-color-scheme="slate"] .nx-hero h1 {
-  color: var(--nx-brand-light) !important;
+  color: inherit !important;
 }
 
 /* Mermaid diagrams (self-rendered via mermaid-init.js) */
