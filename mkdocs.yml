@@ -1,0 +1,152 @@
+site_name: Athena
+site_description: The Memory Operating System for AI agents. Three-tier persistent memory + knowledge graph. Built by Prescott Data.
+site_url: https://prescott-data.github.io/athena/
+repo_url: https://github.com/Prescott-Data/athena
+repo_name: Prescott-Data/athena
+edit_uri: edit/main/docs/
+
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  favicon: assets/favicon.svg
+  palette:
+    - scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    text: Inter
+    code: JetBrains Mono
+  features:
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - navigation.path
+    - navigation.footer
+    - toc.follow
+    - search.highlight
+    - search.share
+    - search.suggest
+    - content.code.copy
+    - content.code.annotate
+    - content.tooltips
+
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/header.js
+  - javascripts/llm-assist.js
+  - javascripts/mermaid-init.js
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: nx-mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets:
+      base_path: ['.']
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.arithmatex:
+      generic: true
+  - tables
+  - toc:
+      permalink: true
+  - attr_list
+  - md_in_html
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+nav:
+  - Home:
+      - Overview: index.md
+      - Website: https://developers.prescottdata.io
+      - Community: https://discord.gg/AbskSXypq
+      - Blog: https://developers.prescottdata.io/blog
+  - Concepts:
+      - Architecture: concepts/architecture.md
+      - Memory Tiers: concepts/memory-tiers.md
+      - Sessions & Identity: concepts/sessions-and-identity.md
+      - The Cognitive Pipeline: concepts/cognitive-pipeline.md
+      - Chain Formation: concepts/chain-formation.md
+      - Heat & Decay: concepts/heat-and-decay.md
+      - Promotion & the Knowledge Graph: concepts/promotion-and-knowledge-graph.md
+      - Graph Analytics: concepts/graph-analytics.md
+      - Archival & Lifecycle: concepts/archival-and-lifecycle.md
+      - Security Model: concepts/security-model.md
+  - Getting Started:
+      - Deploy in Five Minutes: getting-started/quickstart.md
+      - Configuration: getting-started/configuration.md
+      - Your First Session: getting-started/first-session.md
+  - Guides:
+      - Storing Memory: guides/storing-memory.md
+      - Retrieving Context: guides/retrieving-context.md
+      - Semantic Search: guides/semantic-search.md
+      - Go SDK: guides/go-sdk.md
+      - Using the REST API: guides/rest-api.md
+      - Enabling Authentication: guides/authentication.md
+      - LLM Providers: guides/llm-providers.md
+      - Blob Storage: guides/blob-storage.md
+      - Workers & Schedulers: guides/workers-and-schedulers.md
+      - Running Graph Analytics: guides/running-graph-analytics.md
+      - Deploying Athena: guides/deploying-athena.md
+      - Debug Tools: guides/debug-tools.md
+      - Troubleshooting: guides/troubleshooting.md
+  - Reference:
+      - API Reference: reference/api.md
+      - gRPC & Protobuf: reference/grpc.md
+      - Configuration: reference/configuration.md
+      - CLI & Binaries: reference/cli.md
+      - Metrics: reference/metrics.md
+      - Data Schemas: reference/data-schemas.md
+      - Changelog: reference/changelog.md
+  - Research:
+      - Benchmarks: research/index.md
+
+extra:
+  version: "0.1.4"
+  social:
+    - icon: material/web
+      link: https://developers.prescottdata.io
+      name: Prescott Data Developer Hub
+    - icon: fontawesome/brands/x-twitter
+      link: https://x.com/prescottdata
+      name: Prescott Data on X
+    - icon: fontawesome/brands/linkedin
+      link: https://www.linkedin.com/company/prescott-data/
+      name: Prescott Data on LinkedIn
+    - icon: fontawesome/brands/github
+      link: https://github.com/Prescott-Data/athena
+      name: athena on GitHub
+    - icon: fontawesome/brands/discord
+      link: https://discord.gg/AbskSXypq
+      name: Join our Discord
