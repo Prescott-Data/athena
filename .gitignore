@@ -86,3 +86,6 @@ run_simulation_tests.sh
 
 # Go module path artifacts
 bitbucket.org/
+
+# MkDocs build output
+site/
