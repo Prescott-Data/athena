@@ -2,6 +2,8 @@
 
 Athena models memory the way cognitive science does: a small, fast working memory; a consolidating mid-term store; and a durable long-term store of distilled knowledge. Each tier has its own datastore, granularity, and lifetime.
 
+<div class="nx-nowrap-first-col" markdown>
+
 | | STM | MTM | LTM |
 |---|---|---|---|
 | **Holds** | Raw events | Cognitive chains (summarized topics) | Knowledge graph (entities + relations) |
@@ -10,9 +12,13 @@ Athena models memory the way cognitive science does: a small, fast working memor
 | **Lifetime** | 2h window / durable log | Until archived (heat-based) | Permanent |
 | **Written by** | API (synchronous) | Workers (async) | Promoter (async) |
 
+</div>
+
 ## STM: Short-Term Memory
 
-The verbatim record of what is happening *right now*.
+**Short-Term Memory is the agent's working memory: the verbatim, unprocessed record of the current conversation.** It holds the last few events exactly as they happened (every word, every tool call), exists so an agent can recall what was just said without carrying its own context, and is the only tier written synchronously by the API. It answers one question: *what is happening right now?*
+
+Mechanically, STM is two writes per event:
 
 **Hot path (Redis).** Every event is `LPUSH`ed to a per-scope list under the key `stm:{tenantId}:{userId}:{agentId}`, trimmed to a sliding window of `STM_CACHE_MAX_TURNS` (default **10**) and expiring after `STM_CACHE_TTL` (default **2 hours**) of inactivity. `GetContext` reads this list; it's a single `LRANGE`.
 
@@ -31,7 +37,9 @@ plus optional `metadata` (e.g. `workflow_id`, `execution_id`, `origin_service`) 
 
 ## MTM: Mid-Term Memory
 
-When the conversation moves on, the worker cuts the finished topic segment out of STM and distills it into a **cognitive chain**, a MongoDB document in `cognitive_chains`:
+**Mid-Term Memory is episodic memory: a compressed, searchable record of conversations that have ended.** Where STM keeps every word of the current topic, MTM keeps the *gist* of past topics, organized as one summarized unit per topic (a **cognitive chain**) rather than one entry per message. It exists so an agent can answer "what did we discuss about X last week?" without replaying transcripts. It answers the question: *what has happened?*
+
+A chain is born when the conversation moves on: the worker cuts the finished topic segment out of STM and distills it into a MongoDB document in `cognitive_chains` carrying:
 
 - an LLM-written **summary**, **topic**, and extracted **entities**
 - a quality score from the [validation gate](chain-formation.md#the-quality-gate)
@@ -44,7 +52,9 @@ MTM is what `SearchMemory` searches and what `GetContext` blends in as `relevant
 
 ## LTM: Long-Term Memory
 
-Chains that stay hot cross the promotion threshold and get **read for knowledge**: an LLM extracts subject–relation–object triples from the chain summary, which are UPSERTed into the `athena_ltm` graph in ArangoDB:
+**Long-Term Memory is semantic memory: durable knowledge about the user's world, detached from any conversation.** It stores *facts* ("John uses Go", "John works on the payments service") as a graph of entities and typed relationships, not summaries of what was said. Conversations are the evidence; LTM keeps the conclusions. It answers the question: *what is true?*
+
+Facts enter the graph through promotion. Chains that stay hot cross the promotion threshold and get **read for knowledge**: an LLM extracts subject–relation–object triples from the chain summary, which are UPSERTed into the `athena_ltm` graph in ArangoDB:
 
 - **Vertex collections:** `Identities`, `Concepts`, `Tools`, `Projects` (+ `Communities` from analytics)
 - **Edge collection:** `MemoryEdges`, with a whitelisted relation vocabulary (`USES`, `WORKS_ON`, `BUILT_FOR_CLIENT`, `STRUGGLES_WITH`, `EXHIBITS`, `EXPRESSED_INTEREST`, `RELATES_TO`), per-edge confidence, and a frequency `weight` that increments every time the same fact is re-observed

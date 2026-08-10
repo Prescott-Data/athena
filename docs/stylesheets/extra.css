@@ -2481,3 +2481,10 @@ body,
   max-width: 100%;
   height: auto;
 }
+
+/* Opt-in: keep a table's first (label) column on one line */
+.nx-nowrap-first-col table:not([class]) td:first-child,
+.nx-nowrap-first-col table:not([class]) th:first-child {
+  white-space: nowrap;
+  word-break: normal;
+}

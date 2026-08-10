@@ -17,8 +17,6 @@ Most variables use the `MEMORY_OS_` prefix and are read once at startup by `inte
 |---|---|---|
 | `MEMORY_OS_PORT` | `8080` | REST (grpc-gateway) listen port |
 | `MEMORY_OS_GRPC_PORT` | `9090` | gRPC listen port |
-| `APP_ENV` | `local` | `local` \| `development` \| `staging` \| `production` |
-| `LOG_LEVEL` | `info` | `debug` \| `info` \| `warn` \| `error` |
 
 ### LLM provider <span class="nx-badge nx-badge-required">Required</span>
 

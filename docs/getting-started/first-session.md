@@ -66,7 +66,7 @@ go run cmd/verifydb/main.go        # dumps cognitive_chains
 **Pipeline metrics**: every stage is instrumented:
 
 ```bash
-curl -s http://localhost:8080/metrics | grep memos_
+curl -s http://localhost:8080/metrics | grep -E "memos_|stm_cache|cosine"
 ```
 
 **Semantic search**: once a chain has formed, search it from another conversation:

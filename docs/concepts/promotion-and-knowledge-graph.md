@@ -4,7 +4,7 @@ Promotion is where Athena stops remembering *conversations* and starts knowing *
 
 ## Triple extraction
 
-The chain's summary is sent to the LLM with a **strict JSON schema** (structured outputs: the model cannot return anything malformed; schema violations increment `memos_extractor_schema_failures` and abort that chain's promotion).
+The chain's summary is sent to the LLM with a **strict JSON schema** (structured outputs: the model cannot return anything malformed; schema violations increment `memos_extractor_schema_failures_total` and abort that chain's promotion).
 
 The schema enforces the ontology:
 

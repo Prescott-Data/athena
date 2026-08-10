@@ -129,8 +129,9 @@ nav:
       - Metrics: reference/metrics.md
       - Data Schemas: reference/data-schemas.md
       - Changelog: reference/changelog.md
-  - Research:
-      - Benchmarks: research/index.md
+  # Research tab parked until benchmark results are publishable
+  # - Research:
+  #     - Benchmarks: research/index.md
 
 extra:
   version: "0.1.4"
