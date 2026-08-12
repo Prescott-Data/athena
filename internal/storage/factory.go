@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strconv"
@@ -24,7 +25,7 @@ func NewBlobStoreFromEnv() (BlobStore, error) {
 
 		return NewS3BlobStore(endpoint, accessKey, secretKey, bucket, region, useSSL)
 	case "gcs":
-		return NewGCSBlobStore()
+		return NewGCSBlobStore(context.Background(), os.Getenv("BLOB_BUCKET"))
 	case "azure":
 		return NewAzureBlobStore()
 	default:
