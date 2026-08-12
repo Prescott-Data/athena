@@ -1,0 +1,29 @@
+# Mirrors this repo's `main` branch to a dedicated branch on the private
+# Bitbucket deployment repo (dromos/athena-memos), so an internal copy of
+# source exists there without touching the branches its deploy pipeline
+# depends on. `main`/`staging` on Bitbucket are deploy-only (VERSION +
+# bitbucket-pipelines.yml) and must never be overwritten by this mirror.
+name: Mirror to Bitbucket
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to Bitbucket github-mirror branch
+        env:
+          BB_USER: ${{ secrets.BITBUCKET_MIRROR_USERNAME }}
+          BB_PASS: ${{ secrets.BITBUCKET_MIRROR_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          git push "https://${BB_USER}:${BB_PASS}@bitbucket.org/dromos/athena-memos.git" \
+            "HEAD:refs/heads/github-mirror" --force
