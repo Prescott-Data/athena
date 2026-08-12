@@ -68,7 +68,9 @@ temp/
 # Build outputs
 dist/
 build/
-memory-server
+# Anchored to repo root: a bare "memory-server" also matches cmd/memory-server/,
+# which breaks gcloud source deploys that derive ignores from .gitignore.
+/memory-server
 
 
 
