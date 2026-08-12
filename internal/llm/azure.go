@@ -12,21 +12,29 @@ import (
 
 // AzureProvider implements the Provider interface for Azure OpenAI
 type AzureProvider struct {
-	BaseURL        string
-	APIKey         string
-	EmbeddingURL   string
-	EmbeddingModel string
-	Client         *http.Client
+	BaseURL            string
+	APIKey             string
+	EmbeddingURL       string
+	EmbeddingModelName string
+	Client             *http.Client
 }
 
 func NewAzureProvider(baseURL, apiKey, embeddingURL, embeddingModel string) *AzureProvider {
-	return &AzureProvider{
-		BaseURL:        baseURL,
-		APIKey:         apiKey,
-		EmbeddingURL:   embeddingURL,
-		EmbeddingModel: embeddingModel,
-		Client:         &http.Client{Timeout: 30 * time.Second},
+	if embeddingModel == "" {
+		embeddingModel = "text-embedding-ada-002"
 	}
+	return &AzureProvider{
+		BaseURL:            baseURL,
+		APIKey:             apiKey,
+		EmbeddingURL:       embeddingURL,
+		EmbeddingModelName: embeddingModel,
+		Client:             &http.Client{Timeout: 30 * time.Second},
+	}
+}
+
+// EmbeddingModel returns the embedding model name in use.
+func (p *AzureProvider) EmbeddingModel() string {
+	return p.EmbeddingModelName
 }
 
 func (p *AzureProvider) GenerateCompletion(ctx context.Context, req CompletionRequest) (string, error) {

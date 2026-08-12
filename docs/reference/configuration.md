@@ -75,13 +75,14 @@ Recipes: [Enabling Authentication](../guides/authentication.md).
 
 | Variable | Default | Description |
 |---|---|---|
-| `LLM_PROVIDER` | `gemini` | `gemini` \| `azure` <span class="nx-badge nx-badge-required">Required</span> |
-| `LLM_API_KEY` | | Provider key <span class="nx-badge nx-badge-required">Required</span> (or Azure pair below) |
-| `LLM_MODEL_NAME` | `gemini-3-flash-preview` | Completion model |
-| `EMBEDDING_MODEL_NAME` | `gemini-embedding-001` | Embedding model |
-| `EMBEDDING_DIMENSIONS` | `1536` | **Must match the model**: Azure 1536, Gemini 768 ([the trap](../guides/llm-providers.md#the-dimension-trap)) |
-| `AZURE_OPENAI_ENDPOINT` / `AZURE_OPENAI_API_KEY` | | Azure credentials |
-| `LLM_BASE_URL` / `EMBEDDING_BASE_URL` | | Legacy Azure deployment URLs |
+| `LLM_PROVIDER` | `azure` | `gemini` \| `azure` \| `openai` <span class="nx-badge nx-badge-required">Required</span> |
+| `LLM_API_KEY` | | Provider key <span class="nx-badge nx-badge-required">Required</span>; works for every provider |
+| `GEMINI_API_KEY` / `AZURE_OPENAI_API_KEY` / `OPENAI_API_KEY` | | Provider-native fallbacks when `LLM_API_KEY` is unset |
+| `LLM_MODEL_NAME` | per provider | Completion model (`gemini-1.5-pro` / `gpt-4`) |
+| `EMBEDDING_MODEL_NAME` | per provider | Embedding model (`gemini-embedding-001` / `text-embedding-ada-002`) |
+| `MILVUS_VECTOR_DIMENSION` | `1536` | **Must match the embedding model**: ada-002 1536, gemini-embedding-001 3072 ([the trap](../guides/llm-providers.md#the-dimension-trap)) |
+| `AZURE_OPENAI_ENDPOINT` | | Azure endpoint fallback when `LLM_BASE_URL` is unset |
+| `LLM_BASE_URL` / `EMBEDDING_BASE_URL` | | Azure deployment URLs (required for `azure`); custom base URL for `openai` |
 | `LLM_TIMEOUT_SECONDS` | `10` | General per-call timeout |
 | `LLM_SUMMARY_TIMEOUT_SEC` | | Summarization call timeout |
 | `LLM_EMBEDDING_TIMEOUT_SEC` | | Embedding call timeout |

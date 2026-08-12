@@ -1,13 +1,11 @@
 package memory
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"log/slog"
 	"math"
@@ -248,7 +246,7 @@ func NewSTMStore(database *mongo.Database, redisClient cache.Interface, blobStor
 	factory := &llm.Factory{}
 	llmProvider, err := factory.NewProvider(providerType)
 	if err != nil {
-		log.Printf("WARN: Failed to initialize LLM provider: %v", err)
+		log.Printf("WARN: Failed to initialize LLM provider (%s): %v — cognitive pipeline LLM calls will fail until configured", providerType, err)
 	}
 
 	ss := &STMStore{
@@ -457,16 +455,10 @@ func (s *STMStore) StoreCognitiveEvent(ctx context.Context, event *models.Cognit
 	return event.ID, nil
 }
 
-// analyzeTopicContinuity uses the LLM endpoint to analyze topic continuity
+// analyzeTopicContinuity uses the configured LLM provider to analyze topic continuity
 func (s *STMStore) analyzeTopicContinuity(ctx context.Context, userID string, previousContent string, newContent string) (bool, error) {
-	llmBaseURL := os.Getenv("LLM_BASE_URL")
-	apiKey := os.Getenv("AZURE_OPENAI_API_KEY")
-
-	if llmBaseURL == "" {
-		return false, fmt.Errorf("llm_base_url not configured")
-	}
-	if apiKey == "" {
-		return false, fmt.Errorf("azure_openai_api_key not configured")
+	if s.llmProvider == nil {
+		return false, fmt.Errorf("llm provider not configured")
 	}
 
 	if !s.llmGuards.checkRateLimit(ctx, userID) {
@@ -499,75 +491,25 @@ New message:
 Is the new message about the SAME topic as the previous message? Respond with only "true" or "false".`,
 		previousContent, newContent)
 
-	request := map[string]interface{}{
-		"messages": []map[string]string{
-			{"role": "user", "content": prompt},
-		},
-		"max_tokens":  10,
-		"temperature": 0.1,
-		"stop":        []string{"\n"},
-	}
-
-	requestBody, err := json.Marshal(request)
-	if err != nil {
-		return false, fmt.Errorf("failed to marshal llm request: %w", err)
-	}
-
 	llmTimeout := parseIntEnv("LLM_TIMEOUT_SECONDS", 10)
 	httpCtx, cancel := context.WithTimeout(ctx, time.Duration(llmTimeout)*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(httpCtx, "POST", llmBaseURL, bytes.NewBuffer(requestBody))
+	content, err := s.llmProvider.GenerateCompletion(httpCtx, llm.CompletionRequest{
+		Prompt:      prompt,
+		MaxTokens:   16,
+		Temperature: 0.1,
+		Stop:        []string{"\n"},
+	})
 	if err != nil {
-		s.llmGuards.recordLLMResult(false) // Record failure
+		s.llmGuards.recordLLMResult(false)
 		MetricLLMFallbackCalls.WithLabelValues("embedding_failure", "error").Inc()
-		return false, fmt.Errorf("failed to create http request: %w", err)
+		return false, fmt.Errorf("llm continuity call failed: %w", err)
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("api-key", apiKey)
+	s.llmGuards.recordLLMResult(true)
 
-	resp, err := s.HTTPClient.Do(req)
-	if err != nil {
-		s.llmGuards.recordLLMResult(false) // Record failure
-		MetricLLMFallbackCalls.WithLabelValues("embedding_failure", "error").Inc()
-		return false, fmt.Errorf("failed to make llm api call: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		s.llmGuards.recordLLMResult(false) // Record failure
-		MetricLLMFallbackCalls.WithLabelValues("embedding_failure", "error").Inc()
-		return false, fmt.Errorf("llm api returned status %d", resp.StatusCode)
-	}
-
-	responseBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		s.llmGuards.recordLLMResult(false) // Record failure
-		return false, fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	var llmResponse struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(responseBody, &llmResponse); err != nil {
-		s.llmGuards.recordLLMResult(false) // Record failure
-		return false, fmt.Errorf("failed to unmarshal llm response: %w", err)
-	}
-
-	if len(llmResponse.Choices) == 0 {
-		s.llmGuards.recordLLMResult(false) // Record failure
-		MetricLLMFallbackCalls.WithLabelValues("embedding_failure", "error").Inc()
-		return false, fmt.Errorf("no choices in llm response")
-	}
-
-	s.llmGuards.recordLLMResult(true) // Record success
-
-	responseText := strings.ToLower(strings.TrimSpace(llmResponse.Choices[0].Message.Content))
+	responseText := strings.ToLower(strings.TrimSpace(content))
 	isSameTopic := responseText == "true"
 
 	// Record routing decision
@@ -580,22 +522,13 @@ Is the new message about the SAME topic as the previous message? Respond with on
 	return isSameTopic, nil
 }
 
-// CreateEmbedding performs vector embedding creation using an external service like Azure OpenAI
+// CreateEmbedding performs vector embedding creation via the configured LLM provider
 func (s *STMStore) CreateEmbedding(ctx context.Context, textToEmbed string) (*models.EmbeddingData, error) {
-	apiKey := os.Getenv("AZURE_OPENAI_API_KEY")
-	url := os.Getenv("EMBEDDING_BASE_URL")
-	embeddingModel := os.Getenv("EMBEDDING_MODEL_NAME")
-
-	if url == "" {
-		return nil, fmt.Errorf("embedding_base_url environment variable not set")
-	}
-	if apiKey == "" {
-		return nil, fmt.Errorf("azure openai api key not configured")
+	if s.llmProvider == nil {
+		return nil, fmt.Errorf("llm provider not configured")
 	}
 
-	if embeddingModel == "" {
-		embeddingModel = "text-embedding-ada-002"
-	}
+	embeddingModel := s.llmProvider.EmbeddingModel()
 
 	// Check embedding cache first
 	if cachedEmbedding := s.getEmbeddingFromCache(ctx, textToEmbed, embeddingModel); cachedEmbedding != nil {
@@ -610,59 +543,17 @@ func (s *STMStore) CreateEmbedding(ctx context.Context, textToEmbed string) (*mo
 		return nil, fmt.Errorf("embedding api circuit breaker is open")
 	}
 
-	embeddingRequest := map[string]interface{}{"input": textToEmbed}
-	body, err := json.Marshal(embeddingRequest)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal embedding request: %w", err)
-	}
-
 	httpCtx, cancel := context.WithTimeout(ctx, s.llmConfig.EmbeddingTimeout)
 	defer cancel()
 
 	timer := prometheus.NewTimer(MetricEmbeddingLatency)
-	req, err := http.NewRequestWithContext(httpCtx, "POST", url, bytes.NewBuffer(body))
+	vector, err := s.llmProvider.CreateEmbedding(httpCtx, llm.EmbeddingRequest{Input: textToEmbed})
 	if err != nil {
-		s.llmGuards.recordLLMResult(false) // Record failure
-		return nil, fmt.Errorf("failed to create embedding request: %w", err)
+		s.llmGuards.recordLLMResult(false)
+		return nil, fmt.Errorf("failed to create embedding: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("api-key", apiKey)
-
-	resp, err := s.HTTPClient.Do(req)
-	if err != nil {
-		s.llmGuards.recordLLMResult(false) // Record failure
-		return nil, fmt.Errorf("failed to call embedding service: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		s.llmGuards.recordLLMResult(false) // Record failure
-		responseBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("azure openai api returned status %d: %s", resp.StatusCode, string(responseBody))
-	}
-
-	responseBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		s.llmGuards.recordLLMResult(false) // Record failure
-		return nil, fmt.Errorf("failed to read embedding response: %w", err)
-	}
-
-	var embeddingResponse struct {
-		Data []struct {
-			Embedding []float64 `json:"embedding"`
-		} `json:"data"`
-		Usage struct {
-			PromptTokens int `json:"prompt_tokens"`
-			TotalTokens  int `json:"total_tokens"`
-		} `json:"usage"`
-	}
-	if err := json.Unmarshal(responseBody, &embeddingResponse); err != nil {
-		s.llmGuards.recordLLMResult(false) // Record failure
-		return nil, fmt.Errorf("failed to decode embedding response: %w", err)
-	}
-
-	if len(embeddingResponse.Data) == 0 || len(embeddingResponse.Data[0].Embedding) == 0 {
-		s.llmGuards.recordLLMResult(false) // Record failure
+	if len(vector) == 0 {
+		s.llmGuards.recordLLMResult(false)
 		return nil, fmt.Errorf("no embedding data in response")
 	}
 
@@ -670,8 +561,8 @@ func (s *STMStore) CreateEmbedding(ctx context.Context, textToEmbed string) (*mo
 	timer.ObserveDuration()           // Record successful embedding latency
 
 	embeddingData := &models.EmbeddingData{
-		Vector:     embeddingResponse.Data[0].Embedding,
-		Dimensions: len(embeddingResponse.Data[0].Embedding),
+		Vector:     vector,
+		Dimensions: len(vector),
 		Model:      embeddingModel,
 		CreatedAt:  time.Now(),
 	}
@@ -776,15 +667,8 @@ func (s *STMStore) releaseProcessingLock(_ context.Context, chainID string) {
 
 // CreateSegmentSummary generates a detailed summary and importance score for a segment using the LLM with Structured Outputs
 func (s *STMStore) CreateSegmentSummary(ctx context.Context, events []models.CognitiveEvent) (string, float64, error) {
-	LLMBaseURL := os.Getenv("LLM_BASE_URL")
-	apiKey := os.Getenv("AZURE_OPENAI_API_KEY")
-
-	if LLMBaseURL == "" {
-		return "", 0, fmt.Errorf("llm_base_url not configured")
-	}
-
-	if apiKey == "" {
-		return "", 0, fmt.Errorf("azure_openai_api_key not configured")
+	if s.llmProvider == nil {
+		return "", 0, fmt.Errorf("llm provider not configured")
 	}
 
 	if !s.llmGuards.checkRateLimit(ctx, "summary_user") {
@@ -827,54 +711,19 @@ func (s *STMStore) CreateSegmentSummary(ctx context.Context, events []models.Cog
 
 	prompt := b.String()
 
-	reqBody := map[string]interface{}{
-		"messages": []map[string]string{
-			{"role": "system", "content": "You are a helpful assistant designed to output JSON."},
-			{"role": "user", "content": prompt},
-		},
-		"max_tokens":  256,
-		"temperature": 0.3,
-		"response_format": map[string]interface{}{
-			"type":        "json_schema",
-			"json_schema": jsonSchema,
-		},
-	}
-	body, _ := json.Marshal(reqBody)
 	httpCtx, cancel := context.WithTimeout(ctx, s.llmConfig.SummaryTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(httpCtx, "POST", LLMBaseURL, bytes.NewBuffer(body))
-	if err != nil {
-		s.llmGuards.recordLLMResult(false) // Record failure
-		return "", 0, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("api-key", apiKey)
 
-	resp, err := s.HTTPClient.Do(req)
+	content, err := s.llmProvider.GenerateCompletion(httpCtx, llm.CompletionRequest{
+		SystemPrompt: "You are a helpful assistant designed to output JSON.",
+		Prompt:       prompt,
+		MaxTokens:    256,
+		Temperature:  0.3,
+		JSONSchema:   jsonSchema,
+	})
 	if err != nil {
-		s.llmGuards.recordLLMResult(false) // Record failure
-		return "", 0, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		s.llmGuards.recordLLMResult(false) // Record failure
-		return "", 0, fmt.Errorf("llm summary API returned %d", resp.StatusCode)
-	}
-	raw, _ := io.ReadAll(resp.Body)
-	var llmResp struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(raw, &llmResp); err != nil {
-		s.llmGuards.recordLLMResult(false) // Record failure
-		return "", 0, err
-	}
-	if len(llmResp.Choices) == 0 {
-		s.llmGuards.recordLLMResult(false) // Record failure
-		return "", 0, fmt.Errorf("empty summary choices")
+		s.llmGuards.recordLLMResult(false)
+		return "", 0, fmt.Errorf("llm summary call failed: %w", err)
 	}
 
 	// Parse the structured output
@@ -883,11 +732,11 @@ func (s *STMStore) CreateSegmentSummary(ctx context.Context, events []models.Cog
 		IntrinsicImportance float64 `json:"intrinsic_importance"`
 	}
 	var summaryResp MTMSummaryResponse
-	if err := json.Unmarshal([]byte(llmResp.Choices[0].Message.Content), &summaryResp); err != nil {
+	if err := json.Unmarshal([]byte(content), &summaryResp); err != nil {
 		s.llmGuards.recordLLMResult(false)
 		slog.Error("LLM returned invalid JSON schema for summary",
 			slog.String("error", err.Error()),
-			slog.String("raw_llm_payload", llmResp.Choices[0].Message.Content),
+			slog.String("raw_llm_payload", content),
 		)
 		return "", 0, fmt.Errorf("failed to parse structured output: %w", err)
 	}
@@ -900,14 +749,8 @@ func (s *STMStore) CreateSegmentSummary(ctx context.Context, events []models.Cog
 // Returns a list of short entity strings (people, projects, technologies, topics, etc.)
 // that the promoter will use to write structured knowledge graph triples.
 func (s *STMStore) ExtractEntities(ctx context.Context, events []models.CognitiveEvent) ([]string, error) {
-	LLMBaseURL := os.Getenv("LLM_BASE_URL")
-	apiKey := os.Getenv("AZURE_OPENAI_API_KEY")
-
-	if LLMBaseURL == "" {
-		return nil, fmt.Errorf("llm_base_url not configured")
-	}
-	if apiKey == "" {
-		return nil, fmt.Errorf("azure_openai_api_key not configured")
+	if s.llmProvider == nil {
+		return nil, fmt.Errorf("llm provider not configured")
 	}
 
 	if !s.llmGuards.checkRateLimit(ctx, "entity_extraction") {
@@ -924,54 +767,21 @@ func (s *STMStore) ExtractEntities(ctx context.Context, events []models.Cognitiv
 	}
 	b.WriteString("---\n\nJSON array:")
 
-	reqBody := map[string]interface{}{
-		"messages": []map[string]string{
-			{"role": "user", "content": b.String()},
-		},
-		"max_tokens":  200,
-		"temperature": 0.1,
-	}
-	body, _ := json.Marshal(reqBody)
 	httpCtx, cancel := context.WithTimeout(ctx, s.llmConfig.SummaryTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(httpCtx, "POST", LLMBaseURL, bytes.NewBuffer(body))
+
+	rawContent, err := s.llmProvider.GenerateCompletion(httpCtx, llm.CompletionRequest{
+		Prompt:      b.String(),
+		MaxTokens:   200,
+		Temperature: 0.1,
+	})
 	if err != nil {
 		s.llmGuards.recordLLMResult(false)
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("api-key", apiKey)
-
-	resp, err := s.HTTPClient.Do(req)
-	if err != nil {
-		s.llmGuards.recordLLMResult(false)
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		s.llmGuards.recordLLMResult(false)
-		return nil, fmt.Errorf("llm entity extraction API returned %d", resp.StatusCode)
-	}
-
-	raw, _ := io.ReadAll(resp.Body)
-	var llmResp struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(raw, &llmResp); err != nil {
-		s.llmGuards.recordLLMResult(false)
-		return nil, err
-	}
-	if len(llmResp.Choices) == 0 {
-		s.llmGuards.recordLLMResult(false)
-		return nil, fmt.Errorf("empty entity extraction response")
+		return nil, fmt.Errorf("llm entity extraction call failed: %w", err)
 	}
 	s.llmGuards.recordLLMResult(true)
 
-	content := strings.TrimSpace(llmResp.Choices[0].Message.Content)
+	content := strings.TrimSpace(rawContent)
 	// Strip markdown fences if LLM wraps response in ```json ... ```
 	if strings.HasPrefix(content, "```") {
 		content = strings.TrimPrefix(content, "```json")

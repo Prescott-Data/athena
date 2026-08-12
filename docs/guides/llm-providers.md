@@ -1,41 +1,54 @@
 # LLM Providers
 
-Athena needs one LLM provider for two jobs: **chat completions** (summarization, topic analysis, gray-zone arbitration, graph extraction) and **embeddings** (chain-break detection, Milvus vectors). Two providers are supported: Google Gemini and Azure OpenAI.
+Athena needs one LLM provider for two jobs: **chat completions** (summarization, topic analysis, gray-zone arbitration, graph extraction) and **embeddings** (chain-break detection, Milvus vectors). Providers are selected entirely through environment variables; no code path is provider-specific.
+
+`LLM_PROVIDER` chooses the backend (`gemini` | `azure` | `openai`). `LLM_API_KEY` works for every provider; the provider-native names (`GEMINI_API_KEY`, `AZURE_OPENAI_API_KEY`, `OPENAI_API_KEY`) are accepted as fallbacks. Every pipeline call (topic analysis, summaries, entity extraction, continuity, embeddings, graph extraction) goes through the same provider abstraction, so switching providers is a config change, not a migration.
 
 ## Google Gemini
 
 ```bash title="environment"
 LLM_PROVIDER=gemini
-LLM_API_KEY=<your Gemini API key>
+LLM_API_KEY=<your Gemini API key>          # or GEMINI_API_KEY
 LLM_MODEL_NAME=gemini-3-flash-preview
-EMBEDDING_MODEL_NAME=gemini-embedding-001
-EMBEDDING_DIMENSIONS=768
+EMBEDDING_MODEL_NAME=gemini-embedding-001  # default when unset
+MILVUS_VECTOR_DIMENSION=3072               # gemini-embedding-001 native output
 ```
+
+On thinking-capable Gemini models (2.5-flash and newer), Athena disables hidden reasoning (`thinkingBudget: 0`) for its pipeline calls; they use small token budgets that thinking would otherwise consume entirely.
 
 ## Azure OpenAI
 
 ```bash title="environment"
 LLM_PROVIDER=azure
-AZURE_OPENAI_ENDPOINT=https://<resource>.openai.azure.com
-AZURE_OPENAI_API_KEY=<key>
-LLM_MODEL_NAME=gpt-4o
-EMBEDDING_MODEL_NAME=text-embedding-ada-002
-EMBEDDING_DIMENSIONS=1536
+LLM_API_KEY=<key>                          # or AZURE_OPENAI_API_KEY
+LLM_BASE_URL=https://<resource>.openai.azure.com/openai/deployments/<dep>/chat/completions?api-version=...
+EMBEDDING_BASE_URL=https://<resource>.openai.azure.com/openai/deployments/<dep>/embeddings?api-version=...
+EMBEDDING_MODEL_NAME=text-embedding-ada-002  # default when unset
+MILVUS_VECTOR_DIMENSION=1536                 # ada-002 output
 ```
 
-Legacy deployment-URL variables (`LLM_BASE_URL`, `EMBEDDING_BASE_URL`, `LLM_API_VERSION`, `EMBEDDING_API_VERSION`) exist for older Azure setups; the [Configuration Reference](../reference/configuration.md) covers them.
+Azure uses deployment-scoped URLs rather than a model name; the server fails fast at startup with the exact variable name if one is missing.
+
+## OpenAI
+
+```bash title="environment"
+LLM_PROVIDER=openai
+LLM_API_KEY=<key>                          # or OPENAI_API_KEY
+LLM_MODEL_NAME=gpt-4
+EMBEDDING_MODEL_NAME=text-embedding-ada-002
+MILVUS_VECTOR_DIMENSION=1536
+```
 
 ## The dimension trap
 
-!!! danger "EMBEDDING_DIMENSIONS must match the model, and Milvus remembers"
-    Azure `text-embedding-ada-002` produces **1536**-dimensional vectors; Gemini `gemini-embedding-001` produces **768**. The Milvus collection is created with the configured dimension on first startup. If you later switch providers without recreating it, inserts fail with dimension-mismatch errors and search returns garbage.
+!!! danger "MILVUS_VECTOR_DIMENSION must match the embedding model, and Milvus remembers"
+    Azure/OpenAI `text-embedding-ada-002` produces **1536**-dimensional vectors; Gemini `gemini-embedding-001` produces **3072**. The Milvus collection is created with `MILVUS_VECTOR_DIMENSION` (default 1536). On mismatch the collection is dropped and recreated at startup, which **silently discards all existing chain vectors**.
 
 Switching providers on an existing deployment:
 
 1. Stop the server (or disable workers).
-2. Drop the Milvus collection (or point `MILVUS_DATABASE` at a fresh database).
-3. Update the `LLM_*`/`EMBEDDING_*` variables consistently, including `EMBEDDING_DIMENSIONS`.
-4. Restart. New chains embed with the new model.
+2. Update the `LLM_*`/`EMBEDDING_*` variables consistently, **including `MILVUS_VECTOR_DIMENSION`**.
+3. Restart; the Milvus collection is recreated at the new dimension and new chains embed with the new model.
 
 Old chains lose semantic searchability (their vectors are gone); their MongoDB summaries and any promoted LTM knowledge are unaffected. There is no re-embedding backfill today, so treat a provider switch as a semi-destructive migration and do it early in a deployment's life if possible.
 
@@ -62,4 +75,4 @@ Watch `llm_fallback_calls_total` in [metrics](../reference/metrics.md) for silen
 
 ## Choosing a provider
 
-Both run the same pipeline. Decide on: where your data may travel (regional endpoints), embedding cost at your event volume, and completion quality on your language mix. Whichever you choose, **pin `EMBEDDING_DIMENSIONS` in the same change** as the model variables; that pairing is the one config mistake this system does not forgive.
+All providers run the same pipeline. Decide on: where your data may travel (regional endpoints), embedding cost at your event volume, and completion quality on your language mix. Whichever you choose, **pin `MILVUS_VECTOR_DIMENSION` in the same change** as the model variables; that pairing is the one config mistake this system does not forgive.

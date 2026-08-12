@@ -15,9 +15,8 @@ import (
 func setupContinuityTest(t *testing.T, mockClient *http.Client) (*ContinuityAnalyzer, ContinuityConfig) {
 	t.Helper()
 
-	// Mock STMStore and inject the test client.
-	mockSTMStore := NewSTMStore(nil, nil, nil)
-	mockSTMStore.HTTPClient = mockClient
+	// Mock STMStore whose LLM provider routes through the test client.
+	mockSTMStore := newTestStoreWithMockClient(mockClient)
 
 	// Mock ContinuityAnalyzer, injecting the mocked store and client.
 	analyzer := NewContinuityAnalyzer(nil, mockSTMStore)

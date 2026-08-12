@@ -26,4 +26,8 @@ type Provider interface {
 
 	// CreateEmbedding creates a vector embedding for the given text
 	CreateEmbedding(ctx context.Context, req EmbeddingRequest) ([]float64, error)
+
+	// EmbeddingModel returns the name of the embedding model in use
+	// (used for cache keys and stored embedding metadata).
+	EmbeddingModel() string
 }

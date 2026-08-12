@@ -12,11 +12,11 @@ import (
 
 // OpenAIProvider implements the Provider interface for standard OpenAI
 type OpenAIProvider struct {
-	BaseURL        string
-	APIKey         string
-	Model          string
-	EmbeddingModel string
-	Client         *http.Client
+	BaseURL            string
+	APIKey             string
+	Model              string
+	EmbeddingModelName string
+	Client             *http.Client
 }
 
 func NewOpenAIProvider(baseURL, apiKey, model, embeddingModel string) *OpenAIProvider {
@@ -30,12 +30,17 @@ func NewOpenAIProvider(baseURL, apiKey, model, embeddingModel string) *OpenAIPro
 		embeddingModel = "text-embedding-ada-002"
 	}
 	return &OpenAIProvider{
-		BaseURL:        baseURL,
-		APIKey:         apiKey,
-		Model:          model,
-		EmbeddingModel: embeddingModel,
-		Client:         &http.Client{Timeout: 30 * time.Second},
+		BaseURL:            baseURL,
+		APIKey:             apiKey,
+		Model:              model,
+		EmbeddingModelName: embeddingModel,
+		Client:             &http.Client{Timeout: 30 * time.Second},
 	}
+}
+
+// EmbeddingModel returns the embedding model name in use.
+func (p *OpenAIProvider) EmbeddingModel() string {
+	return p.EmbeddingModelName
 }
 
 func (p *OpenAIProvider) GenerateCompletion(ctx context.Context, req CompletionRequest) (string, error) {
@@ -97,7 +102,7 @@ func (p *OpenAIProvider) GenerateCompletion(ctx context.Context, req CompletionR
 
 func (p *OpenAIProvider) CreateEmbedding(ctx context.Context, req EmbeddingRequest) ([]float64, error) {
 	requestBody := map[string]interface{}{
-		"model": p.EmbeddingModel,
+		"model": p.EmbeddingModelName,
 		"input": req.Input,
 	}
 

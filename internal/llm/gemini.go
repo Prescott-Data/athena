@@ -7,16 +7,17 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
 // GeminiProvider implements the Provider interface for Google Gemini
 type GeminiProvider struct {
-	BaseURL        string
-	APIKey         string
-	Model          string
-	EmbeddingModel string
-	Client         *http.Client
+	BaseURL            string
+	APIKey             string
+	Model              string
+	EmbeddingModelName string
+	Client             *http.Client
 }
 
 func NewGeminiProvider(apiKey, model, embeddingModel string) *GeminiProvider {
@@ -24,18 +25,31 @@ func NewGeminiProvider(apiKey, model, embeddingModel string) *GeminiProvider {
 		model = "gemini-1.5-pro"
 	}
 	if embeddingModel == "" {
-		embeddingModel = "text-embedding-004"
+		embeddingModel = "gemini-embedding-001"
 	}
 	// Google's API base URL is hardcoded or can be overridden if needed for enterprise
 	baseURL := "https://generativelanguage.googleapis.com/v1beta/models"
 
 	return &GeminiProvider{
-		BaseURL:        baseURL,
-		APIKey:         apiKey,
-		Model:          model,
-		EmbeddingModel: embeddingModel,
-		Client:         &http.Client{Timeout: 30 * time.Second},
+		BaseURL:            baseURL,
+		APIKey:             apiKey,
+		Model:              model,
+		EmbeddingModelName: embeddingModel,
+		Client:             &http.Client{Timeout: 30 * time.Second},
 	}
+}
+
+// EmbeddingModel returns the embedding model name in use.
+func (p *GeminiProvider) EmbeddingModel() string {
+	return p.EmbeddingModelName
+}
+
+// supportsThinkingBudget reports whether the model accepts
+// generationConfig.thinkingConfig. Thinking-capable models spend the whole
+// output budget on hidden reasoning for small max_tokens requests, so the
+// pipeline disables thinking on them (see issue #20).
+func supportsThinkingBudget(model string) bool {
+	return strings.Contains(model, "2.5") || strings.Contains(model, "gemini-3")
 }
 
 func (p *GeminiProvider) GenerateCompletion(ctx context.Context, req CompletionRequest) (string, error) {
@@ -54,6 +68,13 @@ func (p *GeminiProvider) GenerateCompletion(ctx context.Context, req CompletionR
 			"temperature":     req.Temperature,
 			"stopSequences":   req.Stop,
 		},
+	}
+
+	// Pipeline calls use small token budgets that thinking-capable models
+	// would otherwise spend entirely on hidden reasoning.
+	if supportsThinkingBudget(p.Model) {
+		genCfg := requestBody["generationConfig"].(map[string]interface{})
+		genCfg["thinkingConfig"] = map[string]interface{}{"thinkingBudget": 0}
 	}
 
 	if req.SystemPrompt != "" {
@@ -105,6 +126,7 @@ func (p *GeminiProvider) GenerateCompletion(ctx context.Context, req CompletionR
 					Text string `json:"text"`
 				} `json:"parts"`
 			} `json:"content"`
+			FinishReason string `json:"finishReason"`
 		} `json:"candidates"`
 	}
 
@@ -112,18 +134,21 @@ func (p *GeminiProvider) GenerateCompletion(ctx context.Context, req CompletionR
 		return "", fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	if len(response.Candidates) == 0 || len(response.Candidates[0].Content.Parts) == 0 {
-		return "", fmt.Errorf("no content in response")
+	if len(response.Candidates) == 0 {
+		return "", fmt.Errorf("no candidates in response")
+	}
+	if len(response.Candidates[0].Content.Parts) == 0 {
+		return "", fmt.Errorf("no content in response (finishReason=%s)", response.Candidates[0].FinishReason)
 	}
 
 	return response.Candidates[0].Content.Parts[0].Text, nil
 }
 
 func (p *GeminiProvider) CreateEmbedding(ctx context.Context, req EmbeddingRequest) ([]float64, error) {
-	url := fmt.Sprintf("%s/%s:embedContent?key=%s", p.BaseURL, p.EmbeddingModel, p.APIKey)
+	url := fmt.Sprintf("%s/%s:embedContent?key=%s", p.BaseURL, p.EmbeddingModelName, p.APIKey)
 
 	requestBody := map[string]interface{}{
-		"model": fmt.Sprintf("models/%s", p.EmbeddingModel),
+		"model": fmt.Sprintf("models/%s", p.EmbeddingModelName),
 		"content": map[string]interface{}{
 			"parts": []map[string]string{
 				{"text": req.Input},
@@ -170,8 +195,10 @@ func (p *GeminiProvider) CreateEmbedding(ctx context.Context, req EmbeddingReque
 	return response.Embedding.Values, nil
 }
 
-// mapSchemaTypesForGemini recursively converts type strings in a JSON schema to uppercase
-// because Gemini API strictly expects uppercase types like "OBJECT", "STRING", etc.
+// mapSchemaTypesForGemini converts a JSON Schema into the shape Gemini's
+// responseSchema accepts: type strings are uppercased, and JSON-Schema
+// strictness keys the Schema proto rejects (additionalProperties, strict,
+// $schema) are dropped recursively.
 func mapSchemaTypesForGemini(schema map[string]interface{}) map[string]interface{} {
 	if schema == nil {
 		return nil
@@ -179,30 +206,16 @@ func mapSchemaTypesForGemini(schema map[string]interface{}) map[string]interface
 
 	result := make(map[string]interface{})
 	for k, v := range schema {
-		if k == "type" {
+		switch k {
+		case "additionalProperties", "strict", "$schema":
+			continue // not part of Gemini's Schema proto
+		case "type":
 			if typeStr, ok := v.(string); ok {
-				// We don't uppercase it directly if we want to use strings.ToUpper,
-				// but let's just do a naive uppercase since typical schemas have simple types.
-				if typeStr == "object" {
-					result[k] = "OBJECT"
-				}
-				if typeStr == "string" {
-					result[k] = "STRING"
-				}
-				if typeStr == "number" {
-					result[k] = "NUMBER"
-				}
-				if typeStr == "integer" {
-					result[k] = "INTEGER"
-				}
-				if typeStr == "boolean" {
-					result[k] = "BOOLEAN"
-				}
-				if typeStr == "array" {
-					result[k] = "ARRAY"
-				}
+				result[k] = strings.ToUpper(typeStr)
+			} else {
+				result[k] = v
 			}
-		} else if k == "properties" {
+		case "properties":
 			if propsMap, ok := v.(map[string]interface{}); ok {
 				newProps := make(map[string]interface{})
 				for pk, pv := range propsMap {
@@ -214,13 +227,13 @@ func mapSchemaTypesForGemini(schema map[string]interface{}) map[string]interface
 				}
 				result[k] = newProps
 			}
-		} else if k == "items" {
+		case "items":
 			if itemsMap, ok := v.(map[string]interface{}); ok {
 				result[k] = mapSchemaTypesForGemini(itemsMap)
 			} else {
 				result[k] = v
 			}
-		} else {
+		default:
 			result[k] = v
 		}
 	}
