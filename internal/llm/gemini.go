@@ -9,15 +9,24 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 )
 
-// GeminiProvider implements the Provider interface for Google Gemini
+// GeminiProvider implements the Provider interface for Google Gemini.
+// It supports two auth modes: API key (Generative Language API) and
+// Application Default Credentials against Vertex AI (no static keys).
 type GeminiProvider struct {
 	BaseURL            string
 	APIKey             string
 	Model              string
 	EmbeddingModelName string
 	Client             *http.Client
+
+	// Vertex AI (ADC) mode
+	useADC      bool
+	tokenSource oauth2.TokenSource
 }
 
 func NewGeminiProvider(apiKey, model, embeddingModel string) *GeminiProvider {
@@ -44,6 +53,59 @@ func (p *GeminiProvider) EmbeddingModel() string {
 	return p.EmbeddingModelName
 }
 
+// vertexBaseURL builds the Vertex AI publisher-models base URL for a project/location.
+func vertexBaseURL(projectID, location string) string {
+	host := "aiplatform.googleapis.com"
+	if location != "global" {
+		host = location + "-aiplatform.googleapis.com"
+	}
+	return fmt.Sprintf("https://%s/v1/projects/%s/locations/%s/publishers/google/models", host, projectID, location)
+}
+
+// NewGeminiVertexProvider creates a Gemini provider that authenticates with
+// Application Default Credentials against Vertex AI. No API key is used.
+func NewGeminiVertexProvider(ctx context.Context, projectID, location, model, embeddingModel string) (*GeminiProvider, error) {
+	if projectID == "" {
+		return nil, fmt.Errorf("gemini vertex: set GCP_PROJECT_ID when GEMINI_USE_ADC is enabled")
+	}
+	if location == "" {
+		location = "global"
+	}
+	if model == "" {
+		model = "gemini-1.5-pro"
+	}
+	if embeddingModel == "" {
+		embeddingModel = "gemini-embedding-001"
+	}
+
+	ts, err := google.DefaultTokenSource(ctx, "https://www.googleapis.com/auth/cloud-platform")
+	if err != nil {
+		return nil, fmt.Errorf("gemini vertex: failed to resolve Application Default Credentials: %w", err)
+	}
+
+	return &GeminiProvider{
+		BaseURL:            vertexBaseURL(projectID, location),
+		Model:              model,
+		EmbeddingModelName: embeddingModel,
+		Client:             &http.Client{Timeout: 30 * time.Second},
+		useADC:             true,
+		tokenSource:        oauth2.ReuseTokenSource(nil, ts),
+	}, nil
+}
+
+// setAuth applies the appropriate credentials to an outgoing request.
+func (p *GeminiProvider) setAuth(req *http.Request) error {
+	if !p.useADC {
+		return nil // API key travels in the query string
+	}
+	tok, err := p.tokenSource.Token()
+	if err != nil {
+		return fmt.Errorf("gemini vertex: failed to obtain access token: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+tok.AccessToken)
+	return nil
+}
+
 // supportsThinkingBudget reports whether the model accepts
 // generationConfig.thinkingConfig. Thinking-capable models spend the whole
 // output budget on hidden reasoning for small max_tokens requests, so the
@@ -53,7 +115,10 @@ func supportsThinkingBudget(model string) bool {
 }
 
 func (p *GeminiProvider) GenerateCompletion(ctx context.Context, req CompletionRequest) (string, error) {
-	url := fmt.Sprintf("%s/%s:generateContent?key=%s", p.BaseURL, p.Model, p.APIKey)
+	url := fmt.Sprintf("%s/%s:generateContent", p.BaseURL, p.Model)
+	if !p.useADC {
+		url += "?key=" + p.APIKey
+	}
 
 	requestBody := map[string]interface{}{
 		"contents": []map[string]interface{}{
@@ -107,6 +172,9 @@ func (p *GeminiProvider) GenerateCompletion(ctx context.Context, req CompletionR
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	if err := p.setAuth(httpReq); err != nil {
+		return "", err
+	}
 
 	resp, err := p.Client.Do(httpReq)
 	if err != nil {
@@ -145,6 +213,10 @@ func (p *GeminiProvider) GenerateCompletion(ctx context.Context, req CompletionR
 }
 
 func (p *GeminiProvider) CreateEmbedding(ctx context.Context, req EmbeddingRequest) ([]float64, error) {
+	if p.useADC {
+		return p.createEmbeddingVertex(ctx, req)
+	}
+
 	url := fmt.Sprintf("%s/%s:embedContent?key=%s", p.BaseURL, p.EmbeddingModelName, p.APIKey)
 
 	requestBody := map[string]interface{}{
@@ -193,6 +265,61 @@ func (p *GeminiProvider) CreateEmbedding(ctx context.Context, req EmbeddingReque
 	}
 
 	return response.Embedding.Values, nil
+}
+
+// createEmbeddingVertex creates an embedding via Vertex AI's :predict endpoint,
+// whose request/response shapes differ from the Generative Language API.
+func (p *GeminiProvider) createEmbeddingVertex(ctx context.Context, req EmbeddingRequest) ([]float64, error) {
+	url := fmt.Sprintf("%s/%s:predict", p.BaseURL, p.EmbeddingModelName)
+
+	requestBody := map[string]interface{}{
+		"instances": []map[string]interface{}{
+			{"content": req.Input},
+		},
+	}
+
+	body, err := json.Marshal(requestBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal embedding request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create embedding request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if err := p.setAuth(httpReq); err != nil {
+		return nil, err
+	}
+
+	resp, err := p.Client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call Vertex embedding service: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("Vertex embedding API returned status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var response struct {
+		Predictions []struct {
+			Embeddings struct {
+				Values []float64 `json:"values"`
+			} `json:"embeddings"`
+		} `json:"predictions"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, fmt.Errorf("failed to decode Vertex embedding response: %w", err)
+	}
+
+	if len(response.Predictions) == 0 || len(response.Predictions[0].Embeddings.Values) == 0 {
+		return nil, fmt.Errorf("no embedding data in Vertex response")
+	}
+
+	return response.Predictions[0].Embeddings.Values, nil
 }
 
 // mapSchemaTypesForGemini converts a JSON Schema into the shape Gemini's
