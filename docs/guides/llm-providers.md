@@ -16,6 +16,22 @@ MILVUS_VECTOR_DIMENSION=3072               # gemini-embedding-001 native output
 
 On thinking-capable Gemini models (2.5-flash and newer), Athena disables hidden reasoning (`thinkingBudget: 0`) for its pipeline calls; they use small token budgets that thinking would otherwise consume entirely.
 
+### Gemini via Vertex AI (no API keys)
+
+On GCP (Cloud Run, GKE, GCE), Application Default Credentials are the platform-native auth path and avoid long-lived keys entirely:
+
+```bash title="environment"
+LLM_PROVIDER=gemini
+GEMINI_USE_ADC=true
+GCP_PROJECT_ID=<your project>
+VERTEX_LOCATION=global           # or a region, e.g. us-central1
+LLM_MODEL_NAME=gemini-3-flash-preview
+EMBEDDING_MODEL_NAME=gemini-embedding-001
+MILVUS_VECTOR_DIMENSION=3072
+```
+
+Credentials resolve from the workload's service account (workload identity / attached SA) or `GOOGLE_APPLICATION_CREDENTIALS`; no `LLM_API_KEY` is needed. Completions and embeddings route to the Vertex AI endpoints for the configured project and location.
+
 ## Azure OpenAI
 
 ```bash title="environment"
