@@ -78,6 +78,9 @@ Recipes: [Enabling Authentication](../guides/authentication.md).
 | `LLM_PROVIDER` | `azure` | `gemini` \| `azure` \| `openai` <span class="nx-badge nx-badge-required">Required</span> |
 | `LLM_API_KEY` | | Provider key <span class="nx-badge nx-badge-required">Required</span>; works for every provider |
 | `GEMINI_API_KEY` / `AZURE_OPENAI_API_KEY` / `OPENAI_API_KEY` | | Provider-native fallbacks when `LLM_API_KEY` is unset |
+| `GEMINI_USE_ADC` | `false` | Gemini via Vertex AI with Application Default Credentials (no API key) |
+| `GCP_PROJECT_ID` | | Required when `GEMINI_USE_ADC=true` |
+| `VERTEX_LOCATION` | `global` | Vertex AI location (region or `global`) |
 | `LLM_MODEL_NAME` | per provider | Completion model (`gemini-1.5-pro` / `gpt-4`) |
 | `EMBEDDING_MODEL_NAME` | per provider | Embedding model (`gemini-embedding-001` / `text-embedding-ada-002`) |
 | `MILVUS_VECTOR_DIMENSION` | `1536` | **Must match the embedding model**: ada-002 1536, gemini-embedding-001 3072 ([the trap](../guides/llm-providers.md#the-dimension-trap)) |

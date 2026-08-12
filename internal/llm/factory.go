@@ -1,8 +1,10 @@
 package llm
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"strconv"
 )
 
 // Factory creates LLM providers based on configuration
@@ -52,11 +54,15 @@ func (f *Factory) NewProvider(providerType string) (Provider, error) {
 		}
 		return NewOpenAIProvider(baseURL, apiKey, model, embeddingModel), nil
 	case "gemini":
+		if useADC, _ := strconv.ParseBool(os.Getenv("GEMINI_USE_ADC")); useADC {
+			return NewGeminiVertexProvider(context.Background(),
+				os.Getenv("GCP_PROJECT_ID"), os.Getenv("VERTEX_LOCATION"), model, embeddingModel)
+		}
 		if apiKey == "" {
 			apiKey = os.Getenv("GEMINI_API_KEY")
 		}
 		if apiKey == "" {
-			return nil, fmt.Errorf("gemini provider: set LLM_API_KEY or GEMINI_API_KEY")
+			return nil, fmt.Errorf("gemini provider: set LLM_API_KEY or GEMINI_API_KEY (or GEMINI_USE_ADC=true for Vertex AI)")
 		}
 		return NewGeminiProvider(apiKey, model, embeddingModel), nil
 	default:
