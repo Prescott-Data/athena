@@ -20,8 +20,8 @@ cp .env.example .env.dev
 ```
 
 ```bash title=".env.dev: the four required values"
-LLM_PROVIDER=gemini                      # gemini | azure
-LLM_API_KEY=<your key>                   # or AZURE_OPENAI_API_KEY for azure
+LLM_PROVIDER=gemini                      # gemini | azure | openai
+LLM_API_KEY=<your key>                   # GEMINI_API_KEY / AZURE_OPENAI_API_KEY also accepted
 MEMORY_OS_MONGODB_PASSWORD=admin123      # matches docker-compose.local.yml
 ARANGODB_PASSWORD=athena_dev             # matches docker-compose.local.yml
 ```

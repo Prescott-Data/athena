@@ -1,17 +1,15 @@
 package memory
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
+	"github.com/Prescott-Data/athena/internal/llm"
 	"github.com/Prescott-Data/athena/internal/models"
 )
 
@@ -101,57 +99,28 @@ func (ta *TopicAnalyzer) AnalyzeTopics(ctx context.Context, events []models.Cogn
 	return result, nil
 }
 
-// analyzeLLMTopics uses an LLM to extract multiple topics from the conversation
+// analyzeLLMTopics uses the configured LLM provider to extract multiple topics from the conversation
 func (ta *TopicAnalyzer) analyzeLLMTopics(ctx context.Context, events []models.CognitiveEvent) (*MultiTopicResult, error) {
-	llmBaseURL := os.Getenv("LLM_BASE_URL")
-	apiKey := os.Getenv("AZURE_OPENAI_API_KEY")
-	if llmBaseURL == "" || apiKey == "" {
+	if ta.stmStore == nil || ta.stmStore.llmProvider == nil {
 		return nil, fmt.Errorf("LLM not configured")
 	}
 
 	conversationText := ta.buildConversationText(events)
 	prompt := ta.buildMultiTopicPrompt(conversationText)
 
-	request := map[string]interface{}{
-		"messages": []map[string]string{
-			{"role": "user", "content": prompt},
-		},
-		"max_tokens":  1000,
-		"temperature": 0.3,
-	}
-
-	requestBody, err := json.Marshal(request)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal LLM request: %w", err)
-	}
-
 	httpCtx, cancel := context.WithTimeout(ctx, ta.config.LLMTimeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(httpCtx, "POST", llmBaseURL, bytes.NewBuffer(requestBody))
+	content, err := ta.stmStore.llmProvider.GenerateCompletion(httpCtx, llm.CompletionRequest{
+		Prompt:      prompt,
+		MaxTokens:   1000,
+		Temperature: 0.3,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("api-key", apiKey)
-
-	resp, err := ta.HTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to make LLM API call: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("LLM API returned status %d: %s", resp.StatusCode, string(bodyBytes))
+		return nil, fmt.Errorf("LLM topic analysis call failed: %w", err)
 	}
 
-	responseBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read LLM response body: %w", err)
-	}
-
-	topics, err := ta.parseLLMTopicResponse(responseBody)
+	topics, err := ta.parseLLMTopicResponse(content)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse LLM topic response: %w", err)
 	}
@@ -205,23 +174,9 @@ Conversation:
 Topics (JSON format):`, ta.config.MaxTopicsPerSegment, conversationText)
 }
 
-// parseLLMTopicResponse parses the LLM response for topic extraction
-func (ta *TopicAnalyzer) parseLLMTopicResponse(responseBody []byte) ([]*TopicSummary, error) {
-	var llmResponse struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(responseBody, &llmResponse); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal LLM response: %w", err)
-	}
-	if len(llmResponse.Choices) == 0 {
-		return nil, fmt.Errorf("no choices in LLM response")
-	}
-
-	topicsText := strings.TrimSpace(llmResponse.Choices[0].Message.Content)
+// parseLLMTopicResponse parses the LLM completion content for topic extraction
+func (ta *TopicAnalyzer) parseLLMTopicResponse(content string) ([]*TopicSummary, error) {
+	topicsText := strings.TrimSpace(content)
 	if strings.HasPrefix(topicsText, "```json") {
 		topicsText = strings.TrimPrefix(topicsText, "```json")
 		topicsText = strings.TrimSuffix(topicsText, "```")

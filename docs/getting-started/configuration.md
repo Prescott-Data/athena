@@ -22,11 +22,11 @@ Most variables use the `MEMORY_OS_` prefix and are read once at startup by `inte
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `LLM_PROVIDER` | `gemini` | `gemini` \| `azure` |
-| `LLM_API_KEY` | — | API key for the selected provider |
-| `LLM_MODEL_NAME` | `gemini-3-flash-preview` | Chat/completion model used by the pipeline |
-| `EMBEDDING_MODEL_NAME` | `gemini-embedding-001` | Embedding model |
-| `EMBEDDING_DIMENSIONS` | `1536` | **Must match the provider**: Azure `1536`, Gemini `768` |
+| `LLM_PROVIDER` | `azure` | `gemini` \| `azure` \| `openai` |
+| `LLM_API_KEY` | — | Works for every provider; `GEMINI_API_KEY` / `AZURE_OPENAI_API_KEY` / `OPENAI_API_KEY` accepted as fallbacks |
+| `LLM_MODEL_NAME` | per provider | Chat/completion model |
+| `EMBEDDING_MODEL_NAME` | per provider | Embedding model (`gemini-embedding-001` / `text-embedding-ada-002`) |
+| `MILVUS_VECTOR_DIMENSION` | `1536` | **Must match the embedding model**: ada-002 `1536`, gemini-embedding-001 `3072` |
 
 ### Datastores <span class="nx-badge nx-badge-required">Required</span>
 

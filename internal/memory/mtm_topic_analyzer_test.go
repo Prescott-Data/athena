@@ -51,8 +51,7 @@ func TestTopicAnalyzer_AnalyzeTopics_LLMSuccess(t *testing.T) {
 		return mockJSONResponse(http.StatusOK, llmResponse)
 	})
 
-	analyzer := NewTopicAnalyzer(nil, nil)
-	analyzer.HTTPClient = mockClient // Inject the mock client
+	analyzer := NewTopicAnalyzer(newTestStoreWithMockClient(mockClient), nil)
 
 	events := []models.CognitiveEvent{{Role: "user", Content: "Let's talk about testing."}}
 
@@ -86,8 +85,7 @@ func TestTopicAnalyzer_AnalyzeTopics_HeuristicFallback(t *testing.T) {
 		return mockJSONResponse(http.StatusInternalServerError, "LLM is down")
 	})
 
-	analyzer := NewTopicAnalyzer(nil, nil)
-	analyzer.HTTPClient = mockClient // Inject the mock client
+	analyzer := NewTopicAnalyzer(newTestStoreWithMockClient(mockClient), nil)
 
 	events := []models.CognitiveEvent{{Role: "user", Content: "This call will fail."}}
 

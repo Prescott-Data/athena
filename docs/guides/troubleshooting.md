@@ -58,7 +58,7 @@ The scorer reads `HEAT_WEIGHT_INTRINSIC` (default 0.7) and `HEAT_WEIGHT_DENSITY`
 
 ## Search returns nothing (or garbage)
 
-- **Dimension mismatch after a provider switch**: the classic. Milvus collection was created for 1536-dim (Azure) and now receives 768-dim (Gemini) or vice versa. Recreate the collection ([procedure](llm-providers.md#the-dimension-trap)).
+- **Dimension mismatch after a provider switch**: the classic. The Milvus collection dimension (`MILVUS_VECTOR_DIMENSION`, default 1536 for ada-002) must match the embedding model; `gemini-embedding-001` outputs 3072. On mismatch the collection is dropped and recreated at startup, silently discarding existing vectors ([procedure](llm-providers.md#the-dimension-trap)).
 - **Recent conversation not searchable**: expected; it may still be in the STM window, unformed. Use `GetContext` for the window.
 - **Old memory gone**: check for `status: "archived"` in `verifydb`; archived chains lose their vectors ([lifecycle](../concepts/archival-and-lifecycle.md)).
 

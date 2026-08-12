@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Prescott-Data/athena/internal/llm"
 	"github.com/Prescott-Data/athena/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -26,6 +27,38 @@ func (m *MockTestifyRoundTripper) RoundTrip(req *http.Request) (*http.Response, 
 	return args.Get(0).(*http.Response), args.Error(1)
 }
 
+// MockLLMProvider is a testify-based mock implementation of llm.Provider
+type MockLLMProvider struct {
+	mock.Mock
+}
+
+func (m *MockLLMProvider) GenerateCompletion(ctx context.Context, req llm.CompletionRequest) (string, error) {
+	args := m.Called(ctx, req)
+	return args.String(0), args.Error(1)
+}
+
+func (m *MockLLMProvider) CreateEmbedding(ctx context.Context, req llm.EmbeddingRequest) ([]float64, error) {
+	args := m.Called(ctx, req)
+	return args.Get(0).([]float64), args.Error(1)
+}
+
+func (m *MockLLMProvider) EmbeddingModel() string {
+	return "test-embedding-model"
+}
+
+// newTestStoreWithMockClient returns an STMStore whose LLM provider posts to
+// the TestMain mock URLs through the given HTTP client. Used by tests that
+// stub LLM traffic at the transport level.
+func newTestStoreWithMockClient(client *http.Client) *STMStore {
+	store := NewSTMStore(nil, nil, nil)
+	provider := llm.NewAzureProvider(os.Getenv("LLM_BASE_URL"), "test-key", os.Getenv("EMBEDDING_BASE_URL"), "test-embedding")
+	if client != nil {
+		provider.Client = client
+	}
+	store.llmProvider = provider
+	return store
+}
+
 // MockMongoCollection is a mock implementation of the mongo.Collection for testing
 type MockMongoCollection struct {
 	mock.Mock
@@ -37,59 +70,51 @@ func (m *MockMongoCollection) InsertOne(ctx context.Context, document interface{
 }
 
 // Test Helpers
-func setupSTMStoreTest() (*STMStore, *MockTestifyRoundTripper) {
-	mockTripper := new(MockTestifyRoundTripper)
+func setupSTMStoreTest() (*STMStore, *MockLLMProvider) {
+	mockProvider := new(MockLLMProvider)
 	// We are not testing the full DB/Milvus/Redis stack here, so we can pass nil for them
-	// and rely on mocking the HTTP client for the parts of the functions we are testing.
+	// and rely on mocking the LLM provider for the parts of the functions we are testing.
 	stmStore := &STMStore{
-		db:         nil, // Not used in these specific unit tests
-		redis:      nil, // Not used in these specific unit tests
-		milvus:     nil, // Not used in these specific unit tests
-		llmGuards:  &LLMGuardrails{},
-		HTTPClient: &http.Client{Transport: mockTripper},
+		db:          nil, // Not used in these specific unit tests
+		redis:       nil, // Not used in these specific unit tests
+		milvus:      nil, // Not used in these specific unit tests
+		llmGuards:   &LLMGuardrails{},
+		llmConfig:   LLMConfig{EmbeddingTimeout: 15 * time.Second, SummaryTimeout: 20 * time.Second},
+		llmProvider: mockProvider,
 	}
-	return stmStore, mockTripper
+	return stmStore, mockProvider
 }
 
 func Test_CreateEmbedding_BuildsRequest(t *testing.T) {
-	stmStore, mockTripper := setupSTMStoreTest()
+	stmStore, mockProvider := setupSTMStoreTest()
 	ctx := context.Background()
 
-	// Mock the HTTP response
-	mockResp := &http.Response{
-		StatusCode: http.StatusOK,
-		Body:       io.NopCloser(strings.NewReader(`{"data":[{"embedding":[0.1, 0.2, 0.3]}]}`)),
-	}
-	mockTripper.On("RoundTrip", mock.Anything).Return(mockResp, nil).Once()
+	mockProvider.On("CreateEmbedding", mock.Anything, llm.EmbeddingRequest{Input: "test text"}).
+		Return([]float64{0.1, 0.2, 0.3}, nil).Once()
 
 	_, err := stmStore.CreateEmbedding(ctx, "test text")
 	assert.NoError(t, err)
 
-	// Assert that the request body was correct
-	mockTripper.AssertCalled(t, "RoundTrip", mock.Anything)
+	mockProvider.AssertExpectations(t)
 }
 
 func Test_analyzeTopicContinuity_BuildsPrompt_ParsesResponse(t *testing.T) {
-	stmStore, mockTripper := setupSTMStoreTest()
+	stmStore, mockProvider := setupSTMStoreTest()
 	ctx := context.Background()
 
-	// Mock the HTTP response
-	mockResp := &http.Response{
-		StatusCode: http.StatusOK,
-		Body:       io.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"true"}}]}`)),
-	}
-	mockTripper.On("RoundTrip", mock.Anything).Return(mockResp, nil).Once()
+	mockProvider.On("GenerateCompletion", mock.Anything, mock.MatchedBy(func(req llm.CompletionRequest) bool {
+		return strings.Contains(req.Prompt, "previous content") && strings.Contains(req.Prompt, "new content")
+	})).Return("true", nil).Once()
 
 	continuous, err := stmStore.analyzeTopicContinuity(ctx, "test-user", "previous content", "new content")
 	assert.NoError(t, err)
 	assert.True(t, continuous)
 
-	// Assert that the prompt was correct
-	mockTripper.AssertCalled(t, "RoundTrip", mock.Anything)
+	mockProvider.AssertExpectations(t)
 }
 
 func Test_CreateSegmentSummary_BuildsRichPrompt(t *testing.T) {
-	stmStore, mockTripper := setupSTMStoreTest()
+	stmStore, mockProvider := setupSTMStoreTest()
 	ctx := context.Background()
 
 	testEvents := []models.CognitiveEvent{
@@ -98,21 +123,16 @@ func Test_CreateSegmentSummary_BuildsRichPrompt(t *testing.T) {
 		{Role: "agent", Type: models.STMEventTypeAction, Content: "Calling tool: echo"},
 	}
 
-	// Mock the HTTP response with structured JSON
-	mockJSON := `{"choices":[{"message":{"content":"{\"summary\": \"Summary\", \"intrinsic_importance\": 0.8}"}}]}`
-	mockResp := &http.Response{
-		StatusCode: http.StatusOK,
-		Body:       io.NopCloser(strings.NewReader(mockJSON)),
-	}
-	mockTripper.On("RoundTrip", mock.Anything).Return(mockResp, nil).Once()
+	mockProvider.On("GenerateCompletion", mock.Anything, mock.MatchedBy(func(req llm.CompletionRequest) bool {
+		return req.JSONSchema != nil && strings.Contains(req.Prompt, "Calling tool: echo")
+	})).Return(`{"summary": "Summary", "intrinsic_importance": 0.8}`, nil).Once()
 
 	summary, importance, err := stmStore.CreateSegmentSummary(ctx, testEvents)
 	assert.NoError(t, err)
 	assert.Equal(t, "Summary", summary)
 	assert.Equal(t, 0.8, importance)
 
-	// Assert that the prompt was correct
-	mockTripper.AssertCalled(t, "RoundTrip", mock.Anything)
+	mockProvider.AssertExpectations(t)
 }
 
 // This is a simplified test for orchestration. A full integration test would be needed to test the DB/Milvus interactions.
@@ -247,24 +267,22 @@ func (m *MockRedisCache) LSet(key string, index int64, value interface{}) error 
 }
 
 func TestSTMStore_EmbeddingCache_HitAndMiss(t *testing.T) {
-	mockTripper := new(MockTestifyRoundTripper)
+	mockProvider := new(MockLLMProvider)
 	mockRedis := new(MockRedisCache)
 	mockRedis.cache = make(map[string]interface{})
 
 	stmStore := &STMStore{
-		redis:      mockRedis,
-		llmGuards:  &LLMGuardrails{redis: mockRedis},
-		llmConfig:  LLMConfig{EmbeddingTimeout: 15 * time.Second},
-		HTTPClient: &http.Client{Transport: mockTripper},
+		redis:       mockRedis,
+		llmGuards:   &LLMGuardrails{redis: mockRedis},
+		llmConfig:   LLMConfig{EmbeddingTimeout: 15 * time.Second},
+		llmProvider: mockProvider,
 	}
 
 	ctx := context.Background()
 	testText := "test embedding text"
 
-	// Test 1: Cache MISS - should call API
+	// Test 1: Cache MISS - should call the provider
 	t.Run("Cache Miss", func(t *testing.T) {
-		t.Setenv("EMBEDDING_BASE_URL", "http://test")
-		t.Setenv("AZURE_OPENAI_API_KEY", "test")
 		// Mock embedding cache miss - Get(key string, dest interface{})
 		mockRedis.On("Get", mock.AnythingOfType("string"), mock.AnythingOfType("*models.EmbeddingData")).Return(io.EOF).Once()
 
@@ -272,11 +290,8 @@ func TestSTMStore_EmbeddingCache_HitAndMiss(t *testing.T) {
 		mockRedis.On("Get", mock.AnythingOfType("string"), mock.AnythingOfType("*int")).Return(io.EOF).Once()
 		mockRedis.On("SetEX", mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 
-		mockResp := &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader(`{"data":[{"embedding":[0.1, 0.2, 0.3]}]}`)),
-		}
-		mockTripper.On("RoundTrip", mock.Anything).Return(mockResp, nil).Once()
+		mockProvider.On("CreateEmbedding", mock.Anything, llm.EmbeddingRequest{Input: testText}).
+			Return([]float64{0.1, 0.2, 0.3}, nil).Once()
 
 		// Mock cache storage
 		mockRedis.On("SetWithTTL", mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
@@ -287,26 +302,24 @@ func TestSTMStore_EmbeddingCache_HitAndMiss(t *testing.T) {
 		assert.NotNil(t, embedding)
 		assert.Equal(t, 3, embedding.Dimensions)
 
-		// Verify API was called
-		mockTripper.AssertCalled(t, "RoundTrip", mock.Anything)
+		// Verify the provider was called
+		mockProvider.AssertExpectations(t)
 		// Verify cache was updated
 		mockRedis.AssertCalled(t, "SetWithTTL", mock.Anything, mock.Anything, mock.Anything)
 	})
 
-	// Test 2: Cache HIT - should NOT call API
+	// Test 2: Cache HIT - should NOT call the provider
 	t.Run("Cache Hit", func(t *testing.T) {
-		t.Setenv("EMBEDDING_BASE_URL", "http://test")
-		t.Setenv("AZURE_OPENAI_API_KEY", "test")
 		// Reset mock for clean test
-		mockTripper2 := new(MockTestifyRoundTripper)
+		mockProvider2 := new(MockLLMProvider)
 		mockRedis2 := new(MockRedisCache)
 		mockRedis2.cache = make(map[string]interface{})
 
 		stmStore2 := &STMStore{
-			redis:      mockRedis2,
-			llmGuards:  &LLMGuardrails{redis: mockRedis2},
-			llmConfig:  LLMConfig{EmbeddingTimeout: 15 * time.Second},
-			HTTPClient: &http.Client{Transport: mockTripper2},
+			redis:       mockRedis2,
+			llmGuards:   &LLMGuardrails{redis: mockRedis2},
+			llmConfig:   LLMConfig{EmbeddingTimeout: 15 * time.Second},
+			llmProvider: mockProvider2,
 		}
 
 		cachedEmbedding := &models.EmbeddingData{
@@ -316,8 +329,8 @@ func TestSTMStore_EmbeddingCache_HitAndMiss(t *testing.T) {
 			CreatedAt:  time.Now(),
 		}
 
-		// Generate the actual cache key that will be used
-		cacheKey := stmStore2.generateEmbeddingCacheKey(testText, os.Getenv("EMBEDDING_MODEL_NAME"))
+		// Generate the actual cache key that will be used (provider's embedding model)
+		cacheKey := stmStore2.generateEmbeddingCacheKey(testText, mockProvider2.EmbeddingModel())
 		mockRedis2.cache[cacheKey] = cachedEmbedding
 
 		// Mock the Get call for embedding cache - should return cached data
@@ -330,8 +343,8 @@ func TestSTMStore_EmbeddingCache_HitAndMiss(t *testing.T) {
 		assert.Equal(t, 3, embedding.Dimensions)
 		assert.Equal(t, cachedEmbedding.Vector, embedding.Vector)
 
-		// Verify API was NOT called
-		mockTripper2.AssertNotCalled(t, "RoundTrip", mock.Anything)
+		// Verify the provider was NOT called
+		mockProvider2.AssertNotCalled(t, "CreateEmbedding", mock.Anything, mock.Anything)
 	})
 }
 

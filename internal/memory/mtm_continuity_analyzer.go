@@ -1,18 +1,16 @@
 package memory
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"math"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
+	"github.com/Prescott-Data/athena/internal/llm"
 	"github.com/Prescott-Data/athena/internal/models"
 	"go.mongodb.org/mongo-driver/mongo"
 )
@@ -142,34 +140,25 @@ func (c *ContinuityAnalyzer) calculateSemanticSimilarity(ctx context.Context, ch
 
 // analyzeContinuityWithLLM uses an LLM to determine conversation continuity
 func (c *ContinuityAnalyzer) analyzeContinuityWithLLM(ctx context.Context, prevChain, currentChain *models.CognitiveChain, timeout time.Duration) (float64, string, error) {
-	llmBaseURL := os.Getenv("LLM_BASE_URL")
-	apiKey := os.Getenv("AZURE_OPENAI_API_KEY")
-
-	if llmBaseURL == "" {
-		return 0.0, "LLM not configured", fmt.Errorf("LLM_BASE_URL not configured")
-	}
-	if apiKey == "" {
-		return 0.0, "API key not configured", fmt.Errorf("AZURE_OPENAI_API_KEY not configured")
+	if c.stmStore == nil || c.stmStore.llmProvider == nil {
+		return 0.0, "LLM not configured", fmt.Errorf("llm provider not configured")
 	}
 
 	prompt := c.buildContinuityPrompt(prevChain, currentChain)
 
-	request := map[string]interface{}{
-		"prompt":      prompt,
-		"max_tokens":  200,
-		"temperature": 0.1,
-		"stop":        []string{"\n"},
-	}
-
 	llmCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	responseBody, err := c.callLLMAPI(llmCtx, llmBaseURL, apiKey, request)
+	content, err := c.stmStore.llmProvider.GenerateCompletion(llmCtx, llm.CompletionRequest{
+		Prompt:      prompt,
+		MaxTokens:   200,
+		Temperature: 0.1,
+	})
 	if err != nil {
 		return 0.0, "LLM API call failed", err
 	}
 
-	return c.parseLLMContinuityResponse(responseBody)
+	return c.parseLLMContinuityResponse(content)
 }
 
 // buildContinuityPrompt creates a prompt for LLM continuity analysis
@@ -199,59 +188,14 @@ Response:`,
 		currentChain.StartedAt.Format("2006-01-02 15:04:05"))
 }
 
-// callLLMAPI makes the actual API call to the LLM service
-func (c *ContinuityAnalyzer) callLLMAPI(ctx context.Context, url, apiKey string, request map[string]interface{}) ([]byte, error) {
-	requestBody, err := json.Marshal(request)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal LLM request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(requestBody))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("api-key", apiKey)
-
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to make LLM API call: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("LLM API returned status %d: %s", resp.StatusCode, string(bodyBytes))
-	}
-
-	return io.ReadAll(resp.Body)
-}
-
-// parseLLMContinuityResponse parses the LLM response for continuity analysis
-func (c *ContinuityAnalyzer) parseLLMContinuityResponse(responseBody []byte) (float64, string, error) {
-	var llmResponse struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-
-	if err := json.Unmarshal(responseBody, &llmResponse); err != nil {
-		return 0.0, "Failed to parse LLM response", fmt.Errorf("failed to unmarshal LLM response: %w", err)
-	}
-
-	if len(llmResponse.Choices) == 0 {
-		return 0.0, "No LLM choices returned", fmt.Errorf("no choices in LLM response")
-	}
-
+// parseLLMContinuityResponse parses the LLM completion content for continuity analysis
+func (c *ContinuityAnalyzer) parseLLMContinuityResponse(content string) (float64, string, error) {
 	var continuityResponse struct {
 		Score     float64 `json:"score"`
 		Reasoning string  `json:"reasoning"`
 	}
 
-	responseText := strings.TrimSpace(llmResponse.Choices[0].Message.Content)
+	responseText := strings.TrimSpace(content)
 	if err := json.Unmarshal([]byte(responseText), &continuityResponse); err != nil {
 		return 0.5, "Could not parse structured response", nil
 	}
