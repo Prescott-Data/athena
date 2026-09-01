@@ -115,9 +115,10 @@ Records a single event of any role/type, with optional binary payload.
 | `payload` | bytes | no | Base64 in JSON; uploaded to [blob storage](../guides/blob-storage.md) |
 | `mime_type` | string | with payload | e.g. `application/json` |
 
-**Response** (`StoreEventResponse`): `success` (bool), `event_id` (string, reserved).
+**Response** (`StoreEventResponse`): `success` (bool), `event_id` (string MongoDB
+ObjectID identifying the durable `cognitive_events` record).
 
-**Errors:** `NotFound` (session), `InvalidArgument` (bad `type`), `FailedPrecondition` (payload without blob store → HTTP 412), `Internal`.
+**Errors:** `NotFound` (session), `InvalidArgument` (bad `type`), `FailedPrecondition` (payload without blob store → HTTP 412), `Internal` (cache, blob, or durable event persistence failure).
 
 ---
 

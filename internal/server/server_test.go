@@ -2,13 +2,18 @@ package server
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	gen "github.com/Prescott-Data/athena/api/grpc/gen"
 	"github.com/Prescott-Data/athena/internal/cache"
 	"github.com/Prescott-Data/athena/internal/memory"
+	"github.com/Prescott-Data/athena/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // --- Mocks ---
@@ -114,4 +119,65 @@ func TestStoreInteraction_SmartTrigger(t *testing.T) {
 		mockCache.AssertExpectations(t)
 		mockRedis.AssertExpectations(t)
 	})
+}
+
+func TestStoreEventReturnsDurableEventID(t *testing.T) {
+	ctx := context.Background()
+	mockCache := new(MockSTMCache)
+	mockRedis := new(MockRedis)
+	eventID := primitive.NewObjectID()
+	server := &MemoryServer{
+		stmCache:    mockCache,
+		redisClient: mockRedis,
+		persistCognitiveEvent: func(context.Context, *models.CognitiveEvent) (primitive.ObjectID, error) {
+			return eventID, nil
+		},
+	}
+	server.getIDsFromSessionFunc = func(*MemoryServer, context.Context, string) (string, string, string, error) {
+		return "test-tenant", "test-user", "test-agent", nil
+	}
+	mockCache.On("AddSTMEvent", ctx, "test-tenant", "test-user", "test-agent", mock.AnythingOfType("memory.STMEvent")).Return(nil).Once()
+	scopedQueueName := memory.GenerateScopedQueueName("test-tenant", "test-user", "test-agent")
+	mockRedis.On("LPush", scopedQueueName, mock.Anything).Return(nil).Once()
+	mockRedis.On("LPush", memory.GlobalWorkQueueName, []interface{}{scopedQueueName}).Return(nil).Once()
+
+	response, err := server.StoreEvent(ctx, &gen.StoreEventRequest{
+		SessionId: "test-session",
+		Role:      "agent",
+		Type:      "observation",
+		Content:   "durable event",
+	})
+
+	assert.NoError(t, err)
+	assert.True(t, response.Success)
+	assert.Equal(t, eventID.Hex(), response.EventId)
+	mockCache.AssertExpectations(t)
+	mockRedis.AssertExpectations(t)
+}
+
+func TestStoreEventFailsWhenDurablePersistenceFails(t *testing.T) {
+	ctx := context.Background()
+	mockCache := new(MockSTMCache)
+	server := &MemoryServer{
+		stmCache: mockCache,
+		persistCognitiveEvent: func(context.Context, *models.CognitiveEvent) (primitive.ObjectID, error) {
+			return primitive.NilObjectID, errors.New("mongo unavailable")
+		},
+	}
+	server.getIDsFromSessionFunc = func(*MemoryServer, context.Context, string) (string, string, string, error) {
+		return "test-tenant", "test-user", "test-agent", nil
+	}
+	mockCache.On("AddSTMEvent", ctx, "test-tenant", "test-user", "test-agent", mock.AnythingOfType("memory.STMEvent")).Return(nil).Once()
+
+	response, err := server.StoreEvent(ctx, &gen.StoreEventRequest{
+		SessionId: "test-session",
+		Role:      "agent",
+		Type:      "observation",
+		Content:   "not durable",
+	})
+
+	assert.Nil(t, response)
+	assert.Equal(t, codes.Internal, status.Code(err))
+	assert.Contains(t, err.Error(), "failed to persist event")
+	mockCache.AssertExpectations(t)
 }
