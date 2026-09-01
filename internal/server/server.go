@@ -18,6 +18,7 @@ import (
 	"github.com/Prescott-Data/athena/internal/storage"
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"google.golang.org/grpc/codes"
@@ -43,6 +44,7 @@ type MemoryServer struct {
 	blobStore                            storage.BlobStore
 	promoter                             *memory.Promoter
 	ltmReader                            *memory.LTMReader
+	persistCognitiveEvent                func(context.Context, *models.CognitiveEvent) (primitive.ObjectID, error)
 	// getIDsFromSessionFunc allows mocking the DB call in tests
 	getIDsFromSessionFunc func(s *MemoryServer, ctx context.Context, sessionID string) (string, string, string, error)
 }
@@ -132,6 +134,7 @@ func NewMemoryServer(cfg *config.Config) (*MemoryServer, error) {
 		redisClient: redisClient,
 		blobStore:   blobStore,
 	}
+	server.persistCognitiveEvent = stmStore.StoreCognitiveEvent
 	// Point the function field to the real method
 	server.getIDsFromSessionFunc = (*MemoryServer).getIDsFromSession
 
@@ -361,8 +364,14 @@ func (s *MemoryServer) StoreEvent(ctx context.Context, req *gen.StoreEventReques
 
 	// Persist event to MongoDB immediately for durability (P5)
 	cogEvent := stmEventToCognitiveEvent(tenantID, userID, agentID, sessionID, event)
-	if _, err := s.stmStore.StoreCognitiveEvent(ctx, cogEvent); err != nil {
-		slog.Warn("Failed to persist event to MongoDB", slog.String("session_id", sessionID), slog.String("error", err.Error()))
+	persist := s.persistCognitiveEvent
+	if persist == nil {
+		persist = s.stmStore.StoreCognitiveEvent
+	}
+	eventID, err := persist(ctx, cogEvent)
+	if err != nil {
+		slog.Error("Failed to persist event to MongoDB", slog.String("session_id", sessionID), slog.String("error", err.Error()))
+		return nil, status.Errorf(codes.Internal, "failed to persist event: %v", err)
 	}
 
 	s.enqueueChainCheck(tenantID, userID, agentID)
@@ -371,6 +380,7 @@ func (s *MemoryServer) StoreEvent(ctx context.Context, req *gen.StoreEventReques
 
 	return &gen.StoreEventResponse{
 		Success: true,
+		EventId: eventID.Hex(),
 	}, nil
 }
 

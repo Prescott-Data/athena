@@ -4,6 +4,18 @@ Releases are cut automatically when the `VERSION` file changes on the default br
 
 <div class="changelog-release" markdown>
 
+## v0.1.6 <span class="changelog-date">September 2026</span>
+
+**Fixed**
+
+- `StoreEvent` now returns the durable MongoDB event ID and reports an internal
+	error when permanent persistence fails instead of acknowledging a Redis-only
+	event as successful.
+
+</div>
+
+<div class="changelog-release" markdown>
+
 ## v0.1.4 <span class="changelog-date">June 2026</span>
 
 <div class="changelog-meta" markdown>
