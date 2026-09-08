@@ -118,9 +118,13 @@ Full documentation is at **[athena.developers.prescottdata.io](https://athena.de
 | Section | What is there |
 |---|---|
 | [Getting Started](https://athena.developers.prescottdata.io/getting-started/quickstart/) | Deploy locally, your first session, configuration |
-| [Concepts](https://athena.developers.prescottdata.io/concepts/) | The three tiers, chain formation, heat and decay, the security model |
-| [Guides](https://athena.developers.prescottdata.io/guides/) | Retrieving context, LLM providers, deployment |
-| [Reference](https://athena.developers.prescottdata.io/reference/) | API, configuration variables, metrics |
+| [Architecture](https://athena.developers.prescottdata.io/concepts/architecture/) | How the three tiers fit together |
+| [Memory Tiers](https://athena.developers.prescottdata.io/concepts/memory-tiers/) | STM, MTM and LTM, and what each one decides to keep |
+| [Chain Formation](https://athena.developers.prescottdata.io/concepts/chain-formation/) | How a topic shift closes a chain and what gets summarised |
+| [Heat and Decay](https://athena.developers.prescottdata.io/concepts/heat-and-decay/) | The Ebbinghaus model that decides what survives |
+| [Retrieving Context](https://athena.developers.prescottdata.io/guides/retrieving-context/) | Reading memory back into a prompt |
+| [Security Model](https://athena.developers.prescottdata.io/concepts/security-model/) | Tenancy, auth modes, and what is enforced where |
+| [API Reference](https://athena.developers.prescottdata.io/reference/api/) | Every endpoint, gRPC and REST |
 
 Design notes that live in this repository rather than the docs site:
 [Architecture Evolution](docs/ARCHITECTURE_EVOLUTION.md) ·
