@@ -19,9 +19,12 @@
 </p>
 <p align="center">
   <sub>The same agent, the same question, asked in a new session. Without memory it starts cold.<br/>
-  With Athena it recalls the earlier session and connects the two. Nothing left the machine it ran on.<br/>
-  Ten minute walkthrough: <a href="https://github.com/Prescott-Data/athena/releases">athena-in-less-than-10min-memory.mp4</a></sub>
+  With Athena it recalls the earlier session and connects the two. Nothing left the machine it ran on.</sub>
 </p>
+
+**Seven minutes, start to finish.** An empty stack, a first memory stored over the REST API, and the cognitive pipeline consolidating it in the background:
+
+https://github.com/user-attachments/assets/e3061a7b-9046-4c59-b467-c91ab2abeeab
 
 ---
 
