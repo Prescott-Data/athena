@@ -10,6 +10,7 @@
   <a href="https://athena.developers.prescottdata.io/"><img src="https://img.shields.io/badge/docs-athena-1758F5?style=flat-square" alt="Docs" /></a>
   <img src="https://img.shields.io/badge/Go-1.26%2B-00ADD8?style=flat-square" alt="Go 1.26+" />
   <img src="https://img.shields.io/badge/API-gRPC%20%2B%20REST-555?style=flat-square" alt="gRPC and REST" />
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green?style=flat-square" alt="Apache 2.0" /></a>
   <a href="https://discord.gg/z69QKEnjd"><img src="https://img.shields.io/badge/Discord-join-5865F2?style=flat-square" alt="Discord" /></a>
 </p>
 
