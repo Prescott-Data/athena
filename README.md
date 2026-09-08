@@ -132,6 +132,10 @@ Design notes that live in this repository rather than the docs site:
 
 Office hours run in [Discord](https://discord.gg/z69QKEnjd), where we build on this in public and debug real agents. Issues and pull requests are welcome; see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
+## License
+
+Apache 2.0. See [LICENSE](./LICENSE).
+
 ---
 
 # Reference manual
