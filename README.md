@@ -1,13 +1,141 @@
-# Athena MemOS — Memory Operating System
+<p align="center">
+  <img src="docs/assets/combo-brand.svg" alt="Athena MemOS" height="72" />
+</p>
 
-Athena MemOS is a production-grade, multi-tenant **memory service** for AI agents. It provides human-like recollection by implementing a three-tier memory architecture — Short-Term (STM), Mid-Term (MTM), and Long-Term (LTM) — backed by Redis, MongoDB, Milvus, and ArangoDB. It exposes a dual gRPC + REST HTTP API and is deployed on Azure (Container Apps for dev, AKS for staging/production).
+<p align="center">
+  <strong>Memory for AI agents that runs on your own infrastructure. Three tiers modelled on human recall — a working window, consolidated experience, and a knowledge graph — so an agent remembers what mattered instead of replaying everything it was ever told.</strong>
+</p>
 
-> For the conceptual design and physics-based "Orbital Mechanics" principles see [docs/ARCHITECTURE_EVOLUTION.md](docs/ARCHITECTURE_EVOLUTION.md).  
-> For ArangoDB production infra requirements see [docs/ARANGODB_INFRA_SPEC.md](docs/ARANGODB_INFRA_SPEC.md).  
-> For cross-service (Dromos) integration design see [docs/ATHENA_UNIFIED_ARCHITECTURE.md](docs/ATHENA_UNIFIED_ARCHITECTURE.md).  
-> For current tech debt see [techdebt.md](./techdebt.md).
+<p align="center">
+  <a href="https://athena.developers.prescottdata.io/"><img src="https://img.shields.io/badge/docs-athena-1758F5?style=flat-square" alt="Docs" /></a>
+  <img src="https://img.shields.io/badge/Go-1.26%2B-00ADD8?style=flat-square" alt="Go 1.26+" />
+  <img src="https://img.shields.io/badge/API-gRPC%20%2B%20REST-555?style=flat-square" alt="gRPC and REST" />
+  <a href="https://discord.gg/z69QKEnjd"><img src="https://img.shields.io/badge/Discord-join-5865F2?style=flat-square" alt="Discord" /></a>
+</p>
+
+<p align="center">
+  <img src="docs/assets/memory-vs-none.gif" alt="The same agent answering the same question twice: without memory it starts cold, with Athena it recalls the earlier session and connects the two" width="760" />
+</p>
+<p align="center">
+  <sub>The same agent, the same question, asked in a new session. Without memory it starts cold.<br/>
+  With Athena it recalls the earlier session and connects the two. Nothing left the machine it ran on.<br/>
+  Ten minute walkthrough: <a href="https://github.com/Prescott-Data/athena/releases">athena-in-less-than-10min-memory.mp4</a></sub>
+</p>
 
 ---
+
+## What this is for
+
+An agent has no standing knowledge of anyone. Everything it appears to remember was selected by something and pasted into a prompt. That selection layer is the thing that decides how good the answer is, how much user data is in flight, and how often it goes.
+
+Most agent frameworks answer this with a log. A log keeps everything, which means every session re-sends the whole history and grows until it is truncated arbitrarily.
+
+Athena is the other option: **a memory chooses what to keep.**
+
+| You have this problem | Athena's answer |
+|---|---|
+| The agent forgets a customer between sessions | STM window plus MTM chains persist across sessions and processes |
+| Recall returns everything, so prompts grow without bound | Chains form on topic shift, and heat scoring lets cold ones decay |
+| Retrieval is keyword-shaped and misses related facts | Vector search over consolidated chains plus a graph traversal over entities |
+| Sending customer records to a hosted memory API is not an option | Runs entirely on infrastructure you administer, in your own boundary |
+| "What does the system know about this person?" has no answer | Every tier is inspectable: open the Redis window, the Mongo chains, the Arango graph |
+
+Athena is a service, not a library. Agents talk to it over gRPC or REST, so a Python fleet, a Go service, and a background worker can share one memory.
+
+---
+
+## Quick start
+
+Five minutes to a running stack. Full version: [Deploy in Five Minutes](https://athena.developers.prescottdata.io/getting-started/quickstart/).
+
+```bash
+git clone https://github.com/Prescott-Data/athena.git
+cd athena
+cp .env.example .env.dev
+```
+
+Fill in the four values the server refuses to start without:
+
+```bash
+LLM_PROVIDER=gemini            # gemini | azure | openai
+LLM_API_KEY=<your key>
+MEMORY_OS_MONGODB_URI=mongodb://admin:admin123@localhost:27017/memory_os?authSource=admin
+ARANGODB_PASSWORD=athena_dev   # matches docker-compose.local.yml
+```
+
+> Note the prefix. `internal/config/config.go` reads `MEMORY_OS_MONGODB_URI`; the unprefixed
+> `MONGO_URI` currently shipped in `.env.example` is never read.
+
+```bash
+docker compose -f docker-compose.local.yml up -d   # Redis, MongoDB, Milvus, etcd, MinIO, ArangoDB
+go run cmd/init-ltm/main.go                        # create the athena_ltm graph schema
+go run cmd/memory-server/main.go                   # REST :8080 · gRPC :9090 · metrics :8080/metrics
+```
+
+> Embedding dimensions differ per provider: Azure OpenAI is 1536, Gemini is 768. The Milvus collection is created with `EMBEDDING_DIMENSIONS`, so switching providers later means dropping and recreating it.
+
+## Your first memory
+
+Store something, then read it back. Full version: [Your First Session](https://athena.developers.prescottdata.io/getting-started/first-session/).
+
+```bash
+# 1. Open a session, scoped tenant -> user -> agent
+export SESSION=$(curl -s -X POST http://localhost:8080/api/v1/sessions \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": "test-user-123", "agent_id": "quickstart"}' | jq -r .session_id)
+
+# 2. Store one user<->agent turn
+curl -X POST http://localhost:8080/api/v1/sessions/$SESSION/interactions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_message": "My name is John and I love writing Go code.",
+    "agent_response": "Nice to meet you John, Go is a great language."
+  }'
+
+# 3. Read back what the agent would prepend to its next prompt
+curl "http://localhost:8080/api/v1/sessions/$SESSION/context?limit=10"
+```
+
+Your turn comes back in `stm_events`, newest first. Add `&query=...` to blend in semantically relevant mid-term memories rather than just the recent window.
+
+What happens next is the part worth watching. A background worker compares your last two messages by cosine similarity, and when the topic shifts it summarises the closed stretch into a **cognitive chain**, embeds it, and stores it. Chains that keep getting recalled stay warm; chains that do not decay on an Ebbinghaus curve and are eventually archived. The warm ones get promoted into a knowledge graph. That whole pipeline is described in [Data Flow](#3-data-flow--end-to-end).
+
+## Examples
+
+```bash
+go run cmd/simulate/main.go          # 13 end-to-end scenarios: sessions, recall, blob stress, archival
+go run cmd/verify/main.go            # inspect what actually landed in the ArangoDB graph
+go run cmd/verify_analytics/main.go  # check community detection and bridge entity output
+```
+
+Run `cmd/simulate` against a fresh stack and then `cmd/verify` to see chains promoted into graph nodes and edges. That is the fastest way to understand what the system does without reading the whole manual below.
+
+## Documentation
+
+Full documentation is at **[athena.developers.prescottdata.io](https://athena.developers.prescottdata.io/)**.
+
+| Section | What is there |
+|---|---|
+| [Getting Started](https://athena.developers.prescottdata.io/getting-started/quickstart/) | Deploy locally, your first session, configuration |
+| [Concepts](https://athena.developers.prescottdata.io/concepts/) | The three tiers, chain formation, heat and decay, the security model |
+| [Guides](https://athena.developers.prescottdata.io/guides/) | Retrieving context, LLM providers, deployment |
+| [Reference](https://athena.developers.prescottdata.io/reference/) | API, configuration variables, metrics |
+
+Design notes that live in this repository rather than the docs site:
+[Architecture Evolution](docs/ARCHITECTURE_EVOLUTION.md) ·
+[ArangoDB Infra Spec](docs/ARANGODB_INFRA_SPEC.md) ·
+[Unified Architecture](docs/ATHENA_UNIFIED_ARCHITECTURE.md) ·
+[Tech debt](./techdebt.md)
+
+## Community
+
+Office hours run in [Discord](https://discord.gg/z69QKEnjd), where we build on this in public and debug real agents. Issues and pull requests are welcome; see [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+---
+
+# Reference manual
+
+Athena MemOS is a multi-tenant **memory service** for AI agents, implementing a three-tier memory architecture — Short-Term (STM), Mid-Term (MTM), and Long-Term (LTM) — backed by Redis, MongoDB, Milvus, and ArangoDB. It exposes a dual gRPC + REST HTTP API and is deployed on Azure (Container Apps for dev, AKS for staging/production).
 
 ## Table of Contents
 
