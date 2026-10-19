@@ -300,6 +300,9 @@ func (s *STMStore) eraseSession(ctx context.Context, record *models.CognitiveCha
 		if err := s.milvus.DeleteSegmentEmbeddingsByID(ctx, vectorIDs); err != nil {
 			return nil, fmt.Errorf("failed to delete session vectors: %w", err)
 		}
+		if err := s.milvus.DeleteEventEmbeddingsByID(ctx, eventIDs(events)); err != nil {
+			return nil, fmt.Errorf("failed to delete session event vectors: %w", err)
+		}
 		report.Vectors = len(vectorIDs)
 	}
 
@@ -495,6 +498,9 @@ func (s *STMStore) discardChain(ctx context.Context, chain *models.CognitiveChai
 		if err := s.milvus.DeleteSegmentEmbeddingsByID(ctx, vectorIDs); err != nil {
 			slog.Error("Failed to delete vectors of a discarded chain", slog.String("chain_id", chain.ChainID), slog.String("error", err.Error()))
 		}
+		if err := s.milvus.DeleteEventEmbeddingsByID(ctx, vectorIDs[1:]); err != nil {
+			slog.Error("Failed to delete event vectors of a discarded chain", slog.String("chain_id", chain.ChainID), slog.String("error", err.Error()))
+		}
 	}
 	if _, err := s.db.Collection(CognitiveChainsCollection).DeleteOne(ctx, bson.M{"chainId": chain.ChainID}); err != nil {
 		slog.Error("Failed to delete a chain of an erased session", slog.String("chain_id", chain.ChainID), slog.String("error", err.Error()))
@@ -513,6 +519,15 @@ func sessionIDsOf(events []models.CognitiveEvent) []string {
 			seen[e.SessionID] = struct{}{}
 			ids = append(ids, e.SessionID)
 		}
+	}
+	return ids
+}
+
+// eventIDs returns the hex IDs of events, which are their vector IDs.
+func eventIDs(events []models.CognitiveEvent) []string {
+	ids := make([]string, 0, len(events))
+	for _, e := range events {
+		ids = append(ids, e.ID.Hex())
 	}
 	return ids
 }

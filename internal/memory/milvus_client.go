@@ -586,6 +586,16 @@ var vectorIDPattern = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
 // DeleteSegmentEmbeddingsByID deletes segment vectors by ID, whatever their scope.
 // Chain and event IDs are globally unique, so no scope is needed to target them.
 func (mc *MilvusClient) DeleteSegmentEmbeddingsByID(ctx context.Context, ids []string) error {
+	return mc.deleteByID(ctx, SegmentCollectionName, SegmentIDFieldName, ids)
+}
+
+// DeleteEventEmbeddingsByID deletes event vectors stored in the STM collection, whose
+// page ID is the event ID.
+func (mc *MilvusClient) DeleteEventEmbeddingsByID(ctx context.Context, ids []string) error {
+	return mc.deleteByID(ctx, STMCollectionName, PageIDFieldName, ids)
+}
+
+func (mc *MilvusClient) deleteByID(ctx context.Context, collection, field string, ids []string) error {
 	const batch = 500
 	for start := 0; start < len(ids); start += batch {
 		end := start + batch
@@ -599,9 +609,9 @@ func (mc *MilvusClient) DeleteSegmentEmbeddingsByID(ctx context.Context, ids []s
 			}
 			quoted = append(quoted, `"`+id+`"`)
 		}
-		expr := fmt.Sprintf(`%s in [%s]`, SegmentIDFieldName, strings.Join(quoted, ","))
-		if err := mc.client.Delete(ctx, SegmentCollectionName, "", expr); err != nil {
-			return fmt.Errorf("failed to delete segment embeddings: %w", err)
+		expr := fmt.Sprintf(`%s in [%s]`, field, strings.Join(quoted, ","))
+		if err := mc.client.Delete(ctx, collection, "", expr); err != nil {
+			return fmt.Errorf("failed to delete vectors from %s: %w", collection, err)
 		}
 	}
 	return nil
