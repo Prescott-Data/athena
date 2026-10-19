@@ -594,3 +594,21 @@ func TestLLMConfig_TimeoutConfiguration(t *testing.T) {
 
 	t.Log("LLMConfig properly stores and retrieves timeout values")
 }
+
+func (m *MockRedisCache) HSet(key, field, value string) error {
+	args := m.Called(key, field, value)
+	return args.Error(0)
+}
+
+func (m *MockRedisCache) HGetAll(key string) (map[string]string, error) {
+	args := m.Called(key)
+	if v, ok := args.Get(0).(map[string]string); ok {
+		return v, args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
+func (m *MockRedisCache) HDel(key string, fields ...string) error {
+	args := m.Called(key, fields)
+	return args.Error(0)
+}

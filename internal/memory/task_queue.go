@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/Prescott-Data/athena/internal/cache"
+	"github.com/Prescott-Data/athena/internal/models"
+	"github.com/google/uuid"
 )
 
 // TaskQueuer defines the interface for task queue operations.
@@ -24,6 +26,9 @@ const (
 
 	// TaskTypeCognitiveChainCheck is the task type for cognitive chain analysis
 	TaskTypeCognitiveChainCheck = "cognitive_chain_check"
+
+	// TaskTypeIdleFlush summarises what is left in a quiet scope's STM before it expires
+	TaskTypeIdleFlush = "stm_idle_flush"
 )
 
 // GenerateScopedQueueName creates a tenant-scoped queue name
@@ -110,4 +115,25 @@ func (tq *TaskQueue) MarkTaskResult(ctx context.Context, tenantID, userID, agent
 	}
 
 	return nil
+}
+
+// enqueueTask puts a task for a scope on its queue and announces the queue to the workers.
+func enqueueTask(redis cache.Interface, taskType, tenantID, userID, agentID string) error {
+	payload, err := json.Marshal(models.CognitiveChainCheckTask{
+		ID: uuid.New().String(), Type: taskType, TenantID: tenantID, UserID: userID,
+		AgentID: agentID, Timestamp: time.Now(),
+	})
+	if err != nil {
+		return err
+	}
+	envelope, err := json.Marshal(TaskEnvelope{ID: uuid.New().String(), Type: taskType, Payload: payload,
+		EnqueuedAt: time.Now()})
+	if err != nil {
+		return err
+	}
+	queue := GenerateScopedQueueName(tenantID, userID, agentID)
+	if err := redis.LPush(queue, string(envelope)); err != nil {
+		return err
+	}
+	return redis.LPush(GlobalWorkQueueName, queue)
 }

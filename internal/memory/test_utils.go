@@ -110,3 +110,20 @@ func (m *MockRedis) LSet(key string, index int64, value interface{}) error {
 	args := m.Called(key, index, value)
 	return args.Error(0)
 }
+func (m *MockRedis) HSet(key, field, value string) error {
+	args := m.Called(key, field, value)
+	return args.Error(0)
+}
+
+func (m *MockRedis) HGetAll(key string) (map[string]string, error) {
+	args := m.Called(key)
+	if v, ok := args.Get(0).(map[string]string); ok {
+		return v, args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
+func (m *MockRedis) HDel(key string, fields ...string) error {
+	args := m.Called(key, fields)
+	return args.Error(0)
+}

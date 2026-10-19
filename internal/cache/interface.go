@@ -23,4 +23,7 @@ type Interface interface {
 	RPop(key string) (string, error)
 	LIndex(key string, index int64) (string, error)
 	LSet(key string, index int64, value interface{}) error
+	HSet(key, field, value string) error
+	HGetAll(key string) (map[string]string, error)
+	HDel(key string, fields ...string) error
 }
