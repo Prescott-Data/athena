@@ -246,3 +246,15 @@ func (r *RedisClient) LSet(key string, index int64, value interface{}) error {
 	// If we pass a string (JSON) to LSet, go-redis handles it.
 	return r.client.LSet(r.ctx, key, index, value).Err()
 }
+
+// SetNX sets key to value with a TTL only if it does not exist; true if it was set.
+func (r *RedisClient) SetNX(key, value string, ttl time.Duration) (bool, error) {
+	return r.client.SetNX(r.ctx, key, value, ttl).Result()
+}
+
+var deleteIfEquals = redis.NewScript(`if redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) end return 0`)
+
+// DeleteIfEquals deletes key only if it still holds value, atomically.
+func (r *RedisClient) DeleteIfEquals(key, value string) error {
+	return deleteIfEquals.Run(r.ctx, r.client, []string{key}, value).Err()
+}

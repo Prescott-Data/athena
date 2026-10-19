@@ -23,4 +23,8 @@ type Interface interface {
 	RPop(key string) (string, error)
 	LIndex(key string, index int64) (string, error)
 	LSet(key string, index int64, value interface{}) error
+	// SetNX sets key to value with a TTL only if it does not exist; true if it was set.
+	SetNX(key, value string, ttl time.Duration) (bool, error)
+	// DeleteIfEquals deletes key only if it still holds value (a lock its holder releases).
+	DeleteIfEquals(key, value string) error
 }
