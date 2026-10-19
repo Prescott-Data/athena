@@ -594,21 +594,26 @@ All three modes are disabled by default and can be independently enabled:
 | Variable | Default | Description |
 |---|---|---|
 | `LLM_PROVIDER` | `azure` | LLM backend: `azure` or `gemini` |
-| `LLM_BASE_URL` | `""` | LLM API base URL |
+| `LLM_BASE_URL` | `""` | LLM API base URL. For Azure: a deployment chat-completions URL (used as given), or leave unset and use `AZURE_OPENAI_ENDPOINT` + `AZURE_OPENAI_DEPLOYMENT` |
 | `LLM_MODEL_NAME` | `gpt-4` | Chat completion model name |
-| `LLM_API_VERSION` | `2023-05-15` | Azure API version (if `azure`) |
 | `LLM_TIMEOUT_SECONDS` | `10` | Default LLM call timeout |
 | `LLM_EMBEDDING_TIMEOUT_SEC` | `15` | Embedding call timeout |
 | `LLM_SUMMARY_TIMEOUT_SEC` | `20` | Summary generation timeout |
 | `LLM_RATE_LIMIT_PER_MINUTE` | `50` | Max LLM calls per user per minute |
 | `LLM_CIRCUIT_BREAKER_THRESHOLD` | `5` | Consecutive failures to open circuit |
 | `LLM_CIRCUIT_BREAKER_TIMEOUT_SECONDS` | `60` | Circuit breaker reset window |
-| `AZURE_OPENAI_ENDPOINT` | `""` | Azure OpenAI resource endpoint |
+| `AZURE_OPENAI_ENDPOINT` | `""` | Azure OpenAI resource endpoint; deployment URLs are built from it when `LLM_BASE_URL`/`EMBEDDING_BASE_URL` are unset |
+| `AZURE_OPENAI_DEPLOYMENT` | `LLM_MODEL_NAME` | Azure chat deployment name |
+| `AZURE_OPENAI_EMBEDDING_DEPLOYMENT` | `EMBEDDING_MODEL_NAME` | Azure embedding deployment name |
+| `AZURE_OPENAI_API_VERSION` | `2024-10-21` | API version for URLs built from the endpoint |
 | `AZURE_OPENAI_API_KEY` | `""` | Azure OpenAI API key |
 | `GEMINI_API_KEY` | `""` | Google Gemini API key |
 | `EMBEDDING_BASE_URL` | `""` | Embedding model endpoint |
 | `EMBEDDING_MODEL_NAME` | `text-embedding-ada-002` | Embedding model name |
-| `EMBEDDING_API_VERSION` | `2023-05-15` | Embedding API version |
+| `LLM_REASONING_MODEL` | `false` | Set `true` for reasoning deployments (o-series, gpt-5+) to skip the first rejected request; otherwise detected automatically |
+| `LLM_REASONING_TOKEN_HEADROOM` | `4096` | Completion tokens added for hidden reasoning on reasoning models |
+| `LLM_REASONING_EFFORT` | `""` | `reasoning_effort` sent to reasoning models (e.g. `minimal`, `low`) |
+| `LLM_CHECK_INTERVAL_MIN` | `10` | Minutes between LLM/embedding checks reported by `/api/v1/health` (`0`: startup only) |
 
 ### Blob Storage
 

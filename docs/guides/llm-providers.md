@@ -37,13 +37,28 @@ Credentials resolve from the workload's service account (workload identity / att
 ```bash title="environment"
 LLM_PROVIDER=azure
 LLM_API_KEY=<key>                          # or AZURE_OPENAI_API_KEY
-LLM_BASE_URL=https://<resource>.openai.azure.com/openai/deployments/<dep>/chat/completions?api-version=...
-EMBEDDING_BASE_URL=https://<resource>.openai.azure.com/openai/deployments/<dep>/embeddings?api-version=...
-EMBEDDING_MODEL_NAME=text-embedding-ada-002  # default when unset
-MILVUS_VECTOR_DIMENSION=1536                 # ada-002 output
+AZURE_OPENAI_ENDPOINT=https://<resource>.openai.azure.com
+AZURE_OPENAI_DEPLOYMENT=<chat deployment>              # or LLM_MODEL_NAME
+EMBEDDING_MODEL_NAME=<embedding deployment>            # or AZURE_OPENAI_EMBEDDING_DEPLOYMENT
+MILVUS_VECTOR_DIMENSION=1536                           # text-embedding-3-small / ada-002 output
+# AZURE_OPENAI_API_VERSION=2024-10-21                  # default
 ```
 
-Azure uses deployment-scoped URLs rather than a model name; the server fails fast at startup with the exact variable name if one is missing.
+Athena builds the deployment URLs from the endpoint and deployment names. Full deployment URLs still work and are used as given: `LLM_BASE_URL=https://<resource>.openai.azure.com/openai/deployments/<dep>/chat/completions?api-version=...` and `EMBEDDING_BASE_URL=.../deployments/<dep>/embeddings?api-version=...` (the v1 form `.../openai/v1/chat/completions` too). The provider fails at startup naming the missing variable.
+
+### Reasoning deployments (o-series, gpt-5 and later)
+
+Reasoning models reject `max_tokens`, any non-default `temperature` and `stop`, and spend completion tokens on hidden reasoning before they answer. Athena handles this for Azure and OpenAI:
+
+- The first rejected parameter switches the request shape for the life of the process (`max_completion_tokens`, no `temperature`, no `stop`). Set `LLM_REASONING_MODEL=true` to start in that shape.
+- `LLM_REASONING_TOKEN_HEADROOM` (default 4096) is added to each request's token budget, so reasoning does not consume the whole budget. An answer that still comes back empty is reported as an error naming this setting, not as an empty summary.
+- `LLM_REASONING_EFFORT` (for example `minimal` or `low`) is sent as `reasoning_effort` when set, to cut latency and cost; it is dropped if the deployment rejects it.
+
+Reasoning models are slower. If summaries time out, raise `LLM_SUMMARY_TIMEOUT_SEC` (20) and `LLM_TIMEOUT_SECONDS` (10), or lower the effort.
+
+## Checking the configuration
+
+At startup and every `LLM_CHECK_INTERVAL_MIN` minutes (default 10; `0` checks at startup only), Athena makes one small completion and one embedding and checks the embedding's dimension against `MILVUS_VECTOR_DIMENSION`. A failure is logged as an error and reported in `GET /api/v1/health` as `"llm": "unhealthy: <reason>"` with status `degraded`; otherwise `"llm": "healthy"`.
 
 ## OpenAI
 
