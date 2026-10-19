@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Prescott-Data/athena/internal/models"
@@ -315,7 +317,9 @@ func (mc *MilvusClient) initializeSegmentCollection(ctx context.Context) error {
 	return nil
 }
 
-// InsertEmbedding stores a vector embedding in Milvus with tenant/user/agent scope
+// InsertEmbedding stores an event vector in the STM collection with tenant/user/agent
+// scope; pageID is the event ID. Event vectors are kept apart from chain vectors so
+// they cannot crowd chains out of segment search.
 func (mc *MilvusClient) InsertEmbedding(ctx context.Context, tenantID, userID, agentID, pageID string, embedding *models.EmbeddingData) error {
 	if len(embedding.Vector) != VectorDimension {
 		return fmt.Errorf("vector dimension mismatch: expected %d, got %d", VectorDimension, len(embedding.Vector))
@@ -339,11 +343,6 @@ func (mc *MilvusClient) InsertEmbedding(ctx context.Context, tenantID, userID, a
 	_, err := mc.client.Insert(ctx, STMCollectionName, "", tenantIDColumn, userIDColumn, agentIDColumn, pageIDColumn, vectorColumn, timestampColumn)
 	if err != nil {
 		return fmt.Errorf("failed to insert embedding: %w", err)
-	}
-
-	// Flush to ensure data is persisted
-	if err := mc.client.Flush(ctx, STMCollectionName, false); err != nil {
-		log.Printf("WARN: Failed to flush after embedding insertion: %v", err)
 	}
 
 	return nil
@@ -514,6 +513,9 @@ func (mc *MilvusClient) SearchSimilarEmbeddings(ctx context.Context, tenantID, u
 	return pageIDs, scores, nil
 }
 
+// SearchSimilarSegments returns the IDs of the chain vectors nearest to queryVector
+// with their cosine similarity, most similar first.
+//
 // SearchSimilarSegments finds similar Segment vectors in Milvus with tenant/user/agent scope
 func (mc *MilvusClient) SearchSimilarSegments(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int) ([]string, []float32, error) {
 	if len(queryVector) != VectorDimension {
@@ -571,9 +573,74 @@ func (mc *MilvusClient) SearchSimilarSegments(ctx context.Context, tenantID, use
 		}
 	}
 	for i := 0; i < res.ResultCount; i++ {
-		scores = append(scores, res.Scores[i])
+		scores = append(scores, squaredL2ToCosine(res.Scores[i]))
 	}
 	return ids, scores, nil
+}
+
+// segmentIDPattern matches the IDs Athena uses for vectors (chain UUIDs and event
+// ObjectIDs), so they can be placed in a filter expression safely.
+var segmentIDPattern = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
+
+// GetSegmentVectors reads the stored vectors of the given segment IDs. IDs without a
+// vector are absent from the result.
+func (mc *MilvusClient) GetSegmentVectors(ctx context.Context, ids []string) (map[string][]float32, error) {
+	const batch = 500
+	vectors := make(map[string][]float32, len(ids))
+	for start := 0; start < len(ids); start += batch {
+		end := start + batch
+		if end > len(ids) {
+			end = len(ids)
+		}
+		quoted := make([]string, 0, end-start)
+		for _, id := range ids[start:end] {
+			if !segmentIDPattern.MatchString(id) {
+				return nil, fmt.Errorf("refusing to query vector with malformed id %q", id)
+			}
+			quoted = append(quoted, `"`+id+`"`)
+		}
+		expr := fmt.Sprintf(`%s in [%s]`, SegmentIDFieldName, strings.Join(quoted, ","))
+		columns, err := mc.client.Query(ctx, SegmentCollectionName, nil, expr, []string{SegmentIDFieldName, VectorFieldName})
+		if err != nil {
+			return nil, fmt.Errorf("failed to read segment vectors: %w", err)
+		}
+		var idCol *entity.ColumnVarChar
+		var vecCol *entity.ColumnFloatVector
+		for _, col := range columns {
+			switch c := col.(type) {
+			case *entity.ColumnVarChar:
+				if c.Name() == SegmentIDFieldName {
+					idCol = c
+				}
+			case *entity.ColumnFloatVector:
+				vecCol = c
+			}
+		}
+		if idCol == nil || vecCol == nil {
+			continue
+		}
+		data := vecCol.Data()
+		for i, id := range idCol.Data() {
+			if i < len(data) {
+				vectors[id] = data[i]
+			}
+		}
+	}
+	return vectors, nil
+}
+
+// squaredL2ToCosine converts the distance Milvus reports for the L2 metric, which is
+// the squared Euclidean distance, into cosine similarity. Embeddings are unit
+// vectors (see normalizeVector), for which |a-b|^2 = 2 - 2cos(a,b).
+func squaredL2ToCosine(d float32) float32 {
+	cos := 1 - d/2
+	if cos > 1 {
+		return 1
+	}
+	if cos < -1 {
+		return -1
+	}
+	return cos
 }
 
 // DeleteSegmentEmbedding removes a segment embedding from Milvus with tenant/user/agent scope

@@ -479,7 +479,7 @@ func (s *MemoryServer) GetContext(ctx context.Context, req *gen.GetContextReques
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to create query embedding: %v", err)
 		}
-		chains, err := s.stmStore.SearchSimilarChains(ctx, tenantID, userID, agentID, queryEmbedding.Vector, limit, nil)
+		chains, err := s.stmStore.SearchSimilarChains(ctx, tenantID, userID, agentID, queryEmbedding.Vector, limit, 0, nil)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to search similar chains: %v", err)
 		}
@@ -614,7 +614,7 @@ func (s *MemoryServer) SearchMemory(ctx context.Context, req *gen.SearchMemoryRe
 
 	// Search for similar chains using the STM store's vector search.
 	// Pass empty agentID so Milvus searches across all agents for this user (user-scoped, not session-scoped).
-	chains, err := s.stmStore.SearchSimilarChains(ctx, tenantID, userID, "", queryEmbedding.Vector, limit, req.Filter)
+	chains, err := s.stmStore.SearchSimilarChains(ctx, tenantID, userID, "", queryEmbedding.Vector, limit, req.SimilarityThreshold, req.Filter)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to search similar chains: %v", err)
 	}

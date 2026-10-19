@@ -9,6 +9,7 @@ import (
 	"log"
 	"log/slog"
 	"math"
+	"sort"
 	"net/http"
 	"os"
 	"strconv"
@@ -24,6 +25,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 
 	// Load environment variables from .env file
 	_ "github.com/joho/godotenv/autoload"
@@ -35,7 +37,7 @@ type STMStorer interface {
 	analyzeTopicContinuity(ctx context.Context, userID string, previousContent string, newContent string) (bool, error)
 	ProcessMTMFormation(ctx context.Context, tenantID, userID, agentID string, events []models.CognitiveEvent) error
 	StoreCognitiveEvent(ctx context.Context, event *models.CognitiveEvent) (primitive.ObjectID, error)
-	SearchSimilarChains(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int, metadataFilter map[string]string) ([]*models.CognitiveChain, error)
+	SearchSimilarChains(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int, minSimilarity float64, metadataFilter map[string]string) ([]*models.CognitiveChain, error)
 }
 
 const (
@@ -77,7 +79,9 @@ func parseBoolEnv(key string, defaultValue bool) bool {
 	return val == "true"
 }
 
-// normalizeVector normalizes a vector to unit length
+// normalizeVector normalizes a vector to unit length. Stored and query embeddings are
+// normalized so that cosine similarity can be read from Milvus' L2 distance,
+// whatever the embedding provider returns.
 func normalizeVector(v []float64) []float64 {
 	if len(v) == 0 {
 		return v
@@ -533,6 +537,7 @@ func (s *STMStore) CreateEmbedding(ctx context.Context, textToEmbed string) (*mo
 	// Check embedding cache first
 	if cachedEmbedding := s.getEmbeddingFromCache(ctx, textToEmbed, embeddingModel); cachedEmbedding != nil {
 		slog.Info("Embedding cache hit", slog.Int("text_length", len(textToEmbed)))
+		cachedEmbedding.Vector = normalizeVector(cachedEmbedding.Vector)
 		return cachedEmbedding, nil
 	}
 
@@ -561,7 +566,7 @@ func (s *STMStore) CreateEmbedding(ctx context.Context, textToEmbed string) (*mo
 	timer.ObserveDuration()           // Record successful embedding latency
 
 	embeddingData := &models.EmbeddingData{
-		Vector:     vector,
+		Vector:     normalizeVector(vector),
 		Dimensions: len(vector),
 		Model:      embeddingModel,
 		CreatedAt:  time.Now(),
@@ -816,7 +821,7 @@ func (s *STMStore) StoreEventEmbedding(ctx context.Context, event *models.Cognit
 		return fmt.Errorf("milvus client not configured")
 	}
 	// Using event.ID.Hex() as the reference ID.
-	return s.milvus.InsertSegmentEmbedding(ctx, event.TenantID, event.UserID, event.AgentID, event.ID.Hex(), embedding)
+	return s.milvus.InsertEmbedding(ctx, event.TenantID, event.UserID, event.AgentID, event.ID.Hex(), embedding)
 }
 
 // IndexCognitiveEvents creates and stores embeddings for individual high-value cognitive events.
@@ -864,66 +869,106 @@ func (s *STMStore) IndexCognitiveEvents(ctx context.Context, chainID string, eve
 	return nil
 }
 
-// SearchSimilarChains finds cognitive chains that are semantically similar to a query vector.
+// maxChainSearchCandidates bounds how many chains one search ranks. Active chains
+// per user are capped by SESSION_MAX_CHAINS_PER_USER (default 100), so this is
+// only reached when that cap is raised; the most recently active chains are kept.
+const maxChainSearchCandidates = 500
+
+// SearchSimilarChains returns the active cognitive chains in a scope most similar to
+// a query vector, most similar first. Each chain's SimilarityScore is its cosine
+// similarity to the query; when minSimilarity is positive, chains below it are left
+// out (0 keeps all).
+// An empty agentID searches all of the user's agents.
+//
 // metadataFilter is optional — when non-empty, only chains whose metadata matches all
 // provided key/value pairs are returned (e.g. {"origin_service": "colabra"}).
-func (s *STMStore) SearchSimilarChains(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int, metadataFilter map[string]string) ([]*models.CognitiveChain, error) {
+//
+// Ranking is exact: the scope's chains are listed from MongoDB, their vectors read
+// from Milvus by ID, and every one is scored. Approximate search with a scope filter
+// is not used because Milvus returns fewer neighbours than requested when the filter
+// is selective, and because older releases stored event vectors in the same
+// collection, which rank above chain summaries and crowd them out.
+func (s *STMStore) SearchSimilarChains(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int, minSimilarity float64, metadataFilter map[string]string) ([]*models.CognitiveChain, error) {
 	if s.milvus == nil {
 		slog.Warn("Milvus client not configured, cannot search for similar chains")
 		return nil, nil // Return empty slice, not an error
 	}
-
-	// Step A: Call Milvus to get IDs of similar chains
-	chainIDs, scores, err := s.milvus.SearchSimilarSegments(ctx, tenantID, userID, agentID, queryVector, limit)
-	if err != nil {
-		return nil, fmt.Errorf("failed to search for similar segments in milvus: %w", err)
+	if limit <= 0 {
+		return []*models.CognitiveChain{}, nil
 	}
 
-	if len(chainIDs) == 0 {
-		return []*models.CognitiveChain{}, nil // No similar chains found
-	}
-
-	// Build a map of chainID → similarity score for later population
-	scoreMap := make(map[string]float32, len(chainIDs))
-	for i, id := range chainIDs {
-		if i < len(scores) {
-			scoreMap[id] = scores[i]
-		}
-	}
-
-	slog.Info("Vector search found candidate chain IDs", slog.Int("candidate_count", len(chainIDs)))
-
-	// Step B: Fetch the full metadata for those chain IDs from MongoDB.
-	// Apply metadata filters (e.g. origin_service, context_type) if provided.
-	collection := s.db.Collection(CognitiveChainsCollection)
 	filter := bson.M{
-		"chainId": bson.M{"$in": chainIDs},
-		"status":  "active",
-		"userId":  userID,
+		"tenantId": tenantID,
+		"userId":   userID,
+		"status":   "active",
+		"summary":  bson.M{"$ne": ""},
+	}
+	if agentID != "" {
+		filter["agentId"] = agentID
 	}
 	for k, v := range metadataFilter {
 		filter["metadata."+k] = v
 	}
-
-	cursor, err := collection.Find(ctx, filter)
+	opts := options.Find().
+		SetSort(bson.D{{Key: "lastEventAt", Value: -1}}).
+		SetLimit(maxChainSearchCandidates)
+	cursor, err := s.db.Collection(CognitiveChainsCollection).Find(ctx, filter, opts)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query similar chains from mongodb: %w", err)
+		return nil, fmt.Errorf("failed to list chains to search: %w", err)
 	}
-	defer cursor.Close(ctx)
-
 	var chains []*models.CognitiveChain
 	if err := cursor.All(ctx, &chains); err != nil {
-		return nil, fmt.Errorf("failed to decode similar chains from mongodb: %w", err)
+		return nil, fmt.Errorf("failed to decode chains to search: %w", err)
+	}
+	if len(chains) == 0 {
+		return []*models.CognitiveChain{}, nil
 	}
 
-	// Populate transient similarity scores from Milvus results
-	for _, chain := range chains {
-		chain.SimilarityScore = scoreMap[chain.ChainID]
+	ids := make([]string, 0, len(chains))
+	for _, c := range chains {
+		ids = append(ids, c.ChainID)
+	}
+	vectors, err := s.milvus.GetSegmentVectors(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read chain vectors from milvus: %w", err)
 	}
 
-	slog.Info("Fetched full cognitive chain documents from MongoDB", slog.Int("chain_count", len(chains)))
+	ranked := rankChainsBySimilarity(chains, vectors, queryVector, minSimilarity, limit)
+	slog.Info("Chain search complete", slog.Int("candidates", len(chains)), slog.Int("with_vectors", len(vectors)), slog.Int("returned", len(ranked)))
+	return ranked, nil
+}
 
-	return chains, nil
+// rankChainsBySimilarity scores chains by cosine similarity between their vector and
+// the query, drops chains without a vector or below a positive minSimilarity, and returns at
+// most limit, most similar first.
+func rankChainsBySimilarity(chains []*models.CognitiveChain, vectors map[string][]float32, query []float64, minSimilarity float64, limit int) []*models.CognitiveChain {
+	q := normalizeVector(query)
+	ranked := make([]*models.CognitiveChain, 0, len(chains))
+	for _, c := range chains {
+		v, ok := vectors[c.ChainID]
+		if !ok || len(v) != len(q) {
+			continue
+		}
+		vec := make([]float64, len(v))
+		for i, x := range v {
+			vec[i] = float64(x)
+		}
+		vec = normalizeVector(vec)
+		var dot float64
+		for i := range q {
+			dot += q[i] * vec[i]
+		}
+		if minSimilarity > 0 && dot < minSimilarity {
+			continue
+		}
+		c.SimilarityScore = float32(dot)
+		ranked = append(ranked, c)
+	}
+	sort.SliceStable(ranked, func(i, j int) bool { return ranked[i].SimilarityScore > ranked[j].SimilarityScore })
+	if len(ranked) > limit {
+		ranked = ranked[:limit]
+	}
+	return ranked
 }
 
 // ArchiveColdChains scans for cold chains (low heat score) and archives them.
