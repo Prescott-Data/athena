@@ -44,9 +44,13 @@ Sessions are stored in MongoDB with their metadata. `GetSession` and `DeleteSess
 
 ## Where identity comes from
 
-With authentication disabled (the default), the identity in the request body is trusted as-is. That is acceptable only in development.
+Identity comes from the caller's credentials:
 
-With **JWT auth enabled**, `tenant_id` and `user_id` are taken from token claims and the values in request bodies are ignored. A client cannot claim someone else's scope by editing a payload. `agent_id` may come from an optional claim or the request. With **API-key auth**, the key authenticates the caller but identity still comes from the request, so pair it with JWT when tenant isolation matters. Precedence and configuration: [Security Model](security-model.md).
+- A **JWT** names the tenant, the user and optionally the agent. `CreateSession` takes them from the token and refuses a body naming anyone else, and a session can only be used by callers whose token matches its tenant, user and (if named) agent.
+- A **tenant API key** fixes the tenant the same way; the user and agent come from the request.
+- A **service API key**, held by a trusted backend serving many tenants, names the tenant in each request.
+
+Calls on another tenant's session return `NotFound`. Running with no authentication (`MEMORY_OS_ALLOW_UNAUTHENTICATED=true`) trusts the request body completely and is for local development only. Details: [Security Model](security-model.md).
 
 ## Choosing your granularity
 

@@ -19,7 +19,7 @@ type GraphExtractor interface {
 
 // GraphWriter defines the interface for upserting extracted graph data to a storage backend.
 type GraphWriter interface {
-	WriteExtractionToGraph(ctx context.Context, extraction *GraphExtraction, heatScore float64) error
+	WriteExtractionToGraph(ctx context.Context, tenantID, userID string, extraction *GraphExtraction, heatScore float64) error
 }
 
 // Promoter computes heat scores and promotes canonical triples to the LPM Knowledge Graph
@@ -142,7 +142,7 @@ func (p *Promoter) promoteChainToLPM(ctx context.Context, chain *models.Cognitiv
 	slog.Info("Graph extraction completed", slog.String("chain_id", chain.ChainID), slog.Int("nodes", len(extraction.Nodes)), slog.Int("edges", len(extraction.Edges)))
 
 	// 2. Upsert the Triples into the ArangoDB LTM Graph
-	err = p.writer.WriteExtractionToGraph(ctx, extraction, heatScore)
+	err = p.writer.WriteExtractionToGraph(ctx, chain.TenantID, chain.UserID, extraction, heatScore)
 	if err != nil {
 		return fmt.Errorf("failed to write extraction to LTM graph for chain %s: %w", chain.ChainID, err)
 	}

@@ -434,7 +434,7 @@ func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, ag
 	}
 
 	// Post-processing: Cleanup old chains for the user
-	if err := s.sessionManager.CleanupOldChains(ctx, userID); err != nil {
+	if err := s.sessionManager.CleanupOldChains(ctx, tenantID, userID); err != nil {
 		log.Printf("WARN: Failed to cleanup old chains for user %s: %v", userID, err)
 	}
 
@@ -897,9 +897,10 @@ func (s *STMStore) SearchSimilarChains(ctx context.Context, tenantID, userID, ag
 	// Apply metadata filters (e.g. origin_service, context_type) if provided.
 	collection := s.db.Collection(CognitiveChainsCollection)
 	filter := bson.M{
-		"chainId": bson.M{"$in": chainIDs},
-		"status":  "active",
-		"userId":  userID,
+		"chainId":  bson.M{"$in": chainIDs},
+		"status":   "active",
+		"tenantId": tenantID,
+		"userId":   userID,
 	}
 	for k, v := range metadataFilter {
 		filter["metadata."+k] = v

@@ -378,6 +378,12 @@ func (mc *MilvusClient) InsertSegmentEmbedding(ctx context.Context, tenantID, us
 
 // GetEmbeddingByPageID retrieves a stored embedding by page ID from Milvus
 func (mc *MilvusClient) GetEmbeddingByPageID(ctx context.Context, tenantID, userID, agentID, pageID string) (*models.EmbeddingData, error) {
+	if err := validateScope(tenantID, userID, agentID); err != nil {
+		return nil, err
+	}
+	if err := ValidateScopeID("page_id", pageID); err != nil {
+		return nil, err
+	}
 	// Query with tenant/user/agent scope
 	expr := fmt.Sprintf(`%s == "%s" && %s == "%s" && %s == "%s" && %s == "%s"`,
 		TenantIDFieldName, tenantID,
@@ -447,6 +453,9 @@ func (mc *MilvusClient) GetEmbeddingByPageID(ctx context.Context, tenantID, user
 
 // SearchSimilarEmbeddings finds similar STM vectors in Milvus with tenant/user/agent scope
 func (mc *MilvusClient) SearchSimilarEmbeddings(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int) ([]string, []float32, error) {
+	if err := validateScope(tenantID, userID, agentID); err != nil {
+		return nil, nil, err
+	}
 	if len(queryVector) != VectorDimension {
 		return nil, nil, fmt.Errorf("query vector dimension mismatch: expected %d, got %d", VectorDimension, len(queryVector))
 	}
@@ -516,6 +525,9 @@ func (mc *MilvusClient) SearchSimilarEmbeddings(ctx context.Context, tenantID, u
 
 // SearchSimilarSegments finds similar Segment vectors in Milvus with tenant/user/agent scope
 func (mc *MilvusClient) SearchSimilarSegments(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int) ([]string, []float32, error) {
+	if err := validateScope(tenantID, userID, agentID); err != nil {
+		return nil, nil, err
+	}
 	if len(queryVector) != VectorDimension {
 		return nil, nil, fmt.Errorf("query vector dimension mismatch: expected %d, got %d", VectorDimension, len(queryVector))
 	}
@@ -578,6 +590,12 @@ func (mc *MilvusClient) SearchSimilarSegments(ctx context.Context, tenantID, use
 
 // DeleteSegmentEmbedding removes a segment embedding from Milvus with tenant/user/agent scope
 func (mc *MilvusClient) DeleteSegmentEmbedding(ctx context.Context, tenantID, userID, agentID, segmentID string) error {
+	if err := validateScope(tenantID, userID, agentID); err != nil {
+		return err
+	}
+	if err := ValidateScopeID("segment_id", segmentID); err != nil {
+		return err
+	}
 	// Filter expression for tenant/user/agent scope and segment ID
 	expr := fmt.Sprintf(`%s == "%s" && %s == "%s" && %s == "%s" && %s == "%s"`,
 		TenantIDFieldName, tenantID,

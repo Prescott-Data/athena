@@ -556,6 +556,11 @@ func (s *MemoryServer) CreateSession(ctx context.Context, req *gen.CreateSession
 	if agentID == "" {
 		agentID = "default"
 	}
+	for _, f := range []struct{ kind, id string }{{"tenant_id", tenantID}, {"user_id", userID}, {"agent_id", agentID}} {
+		if err := memory.ValidateScopeID(f.kind, f.id); err != nil {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		}
+	}
 
 	sessionID := uuid.New().String()
 	now := time.Now()
@@ -634,7 +639,7 @@ func (s *MemoryServer) SearchMemory(ctx context.Context, req *gen.SearchMemoryRe
 
 	// Augment with LTM graph results if the reader is available
 	if s.ltmReader != nil {
-		ltmExtraction, ltmErr := s.ltmReader.SearchByQuery(ctx, tenantID, query)
+		ltmExtraction, ltmErr := s.ltmReader.SearchByQuery(ctx, tenantID, userID, query)
 		if ltmErr != nil {
 			slog.Warn("LTM SearchByQuery failed, returning MTM results only", slog.String("error", ltmErr.Error()))
 		} else {

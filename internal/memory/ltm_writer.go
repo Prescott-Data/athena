@@ -2,6 +2,8 @@ package memory
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"time"
@@ -71,8 +73,14 @@ func (w *LTMWriter) TriggerCommunityDetection(ctx context.Context) error {
 	return w.analytics.CalculateBridgeEntities(ctx)
 }
 
-// WriteExtractionToGraph takes a parsed graph extraction and upserts nodes and edges into ArangoDB.
-func (w *LTMWriter) WriteExtractionToGraph(ctx context.Context, extraction *GraphExtraction, heatScore float64) error {
+// WriteExtractionToGraph takes a parsed graph extraction and upserts nodes and edges
+// into ArangoDB within the tenant and user's own graph: node keys carry a scope
+// prefix and every node and edge records its tenant and user, so knowledge from one
+// tenant is never merged with, or returned to, another.
+func (w *LTMWriter) WriteExtractionToGraph(ctx context.Context, tenantID, userID string, extraction *GraphExtraction, heatScore float64) error {
+	if tenantID == "" || userID == "" {
+		return fmt.Errorf("LTM writes need a tenant and user scope")
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// 1. Process Nodes (Planets)
@@ -90,15 +98,18 @@ func (w *LTMWriter) WriteExtractionToGraph(ctx context.Context, extraction *Grap
 
 		query := fmt.Sprintf(`
 			UPSERT { _key: @key }
-			INSERT { _key: @key, name: @name, created_at: @now, last_seen: @now }
+			INSERT { _key: @key, entity_id: @entity, tenant_id: @tenant, user_id: @user, name: @name, created_at: @now, last_seen: @now }
 			UPDATE { last_seen: @now }
 			IN %s
 		`, collectionName) // Collection names cannot be bind variables in ArangoDB AQL
 
 		bindVars := map[string]interface{}{
-			"key":  node.ID,
-			"name": node.Name,
-			"now":  now,
+			"key":    ltmScopedKey(tenantID, userID, node.ID),
+			"entity": node.ID,
+			"tenant": tenantID,
+			"user":   userID,
+			"name":   node.Name,
+			"now":    now,
 		}
 
 		timer := prometheus.NewTimer(LTMArangoUpsertDuration)
@@ -130,8 +141,8 @@ func (w *LTMWriter) WriteExtractionToGraph(ctx context.Context, extraction *Grap
 			continue
 		}
 
-		fromID := fmt.Sprintf("%s/%s", fromCollection, edge.From)
-		toID := fmt.Sprintf("%s/%s", toCollection, edge.To)
+		fromID := fmt.Sprintf("%s/%s", fromCollection, ltmScopedKey(tenantID, userID, edge.From))
+		toID := fmt.Sprintf("%s/%s", toCollection, ltmScopedKey(tenantID, userID, edge.To))
 
 		// Edge Validation & Interceptor
 		if !isValidEdgeRelation(edge.Relation) {
@@ -156,6 +167,8 @@ func (w *LTMWriter) WriteExtractionToGraph(ctx context.Context, extraction *Grap
 			INSERT {
 				_from: @from,
 				_to: @to,
+				tenant_id: @tenant,
+				user_id: @user,
 				relation: @relation,
 				context_nuance: @context_nuance,
 				confidence: @confidence,
@@ -182,6 +195,8 @@ func (w *LTMWriter) WriteExtractionToGraph(ctx context.Context, extraction *Grap
 			"confidence":     edge.Confidence,
 			"heat":           heatScore,
 			"now":            now,
+			"tenant":         tenantID,
+			"user":           userID,
 		}
 
 		timer := prometheus.NewTimer(LTMArangoUpsertDuration)
@@ -233,4 +248,17 @@ func isValidEdgeRelation(relation string) bool {
 		"RELATES_TO":         true,
 	}
 	return valid[relation]
+}
+
+// ltmScopedKey returns the ArangoDB key of an entity in a tenant and user's graph.
+// The scope is hashed so that any tenant and user ID yields a valid, fixed-length key
+// prefix; the same entity in two scopes gets two separate nodes.
+func ltmScopedKey(tenantID, userID, entityID string) string {
+	return ltmScopePrefix(tenantID, userID) + entityID
+}
+
+func ltmScopePrefix(tenantID, userID string) string {
+	// Length-prefixed, so no pair of IDs can produce another pair's encoding.
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%s|%d:%s", len(tenantID), tenantID, len(userID), userID)))
+	return "s" + hex.EncodeToString(sum[:8]) + "_"
 }

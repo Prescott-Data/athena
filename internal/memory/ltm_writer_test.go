@@ -46,7 +46,7 @@ func TestWriteExtraction_Nodes(t *testing.T) {
 
 	heatScore := 0.75
 
-	err := writer.WriteExtractionToGraph(context.Background(), extraction, heatScore)
+	err := writer.WriteExtractionToGraph(context.Background(), "acme", "alice", extraction, heatScore)
 	assert.NoError(t, err)
 
 	// Since "Unknown" label is invalid, we should only have 2 queries executed.
@@ -56,13 +56,16 @@ func TestWriteExtraction_Nodes(t *testing.T) {
 	// Verify first query (Identities)
 	q1 := mockDB.queries[0]
 	assert.Contains(t, q1, "UPSERT { _key: @key }")
-	assert.Contains(t, q1, "INSERT { _key: @key, name: @name, created_at: @now, last_seen: @now }")
+	assert.Contains(t, q1, "INSERT { _key: @key, entity_id: @entity, tenant_id: @tenant, user_id: @user, name: @name, created_at: @now, last_seen: @now }")
 	assert.Contains(t, q1, "UPDATE { last_seen: @now }")
 	assert.Contains(t, q1, "IN Identities") // Verification of dynamic table placement
 
 	// Verify first bindVars
 	bv1 := mockDB.bindVars[0]
-	assert.Equal(t, "sangalo", bv1["key"])
+	assert.Equal(t, ltmScopedKey("acme", "alice", "sangalo"), bv1["key"])
+	assert.Equal(t, "sangalo", bv1["entity"])
+	assert.Equal(t, "acme", bv1["tenant"])
+	assert.Equal(t, "alice", bv1["user"])
 	assert.Equal(t, "Sangalo", bv1["name"])
 	assert.NotEmpty(t, bv1["now"])
 
@@ -71,7 +74,7 @@ func TestWriteExtraction_Nodes(t *testing.T) {
 	assert.Contains(t, q2, "IN Projects")
 
 	bv2 := mockDB.bindVars[1]
-	assert.Equal(t, "openclaw", bv2["key"])
+	assert.Equal(t, ltmScopedKey("acme", "alice", "openclaw"), bv2["key"])
 	assert.Equal(t, "OpenClaw", bv2["name"])
 }
 
@@ -92,7 +95,7 @@ func TestWriteExtraction_Edges(t *testing.T) {
 
 	heatScore := 0.65
 
-	err := writer.WriteExtractionToGraph(context.Background(), extraction, heatScore)
+	err := writer.WriteExtractionToGraph(context.Background(), "acme", "alice", extraction, heatScore)
 	assert.NoError(t, err)
 
 	// 2 queries for nodes + 1 query for the valid edge (the second edge is unresolvable since `unknown_node` isn't in nodes list)
@@ -112,8 +115,10 @@ func TestWriteExtraction_Edges(t *testing.T) {
 	assert.Contains(t, edgeQuery, "heat_score: @heat")
 
 	// Verify path formatting and correct propagation of all fields
-	assert.Equal(t, "Identities/sangalo", edgeVars["from"])
-	assert.Equal(t, "Projects/openclaw", edgeVars["to"])
+	assert.Equal(t, "Identities/"+ltmScopedKey("acme", "alice", "sangalo"), edgeVars["from"])
+	assert.Equal(t, "Projects/"+ltmScopedKey("acme", "alice", "openclaw"), edgeVars["to"])
+	assert.Equal(t, "acme", edgeVars["tenant"])
+	assert.Equal(t, "alice", edgeVars["user"])
 	assert.Equal(t, "WORKS_ON", edgeVars["relation"])
 	assert.Equal(t, "building v2", edgeVars["context_nuance"]) // Ensure the nuance was included
 	assert.Equal(t, 0.85, edgeVars["confidence"])
@@ -136,7 +141,7 @@ func TestWriteExtraction_Edges_InvalidRelation(t *testing.T) {
 
 	heatScore := 0.70
 
-	err := writer.WriteExtractionToGraph(context.Background(), extraction, heatScore)
+	err := writer.WriteExtractionToGraph(context.Background(), "acme", "alice", extraction, heatScore)
 	assert.NoError(t, err)
 
 	assert.Len(t, mockDB.queries, 3) // 2 nodes + 1 edge
@@ -147,8 +152,8 @@ func TestWriteExtraction_Edges_InvalidRelation(t *testing.T) {
 
 	assert.Contains(t, edgeQuery, "UPSERT { _from: @from, _to: @to, relation: @relation }")
 
-	assert.Equal(t, "Identities/sangalo", edgeVars["from"])
-	assert.Equal(t, "Identities/athena", edgeVars["to"])
+	assert.Equal(t, "Identities/"+ltmScopedKey("acme", "alice", "sangalo"), edgeVars["from"])
+	assert.Equal(t, "Identities/"+ltmScopedKey("acme", "alice", "athena"), edgeVars["to"])
 
 	// Interceptor Verification!
 	// It should have forcefully changed the relation to RELATES_TO
@@ -157,4 +162,10 @@ func TestWriteExtraction_Edges_InvalidRelation(t *testing.T) {
 	assert.Equal(t, "talks to her every day (IS_FRIENDS_WITH)", edgeVars["context_nuance"])
 
 	assert.Equal(t, 0.90, edgeVars["confidence"])
+}
+
+func TestWriteExtractionRequiresScope(t *testing.T) {
+	writer := &LTMWriter{db: &mockDatabase{}}
+	err := writer.WriteExtractionToGraph(context.Background(), "", "alice", &GraphExtraction{}, 0.5)
+	assert.Error(t, err)
 }

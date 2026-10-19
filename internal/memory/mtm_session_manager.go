@@ -126,10 +126,13 @@ func (sm *SessionManager) findRecentCandidates(ctx context.Context, newChain *mo
 
 	cutoffTime := time.Now().Add(-sm.config.MaxChainAge)
 	filter := bson.M{
+		"tenantId":  newChain.TenantID,
 		"userId":    newChain.UserID,
 		"status":    "active",
 		"startedAt": bson.M{"$gte": cutoffTime},
 		"chainId":   bson.M{"$ne": newChain.ChainID},
+		// Session records have no summary; they are not memories to merge into.
+		"summary": bson.M{"$ne": ""},
 	}
 
 	cursor, err := collection.Find(ctx, filter)
@@ -173,7 +176,8 @@ func (sm *SessionManager) findVectorCandidates(ctx context.Context, newChain *mo
 	// 3. Convert from pointer slice to value slice and filter to ensure active status
 	vectorChains := make([]models.CognitiveChain, 0, len(similarChains))
 	for _, chain := range similarChains {
-		if chain != nil && chain.Status == "active" && chain.ChainID != newChain.ChainID {
+		if chain != nil && chain.Status == "active" && chain.ChainID != newChain.ChainID &&
+			chain.TenantID == newChain.TenantID && chain.Summary != "" {
 			vectorChains = append(vectorChains, *chain)
 		}
 	}
@@ -288,7 +292,16 @@ func (sm *SessionManager) analyzeMergeDecision(_ context.Context, _ *models.Cogn
 		return &MergeDecision{ShouldMerge: false, Reasoning: "No candidates available"}, nil
 	}
 
+	// A candidate can only be merged into if it is similar enough; among those, the
+	// most confident wins. Ranking by confidence alone let a dissimilar candidate
+	// (whose confidence that the topic changed is high) block every merge.
 	bestCandidate := candidates[0]
+	for _, c := range candidates {
+		if c.SimilarityScore >= sm.config.SimilarityThreshold {
+			bestCandidate = c
+			break
+		}
+	}
 
 	shouldMerge := bestCandidate.MergeConfidence >= sm.config.MergeMinConfidence &&
 		bestCandidate.SimilarityScore >= sm.config.SimilarityThreshold
@@ -355,10 +368,11 @@ func (sm *SessionManager) mergeChains(ctx context.Context, targetChain *models.C
 	}
 
 	update := bson.M{
+		// Concurrent merges into the same chain must not lose each other's events.
+		"$inc": bson.M{"eventCount": newChain.EventCount},
 		"$set": bson.M{
 			"summary":     combinedSummary,
 			"topic":       mergedTopic,
-			"eventCount":  targetChain.EventCount + newChain.EventCount,
 			"startedAt":   targetChain.StartedAt, // typically the older one
 			"lastEventAt": newChain.LastEventAt,  // typically the newer one
 			"entities":    mergedEntities,
@@ -475,11 +489,12 @@ func (sm *SessionManager) mergeEntities(entities1, entities2 []string) []string 
 	return merged
 }
 
-// CleanupOldChains archives old chains to prevent memory bloat
-func (sm *SessionManager) CleanupOldChains(ctx context.Context, userID string) error {
+// CleanupOldChains archives a user's oldest chains beyond MaxChainsPerUser. It is
+// scoped to the tenant: users of different tenants may share an ID.
+func (sm *SessionManager) CleanupOldChains(ctx context.Context, tenantID, userID string) error {
 	collection := sm.db.Collection(CognitiveChainsCollection)
 
-	filter := bson.M{"userId": userID, "status": "active"}
+	filter := bson.M{"tenantId": tenantID, "userId": userID, "status": "active", "summary": bson.M{"$ne": ""}}
 	count, err := collection.CountDocuments(ctx, filter)
 	if err != nil {
 		return fmt.Errorf("failed to count user chains: %w", err)
@@ -507,7 +522,7 @@ func (sm *SessionManager) CleanupOldChains(ctx context.Context, userID string) e
 	}
 
 	if len(chainsToArchive) > 0 {
-		archiveFilter := bson.M{"chainId": bson.M{"$in": chainsToArchive}}
+		archiveFilter := bson.M{"tenantId": tenantID, "chainId": bson.M{"$in": chainsToArchive}}
 		archiveUpdate := bson.M{"$set": bson.M{"status": "archived", "updatedAt": time.Now()}}
 
 		result, err := collection.UpdateMany(ctx, archiveFilter, archiveUpdate)

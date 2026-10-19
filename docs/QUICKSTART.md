@@ -78,7 +78,7 @@ In a new terminal window, run these three curl commands to verify the system wor
 ```bash
 curl -X POST http://localhost:8080/api/v1/sessions \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: default-api-key" \
+  -H "X-API-Key: change-me-local-key" \
   -d '{"user_id": "test-user-123", "agent_id": "curl-test"}'
 ```
 *Copy the `session_id` from the JSON response for the next steps.*
@@ -87,7 +87,7 @@ curl -X POST http://localhost:8080/api/v1/sessions \
 ```bash
 curl -X POST http://localhost:8080/api/v1/sessions/<YOUR_SESSION_ID>/interactions \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: default-api-key" \
+  -H "X-API-Key: change-me-local-key" \
   -d '{
     "user_message": "My name is John and I love writing Go code.",
     "agent_response": "Nice to meet you John, Go is a great language."
@@ -97,7 +97,7 @@ curl -X POST http://localhost:8080/api/v1/sessions/<YOUR_SESSION_ID>/interaction
 **(3) Retrieve context:**
 ```bash
 curl -X GET http://localhost:8080/api/v1/sessions/<YOUR_SESSION_ID>/context \
-  -H "X-API-Key: default-api-key"
+  -H "X-API-Key: change-me-local-key"
 ```
 *You should see your interaction returned in the `stm_events` array.*
 
