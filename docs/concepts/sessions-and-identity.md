@@ -40,7 +40,7 @@ POST /api/v1/sessions
 
 The returned `session_id` goes into the path of every subsequent call (`/api/v1/sessions/{session_id}/...`). Sessions resolve to their `(tenant, user, agent)` scope on every request; the memory itself is keyed by scope, not by session, so a new session with the same identity picks up exactly where the old one left off. That is the point: **sessions are ephemeral, memory is not.**
 
-Sessions are stored in MongoDB with their metadata. `GetSession` and `DeleteSession` exist in the API surface but are not yet implemented <span class="nx-badge nx-badge-beta">Planned</span>; see the [API Reference](../reference/api.md).
+Sessions are stored in MongoDB with their metadata. `GetSession` returns a session's scope and activity, and `DeleteSession` erases what was stored through it: its STM entries, events, blobs, and the MTM chains and vectors formed from them. Every event records the session it came through, so this works even though memory is keyed by scope; see the [API Reference](../reference/api.md).
 
 ## Where identity comes from
 

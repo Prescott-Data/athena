@@ -279,11 +279,22 @@ func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, ag
 		return nil
 	}
 
-	// Get ChainID from events if set, otherwise generate a new one
-	chainID := events[0].ChainID
-	if chainID == "" {
-		chainID = uuid.New().String()
-		log.Printf("INFO: Generated new ChainID %s for MTM formation", chainID)
+	// Events of a session deleted while they waited in STM must not be summarised.
+	events = s.dropErasedSessionEvents(events)
+	if len(events) == 0 {
+		log.Println("INFO: ProcessMTMFormation: every event belongs to a deleted session; nothing to form.")
+		return nil
+	}
+
+	// Every chain gets its own ID. A session ID is not reused as a chain ID, since a
+	// session produces many chains over its lifetime.
+	chainID := uuid.New().String()
+	for i := range events {
+		events[i].TenantID = tenantID
+		events[i].UserID = userID
+		events[i].AgentID = agentID
+		events[i].ChainID = chainID
+		events[i].EventIndex = i
 	}
 
 	// Idempotency check: ensure we don't process the same chain twice
@@ -336,9 +347,11 @@ func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, ag
 	// Step 2: (Build Candidate)
 	// Inherit service metadata (origin_service, context_type, etc.) from the session chain.
 	var sessionMetadata map[string]string
-	var sessionChain models.CognitiveChain
-	if err := s.db.Collection(CognitiveChainsCollection).FindOne(ctx, bson.M{"chainId": chainID}).Decode(&sessionChain); err == nil {
-		sessionMetadata = sessionChain.Metadata
+	if sessionID := firstSessionID(events); sessionID != "" {
+		var sessionChain models.CognitiveChain
+		if err := s.db.Collection(CognitiveChainsCollection).FindOne(ctx, bson.M{"chainId": sessionID}).Decode(&sessionChain); err == nil {
+			sessionMetadata = sessionChain.Metadata
+		}
 	}
 
 	candidateChain := &models.CognitiveChain{
@@ -355,6 +368,7 @@ func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, ag
 		EventCount:          len(events),
 		Status:              "pending",
 		Metadata:            sessionMetadata,
+		SessionIDs:          sessionIDsOf(events),
 		RecallStrength:      1.0,                 // Initialize Ebbinghaus recall strength
 		IntrinsicImportance: intrinsicImportance, // From LLM analysis
 	}
@@ -372,37 +386,13 @@ func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, ag
 		return nil
 	}
 	log.Printf("INFO: Quality gate passed for chain %s. Score: %.2f", chainID, validationResult.QualityScore)
+	candidateChain.QualityScore = validationResult.QualityScore
 
 	// Step 3.5: Promote cognitive events from in_stm → in_mtm.
-	// P5 already wrote these to MongoDB on store, so update status rather than re-inserting.
-	// Fall back to insert only if no existing in_stm events are found (pre-P5 path).
-	eventsCollection := s.db.Collection(CognitiveEventsCollection)
-	updateResult, updateErr := eventsCollection.UpdateMany(ctx,
-		bson.M{"chainId": chainID, "status": "in_stm"},
-		bson.M{"$set": bson.M{"status": "in_mtm"}},
-	)
-	if updateErr != nil {
-		log.Printf("WARN: Failed to update cognitive events status for chain %s: %v", chainID, updateErr)
-	}
-
-	if updateErr != nil || updateResult.MatchedCount == 0 {
-		// No existing in_stm events found — insert them (pre-P5 path or recovery)
-		eventDocs := make([]interface{}, len(events))
-		for i := range events {
-			events[i].Status = "in_mtm"
-			events[i].EventIndex = i
-			if events[i].ID.IsZero() {
-				events[i].ID = primitive.NewObjectID()
-			}
-			eventDocs[i] = events[i]
-		}
-		if _, err := eventsCollection.InsertMany(ctx, eventDocs); err != nil {
-			log.Printf("WARN: Failed to persist %d cognitive events for chain %s: %v", len(events), chainID, err)
-		} else {
-			log.Printf("INFO: Persisted %d cognitive events for chain %s", len(events), chainID)
-		}
-	} else {
-		log.Printf("INFO: Promoted %d cognitive events to in_mtm for chain %s", updateResult.ModifiedCount, chainID)
+	// Events stored through the API already have a durable copy (P5), referenced by
+	// ID; those copies are moved onto the chain. Only events without one are inserted.
+	if err := s.promoteEventsToChain(ctx, chainID, events); err != nil {
+		log.Printf("WARN: Failed to promote cognitive events for chain %s: %v", chainID, err)
 	}
 
 	// Step 4: (Merge/Create)
@@ -436,6 +426,14 @@ func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, ag
 	// Post-processing: Cleanup old chains for the user
 	if err := s.sessionManager.CleanupOldChains(ctx, userID); err != nil {
 		log.Printf("WARN: Failed to cleanup old chains for user %s: %v", userID, err)
+	}
+
+	// A session deleted while this chain was being formed may have been read by
+	// EraseSession before the chain existed. The tombstone was set before that read,
+	// so checking it after every write here closes the gap.
+	if s.chainHasErasedSession(finalChain) {
+		s.discardChain(ctx, finalChain)
+		return nil
 	}
 
 	log.Printf("INFO: MTM formation complete for chain %s.", finalChain.ChainID)

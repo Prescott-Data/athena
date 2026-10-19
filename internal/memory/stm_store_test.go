@@ -232,6 +232,10 @@ func (m *MockRedisCache) LTrim(key string, start, stop int64) error {
 	return nil
 }
 
+func (m *MockRedisCache) LRem(key string, count int64, value interface{}) error {
+	return nil
+}
+
 func (m *MockRedisCache) LLen(key string) (int64, error) {
 	return 0, nil
 }

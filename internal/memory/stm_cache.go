@@ -43,6 +43,11 @@ type STMEvent struct {
 	// ChainID ties this event to its session chain so the worker can associate
 	// events with the correct chain without generating a new random ID.
 	ChainID string `json:"chainId,omitempty"`
+	// SessionID is the session the event was stored through.
+	SessionID string `json:"sessionId,omitempty"`
+	// EventID is the hex ObjectID of the event's durable copy in cognitive_events,
+	// so chain formation promotes that document instead of inserting a duplicate.
+	EventID string `json:"eventId,omitempty"`
 }
 
 // STMCache provides Short-Term Memory caching for conversations and agent events.

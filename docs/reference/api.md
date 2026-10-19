@@ -7,19 +7,17 @@ The complete `MemoryService` surface. Every operation is defined once in `api/gr
 | Operation | REST | Status |
 |---|---|---|
 | [CreateSession](#createsession) | `POST /api/v1/sessions` | <span class="nx-badge nx-badge-primary">Implemented</span> |
-| [GetSession](#getsession) | `GET /api/v1/sessions/{session_id}` | <span class="nx-badge nx-badge-beta">Planned</span> |
-| [DeleteSession](#deletesession) | `DELETE /api/v1/sessions/{session_id}` | <span class="nx-badge nx-badge-beta">Planned</span> |
+| [GetSession](#getsession) | `GET /api/v1/sessions/{session_id}` | <span class="nx-badge nx-badge-primary">Implemented</span> |
+| [DeleteSession](#deletesession) | `DELETE /api/v1/sessions/{session_id}` | <span class="nx-badge nx-badge-primary">Implemented</span> |
 | [StoreInteraction](#storeinteraction) | `POST /api/v1/sessions/{session_id}/interactions` | <span class="nx-badge nx-badge-primary">Implemented</span> |
 | [StoreEvent](#storeevent) | `POST /api/v1/sessions/{session_id}/events` | <span class="nx-badge nx-badge-primary">Implemented</span> |
 | [GetContext](#getcontext) | `GET /api/v1/sessions/{session_id}/context` | <span class="nx-badge nx-badge-primary">Implemented</span> |
 | [SearchMemory](#searchmemory) | `POST /api/v1/sessions/{session_id}/context/search` | <span class="nx-badge nx-badge-primary">Implemented</span> |
-| [AnalyzeTopics](#analyzetopics) | `GET /api/v1/sessions/{session_id}/analysis/topics` | <span class="nx-badge nx-badge-beta">Planned</span> |
-| [GetHeatMetrics](#getheatmetrics) | `GET /api/v1/sessions/{session_id}/analysis/heat` | <span class="nx-badge nx-badge-beta">Planned</span> |
-| [GetSegments](#getsegments) | `GET /api/v1/sessions/{session_id}/segments` | <span class="nx-badge nx-badge-beta">Planned</span> |
+| [AnalyzeTopics](#analyzetopics) | `GET /api/v1/sessions/{session_id}/analysis/topics` | <span class="nx-badge nx-badge-primary">Implemented</span> |
+| [GetHeatMetrics](#getheatmetrics) | `GET /api/v1/sessions/{session_id}/analysis/heat` | <span class="nx-badge nx-badge-primary">Implemented</span> |
+| [GetSegments](#getsegments) | `GET /api/v1/sessions/{session_id}/segments` | <span class="nx-badge nx-badge-primary">Implemented</span> |
 | [HealthCheck](#healthcheck) | `GET /api/v1/health` | <span class="nx-badge nx-badge-primary">Implemented</span> |
 | [TriggerGraphAnalytics](#triggergraphanalytics) | `POST /api/v1/admin/analytics/trigger` | <span class="nx-badge nx-badge-primary">Implemented</span> |
-
-Planned operations are declared in the proto and routable, but their handlers return `Unimplemented`. They are documented here so clients can code against the contract.
 
 ---
 
@@ -53,17 +51,55 @@ Creates a session handle bound to a `(tenant, user, agent)` scope. Memory is key
 
 ## GetSession
 
-`GET /api/v1/sessions/{session_id}` <span class="nx-badge nx-badge-beta">Planned</span>
+`GET /api/v1/sessions/{session_id}` <span class="nx-badge nx-badge-primary">Implemented</span>
 
-Will return the `Session` object (`session_id`, `user_id`, `created_at`, `updated_at`, `metadata`). Currently returns `Unimplemented` (HTTP 501).
+Returns the session's scope, metadata and activity. Use it to check that a cached `session_id` still exists before writing to it.
+
+**Response** (`GetSessionResponse.session`)
+
+| Field | Type | Notes |
+|---|---|---|
+| `session_id` | string | |
+| `tenant_id`, `user_id`, `agent_id` | string | The scope the session writes to |
+| `status` | string | `active` |
+| `metadata` | map<string,string> | As given to `CreateSession` |
+| `event_count` | int32 | Events stored through this session |
+| `created_at` | timestamp | |
+| `updated_at` | timestamp | Time of the latest stored event, or `created_at` if none |
+
+**Errors:** `InvalidArgument` (empty ID), `NotFound`, `Internal`.
 
 ---
 
 ## DeleteSession
 
-`DELETE /api/v1/sessions/{session_id}` <span class="nx-badge nx-badge-beta">Planned</span>
+`DELETE /api/v1/sessions/{session_id}` <span class="nx-badge nx-badge-primary">Implemented</span>
 
-Will delete the session and cascade to its events. Currently returns `Unimplemented` (HTTP 501). Until then, sessions are cheap and abandoning one is harmless.
+Erases everything Athena holds for the session, for example to honour a deletion request:
+
+- its entries in the scope's STM list (entries of other sessions in the same scope stay);
+- every event stored through it, and their blob payloads;
+- every MTM chain summarised from those events, with the chain and event vectors in Milvus. A chain formed from several sessions is deleted whole, because its summary contains this session's content; the other sessions keep their own events;
+- the session record. Later calls with the ID return `NotFound`.
+
+A chain formation already running for the session when it is deleted discards its result. Vectors and blobs are removed before anything in MongoDB, so a failed call leaves the session in place and can be retried.
+
+Knowledge already promoted to the LTM graph is **not** removed: graph nodes do not record which chains they came from.
+
+Data written before this release lacks the links between events, sessions and chains. Its chains are matched by time instead: a chain in the session's scope whose span covers one of the session's events is removed. A chain an older release merged from several chains can span another session's events too, and is then removed as well (its source events stay). Only a session ID resolves; passing a segment (chain) ID returns `NotFound`.
+
+**Response** (`DeleteSessionResponse`)
+
+| Field | Type | Notes |
+|---|---|---|
+| `success` | bool | |
+| `stm_events_deleted` | int32 | |
+| `events_deleted` | int32 | Includes copies made by releases before this fix |
+| `chains_deleted` | int32 | |
+| `vectors_deleted` | int32 | Chain and event vectors targeted |
+| `blobs_deleted` | int32 | |
+
+**Errors:** `InvalidArgument` (empty ID), `NotFound`, `Internal` (safe to retry).
 
 ---
 
@@ -187,25 +223,66 @@ Semantic search over the user's cognitive chains (all agents), enriched from the
 
 ## AnalyzeTopics
 
-`GET /api/v1/sessions/{session_id}/analysis/topics` <span class="nx-badge nx-badge-beta">Planned</span>
+`GET /api/v1/sessions/{session_id}/analysis/topics` <span class="nx-badge nx-badge-primary">Implemented</span>
 
-Will return `TopicSummary[]` (`topic`, `confidence`, `frequency`, `last_mentioned`). Currently `Unimplemented`. Today, topics are visible on chains via [`verifydb`](../guides/debug-tools.md) or in search results.
+Runs the topic analyser (one LLM call) over the session's most recent 200 stored events.
+
+**Response:** `topics`, a list of `TopicSummary`, strongest first.
+
+| Field | Type | Notes |
+|---|---|---|
+| `topic` | string | |
+| `confidence` | double | 0–1 |
+| `frequency` | int32 | Events that mention the topic's keywords |
+| `last_mentioned` | timestamp | Latest of those events |
+
+**Errors:** `InvalidArgument`, `NotFound`, `Unavailable` (LLM call failed), `Internal`.
 
 ---
 
 ## GetHeatMetrics
 
-`GET /api/v1/sessions/{session_id}/analysis/heat` <span class="nx-badge nx-badge-beta">Planned</span>
+`GET /api/v1/sessions/{session_id}/analysis/heat` <span class="nx-badge nx-badge-primary">Implemented</span>
 
-Will return `HeatMetrics` (`overall_heat`, `breakdown` as HeatFactors, `total_interactions`, `last_activity`). Currently `Unimplemented`. Heat is observable today through the `memos_heat_score_distribution` [metric](metrics.md) and `verifydb`.
+Aggregates the current heat of the session's segments (the MTM chains summarised from its events). Heat follows the Ebbinghaus forgetting curve, `heat = base_importance × time_decay`, and decays with time, so it is computed at request time rather than read from the stored score.
+
+**Response** (`GetHeatMetricsResponse.heat_metrics`)
+
+| Field | Type | Notes |
+|---|---|---|
+| `overall_heat` | double | Mean heat of the session's segments |
+| `max_heat` | double | Heat of the hottest segment |
+| `breakdown` | HeatFactors | Mean `base_importance`, `time_decay` and `recall_strength` |
+| `segment_count` | int32 | |
+| `total_interactions` | int32 | Events stored through the session |
+| `last_activity` | timestamp | Latest stored event |
+
+`HeatFactors` fields 1–5 (`access_frequency` … `topic_importance`) are deprecated and always zero.
+
+**Errors:** `InvalidArgument`, `NotFound`, `Internal`.
 
 ---
 
 ## GetSegments
 
-`GET /api/v1/sessions/{session_id}/segments` <span class="nx-badge nx-badge-beta">Planned</span>
+`GET /api/v1/sessions/{session_id}/segments?limit=N` <span class="nx-badge nx-badge-primary">Implemented</span>
 
-Will return `Segment[]` (`content`, `topics`, `heat_factors`, `quality_score`, `created_at`). Currently `Unimplemented`.
+Returns the MTM chains summarised from the session's events, newest first. `limit` defaults to 10, maximum 100. A chain formed from several sessions appears for each of them.
+
+**Response:** `segments`, a list of `Segment`.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | Chain ID |
+| `session_id` | string | The requested session |
+| `content` | string | Chain summary |
+| `topics` | string[] | The chain's topic |
+| `heat`, `heat_factors` | double, HeatFactors | Current heat and its factors |
+| `quality_score` | double | Quality-gate score at formation (0 for chains formed before this field existed) |
+| `event_count` | int32 | |
+| `created_at`, `last_event_at` | timestamp | Times of the chain's first and last events |
+
+**Errors:** `InvalidArgument`, `NotFound`, `Internal`.
 
 ---
 

@@ -10,6 +10,7 @@ import (
 	"github.com/Prescott-Data/athena/internal/cache"
 	"github.com/Prescott-Data/athena/internal/models"
 	"github.com/redis/go-redis/v9"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 const (
@@ -198,6 +199,7 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 	}
 	var userMessages []parsedEvent
 	var allEvents []models.CognitiveEvent
+	var allRaw []string // allRaw[i] is the STM entry allEvents[i] was parsed from
 
 	for i, eventStr := range eventStrings {
 		var stmEvt STMEvent
@@ -206,20 +208,10 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 			continue
 		}
 
-		meta := make(map[string]interface{})
-		for k, v := range stmEvt.Metadata {
-			meta[k] = v
-		}
-
-		evt := models.CognitiveEvent{
-			Role:      stmEvt.Role,
-			Type:      stmEvt.Type,
-			Content:   stmEvt.Content,
-			CreatedAt: stmEvt.Timestamp,
-			Metadata:  meta,
-		}
+		evt := cognitiveEventFromSTM(stmEvt)
 
 		allEvents = append(allEvents, evt)
+		allRaw = append(allRaw, eventStr)
 		if evt.Role == "user" {
 			userMessages = append(userMessages, parsedEvent{event: evt, index: i})
 		}
@@ -242,9 +234,7 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 		if err := w.stmStore.ProcessMTMFormation(ctx, task.TenantID, task.UserID, task.AgentID, oldChainEvents); err != nil {
 			return fmt.Errorf("forced MTM formation failed: %w", err)
 		}
-		if err := w.redis.LTrim(key, 0, int64(splitPoint-1)); err != nil {
-			log.Printf("WARNING: Failed to trim STM after forced formation: %v", err)
-		}
+		w.removeFormedEntries(key, allRaw[splitPoint:])
 		log.Printf("Forced chain formation complete for user %s. Kept %d recent events.", task.UserID, splitPoint)
 		return nil
 	}
@@ -353,18 +343,7 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 				log.Printf("WARNING: Failed to unmarshal event in old chain: %v", err)
 				continue
 			}
-			meta := make(map[string]interface{})
-			for k, v := range stmEvt.Metadata {
-				meta[k] = v
-			}
-			event := models.CognitiveEvent{
-				Role:      stmEvt.Role,
-				Type:      stmEvt.Type,
-				Content:   stmEvt.Content,
-				CreatedAt: stmEvt.Timestamp,
-				Metadata:  meta,
-			}
-			oldChainEvents = append(oldChainEvents, event)
+			oldChainEvents = append(oldChainEvents, cognitiveEventFromSTM(stmEvt))
 		}
 
 		// 7. Trigger MTM formation
@@ -376,15 +355,56 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 			// MTM FAILED! Return the error. DO NOT TRIM.
 			return fmt.Errorf("MTM formation failed: %w", err)
 		} else {
-			// MTM SUCCEEDED! Trim STM to keep only the new topic events.
-			if err := w.redis.LTrim(key, 0, int64(keepCount-1)); err != nil {
-				// The MTM save worked, but the trim failed.
-				log.Printf("WARNING: MTM save succeeded but failed to trim STM for user %s: %v", task.UserID, err)
-			}
+			// MTM SUCCEEDED! Remove the formed events, keeping only the new topic.
+			w.removeFormedEntries(key, oldChainStrings)
 		}
 	}
 
 	return nil
+}
+
+// removeFormedEntries removes the STM entries a chain was formed from. It removes
+// them by value rather than trimming by index: the list changes while a formation
+// runs (new events are pushed, a deleted session's entries are removed), so the
+// positions read before the formation no longer identify the same entries.
+func (w *Worker) removeFormedEntries(key string, raws []string) {
+	for _, raw := range raws {
+		// Formed entries are the oldest, so search from the tail.
+		if err := w.redis.LRem(key, -1, raw); err != nil {
+			log.Printf("WARNING: Failed to remove a formed event from STM %s: %v", key, err)
+		}
+	}
+}
+
+// cognitiveEventFromSTM converts a cached STM event into the cognitive event that
+// chain formation persists. It keeps the event's session and, when the event was
+// stored durably on arrival, the ID of that cognitive_events document.
+func cognitiveEventFromSTM(e STMEvent) models.CognitiveEvent {
+	meta := make(map[string]interface{}, len(e.Metadata))
+	for k, v := range e.Metadata {
+		meta[k] = v
+	}
+	sessionID := e.SessionID
+	if sessionID == "" {
+		// Entries cached before sessionId existed carry the session as ChainID.
+		sessionID = e.ChainID
+	}
+	evt := models.CognitiveEvent{
+		SessionID:    sessionID,
+		Role:         e.Role,
+		Type:         e.Type,
+		Content:      e.Content,
+		BlobURI:      e.BlobURI,
+		BlobMimeType: e.BlobMimeType,
+		CreatedAt:    e.Timestamp,
+		Metadata:     meta,
+	}
+	if e.EventID != "" {
+		if id, err := primitive.ObjectIDFromHex(e.EventID); err == nil {
+			evt.ID = id
+		}
+	}
+	return evt
 }
 
 // truncateLog truncates a string for log output

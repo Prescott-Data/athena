@@ -56,6 +56,11 @@ func (m *MockRedis) LTrim(key string, start, stop int64) error {
 	return args.Error(0)
 }
 
+func (m *MockRedis) LRem(key string, count int64, value interface{}) error {
+	args := m.Called(key, count, value)
+	return args.Error(0)
+}
+
 func (m *MockRedis) Expire(key string, expiration time.Duration) error {
 	args := m.Called(key, expiration)
 	return args.Error(0)

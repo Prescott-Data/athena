@@ -559,6 +559,27 @@
       "properties": {
         "success": {
           "type": "boolean"
+        },
+        "stmEventsDeleted": {
+          "type": "integer",
+          "format": "int32",
+          "description": "What was removed: the session's STM entries, its stored events, the MTM chains\nsummarised from them (a chain shared with other sessions is removed whole), the\nvectors of those chains and events, and the events' blob payloads."
+        },
+        "eventsDeleted": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "chainsDeleted": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "vectorsDeleted": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "blobsDeleted": {
+          "type": "integer",
+          "format": "int32"
         }
       }
     },
@@ -679,7 +700,8 @@
       "properties": {
         "accessFrequency": {
           "type": "number",
-          "format": "double"
+          "format": "double",
+          "description": "Fields 1-5 were never populated; heat is described by fields 6-8."
         },
         "interactionDepth": {
           "type": "number",
@@ -696,26 +718,54 @@
         "topicImportance": {
           "type": "number",
           "format": "double"
+        },
+        "baseImportance": {
+          "type": "number",
+          "format": "double",
+          "description": "Importance of the content: intrinsic importance plus contextual density, capped at 1."
+        },
+        "timeDecay": {
+          "type": "number",
+          "format": "double",
+          "description": "Forgetting-curve factor in (0, 1]; 1 means just accessed."
+        },
+        "recallStrength": {
+          "type": "number",
+          "format": "double",
+          "description": "Grows each time the memory is recalled, which slows decay."
         }
-      }
+      },
+      "description": "Heat follows the Ebbinghaus forgetting curve:\nheat = base_importance * time_decay, where time_decay = exp(-hours_since_access / (tau * recall_strength))."
     },
     "v1HeatMetrics": {
       "type": "object",
       "properties": {
         "overallHeat": {
           "type": "number",
-          "format": "double"
+          "format": "double",
+          "description": "Mean current heat of the session's segments."
         },
         "breakdown": {
-          "$ref": "#/definitions/v1HeatFactors"
+          "$ref": "#/definitions/v1HeatFactors",
+          "description": "Mean of each heat factor across the session's segments."
         },
         "totalInteractions": {
           "type": "integer",
-          "format": "int32"
+          "format": "int32",
+          "description": "Number of events stored through the session."
         },
         "lastActivity": {
           "type": "string",
           "format": "date-time"
+        },
+        "segmentCount": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "maxHeat": {
+          "type": "number",
+          "format": "double",
+          "description": "Heat of the session's hottest segment."
         }
       }
     },
@@ -825,6 +875,19 @@
         "createdAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "heat": {
+          "type": "number",
+          "format": "double",
+          "description": "Current heat of the segment (heat decays with time since last access)."
+        },
+        "eventCount": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "lastEventAt": {
+          "type": "string",
+          "format": "date-time"
         }
       }
     },
@@ -843,13 +906,28 @@
         },
         "updatedAt": {
           "type": "string",
-          "format": "date-time"
+          "format": "date-time",
+          "description": "Time of the session's most recent stored event, or created_at if it has none."
         },
         "metadata": {
           "type": "object",
           "additionalProperties": {
             "type": "string"
           }
+        },
+        "tenantId": {
+          "type": "string"
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "eventCount": {
+          "type": "integer",
+          "format": "int32",
+          "description": "Number of events stored through the session."
         }
       }
     },
