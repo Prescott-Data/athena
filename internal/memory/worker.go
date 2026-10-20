@@ -10,6 +10,7 @@ import (
 
 	"github.com/Prescott-Data/athena/internal/cache"
 	"github.com/Prescott-Data/athena/internal/models"
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -97,17 +98,35 @@ func (w *Worker) processNextTask(ctx context.Context, workerID int) error {
 	case TaskTypeCognitiveChainCheck:
 		if err := json.Unmarshal(task.Payload, &payload); err != nil {
 			processingErr = fmt.Errorf("failed to unmarshal task payload: %w", err)
-		} else {
-			log.Printf("Worker %d processing task %s (UserID: %s)", workerID, task.ID, payload.UserID)
-			processingErr = w.processCognitiveChainCheck(ctx, &payload)
+			break
 		}
+		// One worker at a time reads, summarises and trims a scope's STM: two workers
+		// forming chains from the same window produce duplicate chains.
+		release, held := w.lockScope(&payload)
+		if !held {
+			time.Sleep(scopeBusyBackoff)
+			if err := w.reEnqueueTask(ctx, scopedQueueName, &task, &payload); err != nil {
+				return fmt.Errorf("failed to requeue task for a busy scope: %w", err)
+			}
+			return nil
+		}
+		log.Printf("Worker %d processing task %s (UserID: %s)", workerID, task.ID, payload.UserID)
+		processingErr = w.processCognitiveChainCheck(ctx, &payload)
+		release()
 	case TaskTypeIdleFlush:
 		if err := json.Unmarshal(task.Payload, &payload); err != nil {
 			processingErr = fmt.Errorf("failed to unmarshal task payload: %w", err)
-		} else {
-			log.Printf("Worker %d flushing idle STM (UserID: %s)", workerID, payload.UserID)
-			processingErr = w.processIdleFlush(ctx, &payload)
+			break
 		}
+		// The idle flush reads and trims the same STM, so it takes the same lock.
+		release, held := w.lockScope(&payload)
+		if !held {
+			// A chain check is running for this scope; the next sweep retries.
+			return nil
+		}
+		log.Printf("Worker %d flushing idle STM (UserID: %s)", workerID, payload.UserID)
+		processingErr = w.processIdleFlush(ctx, &payload)
+		release()
 	default:
 		processingErr = fmt.Errorf("unknown task type: %s", task.Type)
 	}
@@ -135,6 +154,31 @@ func (w *Worker) processNextTask(ctx context.Context, workerID int) error {
 	log.Printf("Worker %d task %s completed successfully in %v", workerID, task.ID, duration)
 	w.taskQueue.MarkTaskResult(ctx, payload.TenantID, payload.UserID, payload.AgentID, task.ID, true, "success")
 	return nil
+}
+
+// scopeBusyBackoff is how long a worker waits before requeueing a task whose scope
+// another worker is processing.
+const scopeBusyBackoff = 200 * time.Millisecond
+
+// lockScope takes the scope's processing lock. It returns a release function and
+// true, or false if another worker holds it. Without the lock (Redis error) it
+// proceeds, as before.
+func (w *Worker) lockScope(task *models.CognitiveChainCheckTask) (func(), bool) {
+	key := "stm_scope_lock:v1:" + GenerateScopedQueueName(task.TenantID, task.UserID, task.AgentID)
+	holder := uuid.New().String()
+	acquired, err := w.redis.SetNX(key, holder, TaskTimeout)
+	if err != nil {
+		log.Printf("WARNING: scope lock unavailable for %s, proceeding: %v", task.UserID, err)
+		return func() {}, true
+	}
+	if !acquired {
+		return nil, false
+	}
+	return func() {
+		if err := w.redis.DeleteIfEquals(key, holder); err != nil {
+			log.Printf("WARNING: failed to release scope lock for %s: %v", task.UserID, err)
+		}
+	}, true
 }
 
 // reEnqueueTask puts the failed task back into the queue system

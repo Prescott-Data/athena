@@ -26,4 +26,8 @@ type Interface interface {
 	HSet(key, field, value string) error
 	HGetAll(key string) (map[string]string, error)
 	HDel(key string, fields ...string) error
+	// SetNX sets key to value with a TTL only if it does not exist; true if it was set.
+	SetNX(key, value string, ttl time.Duration) (bool, error)
+	// DeleteIfEquals deletes key only if it still holds value (a lock its holder releases).
+	DeleteIfEquals(key, value string) error
 }

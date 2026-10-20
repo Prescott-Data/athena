@@ -127,3 +127,13 @@ func (m *MockRedis) HDel(key string, fields ...string) error {
 	args := m.Called(key, fields)
 	return args.Error(0)
 }
+
+func (m *MockRedis) SetNX(key, value string, ttl time.Duration) (bool, error) {
+	args := m.Called(key, value, ttl)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockRedis) DeleteIfEquals(key, value string) error {
+	args := m.Called(key, value)
+	return args.Error(0)
+}

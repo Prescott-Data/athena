@@ -2,7 +2,8 @@ package memory
 
 import (
 	"context"
-	"fmt"
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
 	"io"
 	"net/http"
 	"os"
@@ -410,115 +411,54 @@ func TestSTMStore_generateEmbeddingCacheKey(t *testing.T) {
 
 func TestSTMStore_ProcessMTMFormation_Idempotency(t *testing.T) {
 	mockRedis := new(MockRedisCache)
-	mockRedis.cache = make(map[string]interface{})
-
-	stmStore := &STMStore{
-		redis:     mockRedis,
-		llmGuards: &LLMGuardrails{redis: mockRedis},
-	}
-
+	stmStore := &STMStore{redis: mockRedis, llmGuards: &LLMGuardrails{redis: mockRedis}}
 	ctx := context.Background()
-	chainID := "test-chain-idempotency"
+	lockKey := "mtm:processing:lock:test-chain-idempotency"
 
-	t.Run("Lock prevents duplicate processing", func(t *testing.T) {
-		lockKey := fmt.Sprintf("mtm:processing:lock:%s", chainID)
+	// The lock is taken with SET NX and a holder token.
+	mockRedis.On("SetNX", lockKey, mock.Anything, 5*time.Minute).Return(true, nil).Once()
+	release := stmStore.acquireProcessingLock(ctx, "test-chain-idempotency")
+	require.NotNil(t, release, "the first caller holds the lock")
 
-		// Test 1: First call - should acquire lock
-		mockRedis.On("SetWithTTL", lockKey, "processing", mock.Anything).Return(nil).Once()
-		acquired1 := stmStore.acquireProcessingLock(ctx, chainID)
-		assert.True(t, acquired1, "First call should acquire lock successfully")
+	// While held, SET NX fails and the second caller does not process the chain.
+	mockRedis.On("SetNX", lockKey, mock.Anything, 5*time.Minute).Return(false, nil).Once()
+	assert.Nil(t, stmStore.acquireProcessingLock(ctx, "test-chain-idempotency"))
 
-		// Test 2: Second call with same chainID - should fail to acquire (lock exists)
-		mockRedis.On("SetWithTTL", lockKey, "processing", mock.Anything).Return(io.EOF).Once()
-		mockRedis.On("Exists", lockKey).Return(true, nil).Once() // Confirm lock exists
-		acquired2 := stmStore.acquireProcessingLock(ctx, chainID)
-		assert.False(t, acquired2, "Second call should fail to acquire lock (duplicate detected)")
-
-		// Test 3: Release lock
-		mockRedis.On("Delete", lockKey).Return(nil).Once()
-		stmStore.releaseProcessingLock(ctx, chainID)
-
-		// Test 4: After release, should be able to acquire again
-		mockRedis.On("SetWithTTL", lockKey, "processing", mock.Anything).Return(nil).Once()
-		acquired3 := stmStore.acquireProcessingLock(ctx, chainID)
-		assert.True(t, acquired3, "After release, should acquire lock again")
-
-		t.Log("Idempotency lock cycle completed: acquire -> reject duplicate -> release -> re-acquire")
-	})
+	// Release deletes the key only if this holder still holds it.
+	holder := mockRedis.Calls[0].Arguments.String(1)
+	mockRedis.On("DeleteIfEquals", lockKey, holder).Return(nil).Once()
+	release()
+	mockRedis.AssertExpectations(t)
 }
 
-func TestSTMStore_acquireProcessingLock(t *testing.T) {
-	tests := []struct {
-		name          string
-		setupMock     func(*MockRedisCache)
-		expectAcquire bool
-		description   string
-	}{
-		{
-			name: "Successful lock acquisition",
-			setupMock: func(m *MockRedisCache) {
-				m.On("SetWithTTL", mock.Anything, "processing", mock.Anything).Return(nil).Once()
-			},
-			expectAcquire: true,
-			description:   "Should acquire lock when key doesn't exist",
-		},
-		{
-			name: "Lock already held",
-			setupMock: func(m *MockRedisCache) {
-				m.On("SetWithTTL", mock.Anything, "processing", mock.Anything).Return(io.EOF).Once()
-				m.On("Exists", mock.Anything).Return(true, nil).Once()
-			},
-			expectAcquire: false,
-			description:   "Should fail to acquire when lock exists",
-		},
-		{
-			name: "Redis unavailable - fail open",
-			setupMock: func(m *MockRedisCache) {
-				// stmStore with nil redis will fail open
-			},
-			expectAcquire: true,
-			description:   "Should allow processing when Redis is unavailable",
-		},
-	}
+func TestSTMStore_acquireProcessingLock_FailsOpenWithoutRedis(t *testing.T) {
+	stmStore := &STMStore{redis: nil}
+	release := stmStore.acquireProcessingLock(context.Background(), "test-chain-123")
+	require.NotNil(t, release)
+	release()
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var stmStore *STMStore
-
-			if tt.name == "Redis unavailable - fail open" {
-				stmStore = &STMStore{redis: nil}
-			} else {
-				mockRedis := new(MockRedisCache)
-				tt.setupMock(mockRedis)
-				stmStore = &STMStore{redis: mockRedis}
-			}
-
-			ctx := context.Background()
-			acquired := stmStore.acquireProcessingLock(ctx, "test-chain-123")
-
-			assert.Equal(t, tt.expectAcquire, acquired, tt.description)
-			t.Logf("%s: Acquired=%v", tt.description, acquired)
-		})
-	}
+	errRedis := new(MockRedisCache)
+	errRedis.On("SetNX", mock.Anything, mock.Anything, mock.Anything).Return(false, io.EOF).Once()
+	assert.NotNil(t, (&STMStore{redis: errRedis}).acquireProcessingLock(context.Background(), "test-chain-123"),
+		"a Redis error proceeds, as before")
 }
 
-func TestSTMStore_releaseProcessingLock(t *testing.T) {
-	mockRedis := new(MockRedisCache)
-	lockKey := "mtm:processing:lock:test-chain-123"
-	mockRedis.On("Delete", lockKey).Return(nil).Once()
-
-	stmStore := &STMStore{redis: mockRedis}
+func TestSTMStore_ProcessingLockIsExclusiveOnRealRedis(t *testing.T) {
+	client, err := setupRedisTestClient()
+	if err != nil {
+		t.Skipf("Skipping: real Redis not available: %v", err)
+	}
+	stmStore := &STMStore{redis: client}
 	ctx := context.Background()
+	chainID := "test-chain-exclusive-" + uuid.New().String()
 
-	// Should not panic or error
-	stmStore.releaseProcessingLock(ctx, "test-chain-123")
-
-	mockRedis.AssertCalled(t, "Delete", lockKey)
-
-	// Test with nil redis - should not panic
-	stmStoreNilRedis := &STMStore{redis: nil}
-	stmStoreNilRedis.releaseProcessingLock(ctx, "test-chain-456")
-	t.Log("Successfully handled nil redis in release lock")
+	first := stmStore.acquireProcessingLock(ctx, chainID)
+	require.NotNil(t, first)
+	assert.Nil(t, stmStore.acquireProcessingLock(ctx, chainID), "a second worker is refused while the first holds it")
+	first()
+	again := stmStore.acquireProcessingLock(ctx, chainID)
+	require.NotNil(t, again, "free again once released")
+	again()
 }
 
 func TestSTMStore_ConfigurableTimeouts(t *testing.T) {
@@ -610,5 +550,15 @@ func (m *MockRedisCache) HGetAll(key string) (map[string]string, error) {
 
 func (m *MockRedisCache) HDel(key string, fields ...string) error {
 	args := m.Called(key, fields)
+	return args.Error(0)
+}
+
+func (m *MockRedisCache) SetNX(key, value string, ttl time.Duration) (bool, error) {
+	args := m.Called(key, value, ttl)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockRedisCache) DeleteIfEquals(key, value string) error {
+	args := m.Called(key, value)
 	return args.Error(0)
 }
