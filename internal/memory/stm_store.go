@@ -9,6 +9,7 @@ import (
 	"log"
 	"log/slog"
 	"math"
+	"sort"
 	"net/http"
 	"os"
 	"strconv"
@@ -24,6 +25,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 
 	// Load environment variables from .env file
 	_ "github.com/joho/godotenv/autoload"
@@ -35,7 +37,7 @@ type STMStorer interface {
 	analyzeTopicContinuity(ctx context.Context, userID string, previousContent string, newContent string) (bool, error)
 	ProcessMTMFormation(ctx context.Context, tenantID, userID, agentID string, events []models.CognitiveEvent) error
 	StoreCognitiveEvent(ctx context.Context, event *models.CognitiveEvent) (primitive.ObjectID, error)
-	SearchSimilarChains(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int, metadataFilter map[string]string) ([]*models.CognitiveChain, error)
+	SearchSimilarChains(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int, minSimilarity float64, metadataFilter map[string]string) ([]*models.CognitiveChain, error)
 }
 
 const (
@@ -77,7 +79,9 @@ func parseBoolEnv(key string, defaultValue bool) bool {
 	return val == "true"
 }
 
-// normalizeVector normalizes a vector to unit length
+// normalizeVector normalizes a vector to unit length. Stored and query embeddings are
+// normalized so that cosine similarity can be read from Milvus' L2 distance,
+// whatever the embedding provider returns.
 func normalizeVector(v []float64) []float64 {
 	if len(v) == 0 {
 		return v
@@ -214,6 +218,7 @@ type STMStore struct {
 	topicAnalyzer     *TopicAnalyzer
 	sessionManager    *SessionManager
 	parallelProcessor *ParallelProcessor
+	graphEraser       GraphEraser
 }
 
 // NewSTMStore creates a new STM store instance
@@ -279,19 +284,31 @@ func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, ag
 		return nil
 	}
 
-	// Get ChainID from events if set, otherwise generate a new one
-	chainID := events[0].ChainID
-	if chainID == "" {
-		chainID = uuid.New().String()
-		log.Printf("INFO: Generated new ChainID %s for MTM formation", chainID)
+	// Events of a session deleted while they waited in STM must not be summarised.
+	events = s.dropErasedSessionEvents(events)
+	if len(events) == 0 {
+		log.Println("INFO: ProcessMTMFormation: every event belongs to a deleted session; nothing to form.")
+		return nil
+	}
+
+	// Every chain gets its own ID. A session ID is not reused as a chain ID, since a
+	// session produces many chains over its lifetime.
+	chainID := uuid.New().String()
+	for i := range events {
+		events[i].TenantID = tenantID
+		events[i].UserID = userID
+		events[i].AgentID = agentID
+		events[i].ChainID = chainID
+		events[i].EventIndex = i
 	}
 
 	// Idempotency check: ensure we don't process the same chain twice
-	if !s.acquireProcessingLock(ctx, chainID) {
-		log.Printf("INFO: Chain %s is already being processed or has been processed recently. Skipping.", chainID)
+	release := s.acquireProcessingLock(ctx, chainID)
+	if release == nil {
+		log.Printf("INFO: Chain %s is already being processed. Skipping.", chainID)
 		return nil
 	}
-	defer s.releaseProcessingLock(ctx, chainID)
+	defer release()
 
 	log.Printf("INFO: Starting MTM formation for user %s with %d events.", userID, len(events))
 
@@ -336,9 +353,11 @@ func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, ag
 	// Step 2: (Build Candidate)
 	// Inherit service metadata (origin_service, context_type, etc.) from the session chain.
 	var sessionMetadata map[string]string
-	var sessionChain models.CognitiveChain
-	if err := s.db.Collection(CognitiveChainsCollection).FindOne(ctx, bson.M{"chainId": chainID}).Decode(&sessionChain); err == nil {
-		sessionMetadata = sessionChain.Metadata
+	if sessionID := firstSessionID(events); sessionID != "" {
+		var sessionChain models.CognitiveChain
+		if err := s.db.Collection(CognitiveChainsCollection).FindOne(ctx, bson.M{"chainId": sessionID}).Decode(&sessionChain); err == nil {
+			sessionMetadata = sessionChain.Metadata
+		}
 	}
 
 	candidateChain := &models.CognitiveChain{
@@ -355,6 +374,7 @@ func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, ag
 		EventCount:          len(events),
 		Status:              "pending",
 		Metadata:            sessionMetadata,
+		SessionIDs:          sessionIDsOf(events),
 		RecallStrength:      1.0,                 // Initialize Ebbinghaus recall strength
 		IntrinsicImportance: intrinsicImportance, // From LLM analysis
 	}
@@ -372,37 +392,13 @@ func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, ag
 		return nil
 	}
 	log.Printf("INFO: Quality gate passed for chain %s. Score: %.2f", chainID, validationResult.QualityScore)
+	candidateChain.QualityScore = validationResult.QualityScore
 
 	// Step 3.5: Promote cognitive events from in_stm → in_mtm.
-	// P5 already wrote these to MongoDB on store, so update status rather than re-inserting.
-	// Fall back to insert only if no existing in_stm events are found (pre-P5 path).
-	eventsCollection := s.db.Collection(CognitiveEventsCollection)
-	updateResult, updateErr := eventsCollection.UpdateMany(ctx,
-		bson.M{"chainId": chainID, "status": "in_stm"},
-		bson.M{"$set": bson.M{"status": "in_mtm"}},
-	)
-	if updateErr != nil {
-		log.Printf("WARN: Failed to update cognitive events status for chain %s: %v", chainID, updateErr)
-	}
-
-	if updateErr != nil || updateResult.MatchedCount == 0 {
-		// No existing in_stm events found — insert them (pre-P5 path or recovery)
-		eventDocs := make([]interface{}, len(events))
-		for i := range events {
-			events[i].Status = "in_mtm"
-			events[i].EventIndex = i
-			if events[i].ID.IsZero() {
-				events[i].ID = primitive.NewObjectID()
-			}
-			eventDocs[i] = events[i]
-		}
-		if _, err := eventsCollection.InsertMany(ctx, eventDocs); err != nil {
-			log.Printf("WARN: Failed to persist %d cognitive events for chain %s: %v", len(events), chainID, err)
-		} else {
-			log.Printf("INFO: Persisted %d cognitive events for chain %s", len(events), chainID)
-		}
-	} else {
-		log.Printf("INFO: Promoted %d cognitive events to in_mtm for chain %s", updateResult.ModifiedCount, chainID)
+	// Events stored through the API already have a durable copy (P5), referenced by
+	// ID; those copies are moved onto the chain. Only events without one are inserted.
+	if err := s.promoteEventsToChain(ctx, chainID, events); err != nil {
+		log.Printf("WARN: Failed to promote cognitive events for chain %s: %v", chainID, err)
 	}
 
 	// Step 4: (Merge/Create)
@@ -436,6 +432,14 @@ func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, ag
 	// Post-processing: Cleanup old chains for the user
 	if err := s.sessionManager.CleanupOldChains(ctx, userID); err != nil {
 		log.Printf("WARN: Failed to cleanup old chains for user %s: %v", userID, err)
+	}
+
+	// A session deleted while this chain was being formed may have been read by
+	// EraseSession before the chain existed. The tombstone was set before that read,
+	// so checking it after every write here closes the gap.
+	if s.chainHasErasedSession(finalChain) {
+		s.discardChain(ctx, finalChain)
+		return nil
 	}
 
 	log.Printf("INFO: MTM formation complete for chain %s.", finalChain.ChainID)
@@ -533,6 +537,7 @@ func (s *STMStore) CreateEmbedding(ctx context.Context, textToEmbed string) (*mo
 	// Check embedding cache first
 	if cachedEmbedding := s.getEmbeddingFromCache(ctx, textToEmbed, embeddingModel); cachedEmbedding != nil {
 		slog.Info("Embedding cache hit", slog.Int("text_length", len(textToEmbed)))
+		cachedEmbedding.Vector = normalizeVector(cachedEmbedding.Vector)
 		return cachedEmbedding, nil
 	}
 
@@ -561,7 +566,7 @@ func (s *STMStore) CreateEmbedding(ctx context.Context, textToEmbed string) (*mo
 	timer.ObserveDuration()           // Record successful embedding latency
 
 	embeddingData := &models.EmbeddingData{
-		Vector:     vector,
+		Vector:     normalizeVector(vector),
 		Dimensions: len(vector),
 		Model:      embeddingModel,
 		CreatedAt:  time.Now(),
@@ -622,46 +627,29 @@ func (s *STMStore) generateEmbeddingCacheKey(text, model string) string {
 	return fmt.Sprintf("embedding:cache:%s", hash)
 }
 
-// acquireProcessingLock attempts to acquire a lock for processing a chain
-// Returns true if lock was acquired, false if chain is already being processed
-func (s *STMStore) acquireProcessingLock(_ context.Context, chainID string) bool {
+// acquireProcessingLock takes the exclusive lock for forming chain chainID. It returns
+// a release function, or nil if another worker holds it. Without Redis it allows
+// processing (fail-open), as before.
+func (s *STMStore) acquireProcessingLock(_ context.Context, chainID string) func() {
 	if s.redis == nil {
-		// If Redis is not available, allow processing (fail-open for availability)
 		slog.Warn("Redis not available for idempotency check, proceeding with processing")
-		return true
+		return func() {}
 	}
-
 	lockKey := fmt.Sprintf("mtm:processing:lock:%s", chainID)
-	lockTTL := 5 * time.Minute // Lock expires after 5 minutes to prevent deadlocks
-
-	// Try to set the lock with NX (only if not exists)
-	err := s.redis.SetWithTTL(lockKey, "processing", lockTTL)
+	holder := uuid.New().String()
+	acquired, err := s.redis.SetNX(lockKey, holder, 5*time.Minute) // expires so a crashed worker cannot block it
 	if err != nil {
-		// Lock already exists or error occurred
-		slog.Warn("Failed to acquire processing lock", slog.String("chain_id", chainID), slog.String("error", err.Error()))
-
-		// Check if the key already exists to distinguish between "already processing" and other errors
-		exists, checkErr := s.redis.Exists(lockKey)
-		if checkErr == nil && exists {
-			return false // Chain is already being processed
+		slog.Warn("Processing lock unavailable, proceeding", slog.String("chain_id", chainID), slog.String("error", err.Error()))
+		return func() {}
+	}
+	if !acquired {
+		return nil
+	}
+	return func() {
+		// Only the holder releases it: after expiry another worker may hold it.
+		if err := s.redis.DeleteIfEquals(lockKey, holder); err != nil {
+			slog.Warn("Failed to release processing lock for chain", slog.String("chain_id", chainID), slog.String("error", err.Error()))
 		}
-		// For other errors, fail-open for availability
-		return true
-	}
-
-	return true
-}
-
-// releaseProcessingLock releases the processing lock for a chain
-func (s *STMStore) releaseProcessingLock(_ context.Context, chainID string) {
-	if s.redis == nil {
-		return
-	}
-
-	lockKey := fmt.Sprintf("mtm:processing:lock:%s", chainID)
-	err := s.redis.Delete(lockKey)
-	if err != nil {
-		slog.Warn("Failed to release processing lock for chain", slog.String("chain_id", chainID), slog.String("error", err.Error()))
 	}
 }
 
@@ -816,7 +804,7 @@ func (s *STMStore) StoreEventEmbedding(ctx context.Context, event *models.Cognit
 		return fmt.Errorf("milvus client not configured")
 	}
 	// Using event.ID.Hex() as the reference ID.
-	return s.milvus.InsertSegmentEmbedding(ctx, event.TenantID, event.UserID, event.AgentID, event.ID.Hex(), embedding)
+	return s.milvus.InsertEmbedding(ctx, event.TenantID, event.UserID, event.AgentID, event.ID.Hex(), embedding)
 }
 
 // IndexCognitiveEvents creates and stores embeddings for individual high-value cognitive events.
@@ -864,66 +852,106 @@ func (s *STMStore) IndexCognitiveEvents(ctx context.Context, chainID string, eve
 	return nil
 }
 
-// SearchSimilarChains finds cognitive chains that are semantically similar to a query vector.
+// maxChainSearchCandidates bounds how many chains one search ranks. Active chains
+// per user are capped by SESSION_MAX_CHAINS_PER_USER (default 100), so this is
+// only reached when that cap is raised; the most recently active chains are kept.
+const maxChainSearchCandidates = 500
+
+// SearchSimilarChains returns the active cognitive chains in a scope most similar to
+// a query vector, most similar first. Each chain's SimilarityScore is its cosine
+// similarity to the query; when minSimilarity is positive, chains below it are left
+// out (0 keeps all).
+// An empty agentID searches all of the user's agents.
+//
 // metadataFilter is optional — when non-empty, only chains whose metadata matches all
 // provided key/value pairs are returned (e.g. {"origin_service": "colabra"}).
-func (s *STMStore) SearchSimilarChains(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int, metadataFilter map[string]string) ([]*models.CognitiveChain, error) {
+//
+// Ranking is exact: the scope's chains are listed from MongoDB, their vectors read
+// from Milvus by ID, and every one is scored. Approximate search with a scope filter
+// is not used because Milvus returns fewer neighbours than requested when the filter
+// is selective, and because older releases stored event vectors in the same
+// collection, which rank above chain summaries and crowd them out.
+func (s *STMStore) SearchSimilarChains(ctx context.Context, tenantID, userID, agentID string, queryVector []float64, limit int, minSimilarity float64, metadataFilter map[string]string) ([]*models.CognitiveChain, error) {
 	if s.milvus == nil {
 		slog.Warn("Milvus client not configured, cannot search for similar chains")
 		return nil, nil // Return empty slice, not an error
 	}
-
-	// Step A: Call Milvus to get IDs of similar chains
-	chainIDs, scores, err := s.milvus.SearchSimilarSegments(ctx, tenantID, userID, agentID, queryVector, limit)
-	if err != nil {
-		return nil, fmt.Errorf("failed to search for similar segments in milvus: %w", err)
+	if limit <= 0 {
+		return []*models.CognitiveChain{}, nil
 	}
 
-	if len(chainIDs) == 0 {
-		return []*models.CognitiveChain{}, nil // No similar chains found
-	}
-
-	// Build a map of chainID → similarity score for later population
-	scoreMap := make(map[string]float32, len(chainIDs))
-	for i, id := range chainIDs {
-		if i < len(scores) {
-			scoreMap[id] = scores[i]
-		}
-	}
-
-	slog.Info("Vector search found candidate chain IDs", slog.Int("candidate_count", len(chainIDs)))
-
-	// Step B: Fetch the full metadata for those chain IDs from MongoDB.
-	// Apply metadata filters (e.g. origin_service, context_type) if provided.
-	collection := s.db.Collection(CognitiveChainsCollection)
 	filter := bson.M{
-		"chainId": bson.M{"$in": chainIDs},
-		"status":  "active",
-		"userId":  userID,
+		"tenantId": tenantID,
+		"userId":   userID,
+		"status":   "active",
+		"summary":  bson.M{"$ne": ""},
+	}
+	if agentID != "" {
+		filter["agentId"] = agentID
 	}
 	for k, v := range metadataFilter {
 		filter["metadata."+k] = v
 	}
-
-	cursor, err := collection.Find(ctx, filter)
+	opts := options.Find().
+		SetSort(bson.D{{Key: "lastEventAt", Value: -1}}).
+		SetLimit(maxChainSearchCandidates)
+	cursor, err := s.db.Collection(CognitiveChainsCollection).Find(ctx, filter, opts)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query similar chains from mongodb: %w", err)
+		return nil, fmt.Errorf("failed to list chains to search: %w", err)
 	}
-	defer cursor.Close(ctx)
-
 	var chains []*models.CognitiveChain
 	if err := cursor.All(ctx, &chains); err != nil {
-		return nil, fmt.Errorf("failed to decode similar chains from mongodb: %w", err)
+		return nil, fmt.Errorf("failed to decode chains to search: %w", err)
+	}
+	if len(chains) == 0 {
+		return []*models.CognitiveChain{}, nil
 	}
 
-	// Populate transient similarity scores from Milvus results
-	for _, chain := range chains {
-		chain.SimilarityScore = scoreMap[chain.ChainID]
+	ids := make([]string, 0, len(chains))
+	for _, c := range chains {
+		ids = append(ids, c.ChainID)
+	}
+	vectors, err := s.milvus.GetSegmentVectors(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read chain vectors from milvus: %w", err)
 	}
 
-	slog.Info("Fetched full cognitive chain documents from MongoDB", slog.Int("chain_count", len(chains)))
+	ranked := rankChainsBySimilarity(chains, vectors, queryVector, minSimilarity, limit)
+	slog.Info("Chain search complete", slog.Int("candidates", len(chains)), slog.Int("with_vectors", len(vectors)), slog.Int("returned", len(ranked)))
+	return ranked, nil
+}
 
-	return chains, nil
+// rankChainsBySimilarity scores chains by cosine similarity between their vector and
+// the query, drops chains without a vector or below a positive minSimilarity, and returns at
+// most limit, most similar first.
+func rankChainsBySimilarity(chains []*models.CognitiveChain, vectors map[string][]float32, query []float64, minSimilarity float64, limit int) []*models.CognitiveChain {
+	q := normalizeVector(query)
+	ranked := make([]*models.CognitiveChain, 0, len(chains))
+	for _, c := range chains {
+		v, ok := vectors[c.ChainID]
+		if !ok || len(v) != len(q) {
+			continue
+		}
+		vec := make([]float64, len(v))
+		for i, x := range v {
+			vec[i] = float64(x)
+		}
+		vec = normalizeVector(vec)
+		var dot float64
+		for i := range q {
+			dot += q[i] * vec[i]
+		}
+		if minSimilarity > 0 && dot < minSimilarity {
+			continue
+		}
+		c.SimilarityScore = float32(dot)
+		ranked = append(ranked, c)
+	}
+	sort.SliceStable(ranked, func(i, j int) bool { return ranked[i].SimilarityScore > ranked[j].SimilarityScore })
+	if len(ranked) > limit {
+		ranked = ranked[:limit]
+	}
+	return ranked
 }
 
 // ArchiveColdChains scans for cold chains (low heat score) and archives them.

@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/Prescott-Data/athena/internal/cache"
 	"github.com/Prescott-Data/athena/internal/models"
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 const (
@@ -96,10 +99,35 @@ func (w *Worker) processNextTask(ctx context.Context, workerID int) error {
 	case TaskTypeCognitiveChainCheck:
 		if err := json.Unmarshal(task.Payload, &payload); err != nil {
 			processingErr = fmt.Errorf("failed to unmarshal task payload: %w", err)
-		} else {
-			log.Printf("Worker %d processing task %s (UserID: %s)", workerID, task.ID, payload.UserID)
-			processingErr = w.processCognitiveChainCheck(ctx, &payload)
+			break
 		}
+		// One worker at a time reads, summarises and trims a scope's STM: two workers
+		// forming chains from the same window produce duplicate chains.
+		release, held := w.lockScope(&payload)
+		if !held {
+			time.Sleep(scopeBusyBackoff)
+			if err := w.reEnqueueTask(ctx, scopedQueueName, &task, &payload); err != nil {
+				return fmt.Errorf("failed to requeue task for a busy scope: %w", err)
+			}
+			return nil
+		}
+		log.Printf("Worker %d processing task %s (UserID: %s)", workerID, task.ID, payload.UserID)
+		processingErr = w.processCognitiveChainCheck(ctx, &payload)
+		release()
+	case TaskTypeIdleFlush:
+		if err := json.Unmarshal(task.Payload, &payload); err != nil {
+			processingErr = fmt.Errorf("failed to unmarshal task payload: %w", err)
+			break
+		}
+		// The idle flush reads and trims the same STM, so it takes the same lock.
+		release, held := w.lockScope(&payload)
+		if !held {
+			// A chain check is running for this scope; the next sweep retries.
+			return nil
+		}
+		log.Printf("Worker %d flushing idle STM (UserID: %s)", workerID, payload.UserID)
+		processingErr = w.processIdleFlush(ctx, &payload)
+		release()
 	default:
 		processingErr = fmt.Errorf("unknown task type: %s", task.Type)
 	}
@@ -127,6 +155,31 @@ func (w *Worker) processNextTask(ctx context.Context, workerID int) error {
 	log.Printf("Worker %d task %s completed successfully in %v", workerID, task.ID, duration)
 	w.taskQueue.MarkTaskResult(ctx, payload.TenantID, payload.UserID, payload.AgentID, task.ID, true, "success")
 	return nil
+}
+
+// scopeBusyBackoff is how long a worker waits before requeueing a task whose scope
+// another worker is processing.
+const scopeBusyBackoff = 200 * time.Millisecond
+
+// lockScope takes the scope's processing lock. It returns a release function and
+// true, or false if another worker holds it. Without the lock (Redis error) it
+// proceeds, as before.
+func (w *Worker) lockScope(task *models.CognitiveChainCheckTask) (func(), bool) {
+	key := "stm_scope_lock:v1:" + GenerateScopedQueueName(task.TenantID, task.UserID, task.AgentID)
+	holder := uuid.New().String()
+	acquired, err := w.redis.SetNX(key, holder, TaskTimeout)
+	if err != nil {
+		log.Printf("WARNING: scope lock unavailable for %s, proceeding: %v", task.UserID, err)
+		return func() {}, true
+	}
+	if !acquired {
+		return nil, false
+	}
+	return func() {
+		if err := w.redis.DeleteIfEquals(key, holder); err != nil {
+			log.Printf("WARNING: failed to release scope lock for %s: %v", task.UserID, err)
+		}
+	}, true
 }
 
 // reEnqueueTask puts the failed task back into the queue system
@@ -198,6 +251,7 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 	}
 	var userMessages []parsedEvent
 	var allEvents []models.CognitiveEvent
+	var allRaw []string // allRaw[i] is the STM entry allEvents[i] was parsed from
 
 	for i, eventStr := range eventStrings {
 		var stmEvt STMEvent
@@ -206,20 +260,10 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 			continue
 		}
 
-		meta := make(map[string]interface{})
-		for k, v := range stmEvt.Metadata {
-			meta[k] = v
-		}
-
-		evt := models.CognitiveEvent{
-			Role:      stmEvt.Role,
-			Type:      stmEvt.Type,
-			Content:   stmEvt.Content,
-			CreatedAt: stmEvt.Timestamp,
-			Metadata:  meta,
-		}
+		evt := cognitiveEventFromSTM(stmEvt)
 
 		allEvents = append(allEvents, evt)
+		allRaw = append(allRaw, eventStr)
 		if evt.Role == "user" {
 			userMessages = append(userMessages, parsedEvent{event: evt, index: i})
 		}
@@ -242,9 +286,7 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 		if err := w.stmStore.ProcessMTMFormation(ctx, task.TenantID, task.UserID, task.AgentID, oldChainEvents); err != nil {
 			return fmt.Errorf("forced MTM formation failed: %w", err)
 		}
-		if err := w.redis.LTrim(key, 0, int64(splitPoint-1)); err != nil {
-			log.Printf("WARNING: Failed to trim STM after forced formation: %v", err)
-		}
+		w.removeFormedEntries(key, allRaw[splitPoint:])
 		log.Printf("Forced chain formation complete for user %s. Kept %d recent events.", task.UserID, splitPoint)
 		return nil
 	}
@@ -253,7 +295,6 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 		log.Printf("Not enough user messages for chain analysis for user %s (found %d). Assuming new chain.", task.UserID, len(userMessages))
 		return nil // Not enough data to compare topics
 	}
-
 
 	// The newest user message vs the previous user message
 	newestUser := userMessages[0].event
@@ -353,18 +394,7 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 				log.Printf("WARNING: Failed to unmarshal event in old chain: %v", err)
 				continue
 			}
-			meta := make(map[string]interface{})
-			for k, v := range stmEvt.Metadata {
-				meta[k] = v
-			}
-			event := models.CognitiveEvent{
-				Role:      stmEvt.Role,
-				Type:      stmEvt.Type,
-				Content:   stmEvt.Content,
-				CreatedAt: stmEvt.Timestamp,
-				Metadata:  meta,
-			}
-			oldChainEvents = append(oldChainEvents, event)
+			oldChainEvents = append(oldChainEvents, cognitiveEventFromSTM(stmEvt))
 		}
 
 		// 7. Trigger MTM formation
@@ -376,15 +406,149 @@ func (w *Worker) processCognitiveChainCheck(ctx context.Context, task *models.Co
 			// MTM FAILED! Return the error. DO NOT TRIM.
 			return fmt.Errorf("MTM formation failed: %w", err)
 		} else {
-			// MTM SUCCEEDED! Trim STM to keep only the new topic events.
-			if err := w.redis.LTrim(key, 0, int64(keepCount-1)); err != nil {
-				// The MTM save worked, but the trim failed.
-				log.Printf("WARNING: MTM save succeeded but failed to trim STM for user %s: %v", task.UserID, err)
-			}
+			// MTM SUCCEEDED! Remove the formed events, keeping only the new topic.
+			w.removeFormedEntries(key, oldChainStrings)
 		}
 	}
 
 	return nil
+}
+
+// STMIdleFlushAfter is how long a scope may be quiet before its remaining STM events
+// are summarised (STM_IDLE_FLUSH_MINUTES, default 30). It must be shorter than
+// STM_CACHE_TTL, or a quiet scope's events expire unsummarised.
+func STMIdleFlushAfter() time.Duration {
+	return time.Duration(parseIntEnv("STM_IDLE_FLUSH_MINUTES", 30)) * time.Minute
+}
+
+// RunIdleSweeper queues an idle flush for every scope that has been quiet for
+// STMIdleFlushAfter, until ctx is done. Run one per process; flushes are tasks on the
+// scope's own queue, processed like any other.
+func (w *Worker) RunIdleSweeper(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if n, err := w.SweepIdle(ctx, time.Now()); err != nil {
+				log.Printf("WARNING: STM idle sweep failed: %v", err)
+			} else if n > 0 {
+				log.Printf("INFO: STM idle sweep queued %d flush(es)", n)
+			}
+		}
+	}
+}
+
+// SweepIdle queues an idle flush for scopes quiet since before now-STMIdleFlushAfter.
+// Returns how many it queued.
+func (w *Worker) SweepIdle(ctx context.Context, now time.Time) (int, error) {
+	scopes, err := w.redis.HGetAll(STMActivityKey)
+	if err != nil {
+		return 0, err
+	}
+	cutoff := now.Add(-STMIdleFlushAfter()).Unix()
+	queued := 0
+	for field, last := range scopes {
+		seconds, err := strconv.ParseInt(last, 10, 64)
+		if err != nil || seconds > cutoff {
+			continue
+		}
+		tenantID, userID, agentID, ok := ParseSTMScopeField(field)
+		if !ok {
+			_ = w.redis.HDel(STMActivityKey, field)
+			continue
+		}
+		if err := enqueueTask(w.redis, TaskTypeIdleFlush, tenantID, userID, agentID); err != nil {
+			return queued, err
+		}
+		queued++
+	}
+	return queued, nil
+}
+
+// processIdleFlush summarises everything left in a quiet scope's STM, so it is in
+// mid-term memory before STM expires.
+func (w *Worker) processIdleFlush(ctx context.Context, task *models.CognitiveChainCheckTask) error {
+	key := GenerateSTMKey(task.TenantID, task.UserID, task.AgentID)
+	field := STMScopeField(task.TenantID, task.UserID, task.AgentID)
+	raw, err := w.redis.LRange(key, 0, -1)
+	if err != nil {
+		return fmt.Errorf("failed to read STM for idle flush: %w", err)
+	}
+	if len(raw) == 0 {
+		return w.redis.HDel(STMActivityKey, field)
+	}
+	events := make([]models.CognitiveEvent, 0, len(raw))
+	newest := time.Time{}
+	for i := len(raw) - 1; i >= 0; i-- { // oldest first
+		var stmEvt STMEvent
+		if err := json.Unmarshal([]byte(raw[i]), &stmEvt); err != nil {
+			continue
+		}
+		if stmEvt.Timestamp.After(newest) {
+			newest = stmEvt.Timestamp
+		}
+		events = append(events, cognitiveEventFromSTM(stmEvt))
+	}
+	if time.Since(newest) < STMIdleFlushAfter() {
+		return nil // it became active again: the normal path handles it
+	}
+	if len(events) > 0 {
+		if err := w.stmStore.ProcessMTMFormation(ctx, task.TenantID, task.UserID, task.AgentID, events); err != nil {
+			return fmt.Errorf("idle MTM formation failed: %w", err)
+		}
+	}
+	w.removeFormedEntries(key, raw)
+	if remaining, err := w.redis.LLen(key); err == nil && remaining == 0 {
+		return w.redis.HDel(STMActivityKey, field)
+	}
+	return nil
+}
+
+// removeFormedEntries removes the STM entries a chain was formed from. It removes
+// them by value rather than trimming by index: the list changes while a formation
+// runs (new events are pushed, a deleted session's entries are removed), so the
+// positions read before the formation no longer identify the same entries.
+func (w *Worker) removeFormedEntries(key string, raws []string) {
+	for _, raw := range raws {
+		// Formed entries are the oldest, so search from the tail.
+		if err := w.redis.LRem(key, -1, raw); err != nil {
+			log.Printf("WARNING: Failed to remove a formed event from STM %s: %v", key, err)
+		}
+	}
+}
+
+// cognitiveEventFromSTM converts a cached STM event into the cognitive event that
+// chain formation persists. It keeps the event's session and, when the event was
+// stored durably on arrival, the ID of that cognitive_events document.
+func cognitiveEventFromSTM(e STMEvent) models.CognitiveEvent {
+	meta := make(map[string]interface{}, len(e.Metadata))
+	for k, v := range e.Metadata {
+		meta[k] = v
+	}
+	sessionID := e.SessionID
+	if sessionID == "" {
+		// Entries cached before sessionId existed carry the session as ChainID.
+		sessionID = e.ChainID
+	}
+	evt := models.CognitiveEvent{
+		SessionID:    sessionID,
+		Role:         e.Role,
+		Type:         e.Type,
+		Content:      e.Content,
+		BlobURI:      e.BlobURI,
+		BlobMimeType: e.BlobMimeType,
+		CreatedAt:    e.Timestamp,
+		Metadata:     meta,
+	}
+	if e.EventID != "" {
+		if id, err := primitive.ObjectIDFromHex(e.EventID); err == nil {
+			evt.ID = id
+		}
+	}
+	return evt
 }
 
 // truncateLog truncates a string for log output

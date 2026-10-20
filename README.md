@@ -237,13 +237,17 @@ Athena MemOS is a multi-tenant **memory service** for AI agents, implementing a 
 
 **Storage:** Redis  
 **Key pattern:** `stm:{tenantId}:{userId}:{agentId}`  
-**TTL:** `STM_CACHE_TTL` hours (default: 3600 seconds)  
+**TTL:** `STM_CACHE_TTL` hours (default: 2)  
 
-STM is the agent's immediate working memory. Every event is `LPUSH`'d into a Redis list (newest first) and trimmed to a sliding window of `STM_CACHE_MAX_TURNS` events. The list is also written to MongoDB (`cognitive_events`, `status="in_stm"`) for durability.
+STM is the agent's immediate working memory. Every event is `LPUSH`'d into a Redis list (newest first); `GetContext` returns the newest `STM_CACHE_MAX_TURNS` of them. The list is also written to MongoDB (`cognitive_events`, `status="in_stm"`) for durability.
+
+Events leave STM only when a chain is formed from them, so nothing is dropped before it is summarised. The list is bounded by `STM_MAX_EVENTS` (default 200) in case the workers fall behind; events dropped at that bound are logged as errors and counted in `stm_events_evicted_unsummarised_total`.
 
 **Event coalescing:** Automation events sharing the same `workflow_id` or `execution_id` in `metadata` are deduplicated so repeated action-observation pairs don't pollute the context window.
 
-**Automatic flush:** When the STM list grows to `STM_MAX_EVENTS_BEFORE_FLUSH` (default: 20), the older half is force-promoted to MTM even without a topic change.
+**Automatic flush:** When the STM list grows to `STM_MAX_EVENTS_BEFORE_FLUSH` (default: 20), the older half is force-promoted to MTM even without a topic change. `STM_MAX_EVENTS` must be larger; the server refuses to start otherwise.
+
+**Idle flush:** A scope that receives no events for `STM_IDLE_FLUSH_MINUTES` (default 30) has its remaining STM summarised, so a short session is in MTM before its STM expires. `STM_IDLE_FLUSH_MINUTES` must be shorter than `STM_CACHE_TTL`.
 
 ---
 
@@ -374,7 +378,8 @@ Worker goroutine (×MEMORY_OS_NUM_WORKERS, default 2):
      d. LLM: ExtractEntities → []string of named entities
      e. QualityValidator.ValidateSegment → score + ShouldStore bool
         (if rejected → discard, log, return)
-     f. MongoDB UPDATE cognitive_events SET status="in_mtm"
+     f. MongoDB UPDATE cognitive_events (by _id) SET status="in_mtm", chainId
+        (each event keeps its sessionId; the chain records sessionIds)
      g. SessionManager.ProcessNewChain:
         - Milvus similarity search for existing chains ≥ MEMORY_OS_MTM_MERGE_THRESHOLD (0.85)
         - MERGE or INSERT cognitive_chains in MongoDB
@@ -458,8 +463,9 @@ All endpoints are available as both gRPC (port 9090) and REST HTTP (port 8080) v
 | Method | gRPC | REST | Description |
 |---|---|---|---|
 | Create session | `CreateSession` | `POST /sessions` | Creates a new session anchor in MongoDB. Returns `session_id`. |
-| Get session | `GetSession` | `GET /sessions/{session_id}` | Returns session metadata. |
-| Delete session | `DeleteSession` | `DELETE /sessions/{session_id}` | Deletes session record. |
+| Get session | `GetSession` | `GET /sessions/{session_id}` | Returns the session's tenant, user, agent, status, metadata, event count and last activity. |
+| Erase memory | `EraseMemory` | `POST /memory/erase` | Erases a user, an agent of a user, or a whole tenant: sessions, STM, events, blobs, chains, vectors and LTM graph. Safe to retry. |
+| Delete session | `DeleteSession` | `DELETE /sessions/{session_id}` | Erases the session's STM entries, events, blobs, and the MTM chains and vectors formed from them (a chain shared with other sessions is removed whole), and LTM graph entries no remaining chain supports. Safe to retry. |
 
 ### Memory Operations
 
@@ -474,9 +480,9 @@ All endpoints are available as both gRPC (port 9090) and REST HTTP (port 8080) v
 
 | Method | gRPC | REST | Description |
 |---|---|---|---|
-| Analyze topics | `AnalyzeTopics` | `GET /sessions/{session_id}/analysis/topics` | LLM topic analysis of recent STM events. |
-| Get heat metrics | `GetHeatMetrics` | `GET /sessions/{session_id}/analysis/heat` | Returns full Ebbinghaus heat score breakdown for a session. |
-| Get segments | `GetSegments` | `GET /sessions/{session_id}/segments` | Returns paginated list of MTM cognitive chains for a session. |
+| Analyze topics | `AnalyzeTopics` | `GET /sessions/{session_id}/analysis/topics` | LLM topic analysis of the session's latest 200 stored events. |
+| Get heat metrics | `GetHeatMetrics` | `GET /sessions/{session_id}/analysis/heat` | Mean and maximum current heat of the session's segments, with the mean Ebbinghaus factors. |
+| Get segments | `GetSegments` | `GET /sessions/{session_id}/segments` | MTM chains summarised from the session's events, newest first (`limit` default 10, max 100). |
 
 ### Admin
 
@@ -557,8 +563,11 @@ All three modes are disabled by default and can be independently enabled:
 | `REDIS_POOL_SIZE` | `10` | Connection pool size |
 | `REDIS_POOL_TIMEOUT` | `5s` | Pool checkout timeout |
 | `CACHE_TTL` | `3600` | Default TTL for STM entries (seconds) |
-| `STM_CACHE_MAX_TURNS` | `10` | Max events in STM sliding window |
-| `STM_CACHE_TTL` | `3600` | STM Redis key TTL (seconds) |
+| `STM_CACHE_MAX_TURNS` | `10` | Newest STM events returned as context by `GetContext` |
+| `STM_CACHE_TTL` | `2` | STM Redis key TTL (hours) |
+| `STM_MAX_EVENTS` | `200` | Most events a scope's STM keeps while waiting to be summarised; must exceed `STM_MAX_EVENTS_BEFORE_FLUSH` |
+| `STM_MAX_EVENTS_BEFORE_FLUSH` | `20` | STM size at which the older half is summarised without a topic change |
+| `STM_IDLE_FLUSH_MINUTES` | `30` | Quiet time after which a scope's remaining STM is summarised; must be shorter than `STM_CACHE_TTL` |
 | `STM_TASK_TIMEOUT` | `300` | Worker task execution timeout (seconds) |
 
 ### MongoDB (MTM)

@@ -27,6 +27,7 @@ type CognitiveEvent struct {
 	UserID       string                 `json:"userId" bson:"userId"`
 	AgentID      string                 `json:"agentId" bson:"agentId"`
 	ChainID      string                 `json:"chainId" bson:"chainId"`
+	SessionID    string                 `json:"sessionId,omitempty" bson:"sessionId,omitempty"` // Session it was stored through; unlike ChainID, unchanged when summarised
 	EventIndex   int                    `json:"eventIndex" bson:"eventIndex"`
 	Role         string                 `json:"role"` // "user", "agent"
 	Type         STMEventType           `json:"type"` // "message", "thought", "action", "observation"
@@ -37,6 +38,9 @@ type CognitiveEvent struct {
 	Metadata     map[string]interface{} `json:"metadata,omitempty" bson:"metadata,omitempty"`
 	CreatedAt    time.Time              `json:"createdAt" bson:"createdAt"`
 }
+
+// ChainKindSession marks the cognitive_chains record that represents a session.
+const ChainKindSession = "session"
 
 // CognitiveChain represents metadata about a cognitive chain.
 type CognitiveChain struct {
@@ -63,6 +67,12 @@ type CognitiveChain struct {
 	// --- END NEW FIELDS ---
 	// Service-level metadata (e.g. origin_service, context_type) set at session creation.
 	Metadata map[string]string `json:"metadata" bson:"metadata,omitempty"`
+	// Kind is "session" for the record CreateSession writes; empty for MTM chains.
+	Kind string `json:"kind,omitempty" bson:"kind,omitempty"`
+	// SessionIDs lists the sessions whose events were summarised into the chain.
+	SessionIDs []string `json:"sessionIds,omitempty" bson:"sessionIds,omitempty"`
+	// QualityScore is the score the quality gate gave the chain when it was formed.
+	QualityScore float64 `json:"qualityScore,omitempty" bson:"qualityScore,omitempty"`
 	// Transient — populated on vector search, not persisted to MongoDB.
 	SimilarityScore float32 `json:"similarityScore,omitempty" bson:"-"`
 }

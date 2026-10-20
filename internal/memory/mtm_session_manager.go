@@ -161,7 +161,7 @@ func (sm *SessionManager) findVectorCandidates(ctx context.Context, newChain *mo
 
 	// 2. Search for similar chains using STMStore's SearchSimilarChains method
 	// which handles both vector search and MongoDB retrieval
-	similarChains, err := sm.stmStore.SearchSimilarChains(ctx, newChain.TenantID, newChain.UserID, newChain.AgentID, embedding.Vector, sm.config.VectorSearchLimit, nil)
+	similarChains, err := sm.stmStore.SearchSimilarChains(ctx, newChain.TenantID, newChain.UserID, newChain.AgentID, embedding.Vector, sm.config.VectorSearchLimit, 0, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to perform vector search for similar chains: %w", err)
 	}
@@ -364,6 +364,10 @@ func (sm *SessionManager) mergeChains(ctx context.Context, targetChain *models.C
 			"entities":    mergedEntities,
 			"updatedAt":   now,
 		},
+	}
+
+	if len(newChain.SessionIDs) > 0 {
+		update["$addToSet"] = bson.M{"sessionIds": bson.M{"$each": newChain.SessionIDs}}
 	}
 
 	filter := bson.M{"chainId": targetChain.ChainID}

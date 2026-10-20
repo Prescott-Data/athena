@@ -17,13 +17,13 @@ curl -X POST http://localhost:8080/api/v1/sessions/$SESSION/context/search \
 |---|---|---|
 | `query` | yes | Natural-language question or phrase; empty returns `InvalidArgument` |
 | `limit` | no | Max results |
-| `similarity_threshold` | no | Accepted but **not enforced** <span class="nx-badge nx-badge-beta">Planned</span>; filter client-side for now |
+| `similarity_threshold` | no | Minimum cosine similarity for chain results (for example `0.5`); unset returns all |
 | `filter` | no | Metadata filter map |
 
 ## What it searches
 
 1. The query is embedded with the configured [embedding model](llm-providers.md).
-2. Milvus returns the nearest **cognitive chains**, scored by similarity.
+2. The user's active **cognitive chains** (filtered by `filter` first) are scored exactly against the query: their vectors are read from Milvus and compared by cosine similarity (−1 to 1, higher is closer). Results are ordered most similar first, and chains below `similarity_threshold` are dropped. Embeddings are normalised to unit length, so scores mean the same whichever embedding provider is configured.
 3. Entities in the top chains seed a **graph traversal**: 1–2 hops through `MemoryEdges`, `confidence >= 0.5`, sorted by `weight` then `heat_score`, enriching results with related facts ([details](../concepts/promotion-and-knowledge-graph.md#retrieval)).
 
 Results carry the chain summary, topic, similarity score, and any graph enrichment.

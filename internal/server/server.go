@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"log/slog"
@@ -48,6 +49,8 @@ type MemoryServer struct {
 	persistCognitiveEvent                func(context.Context, *models.CognitiveEvent) (primitive.ObjectID, error)
 	// ltmStatus holds "" when the LTM graph is available, else why it is not.
 	ltmStatus atomic.Value
+	// sessions serves the session lifecycle endpoints; nil means the STM store.
+	sessions sessionStore
 	// getIDsFromSessionFunc allows mocking the DB call in tests
 	getIDsFromSessionFunc func(s *MemoryServer, ctx context.Context, sessionID string) (string, string, string, error)
 }
@@ -202,6 +205,7 @@ func stmEventToCognitiveEvent(tenantID, userID, agentID, chainID string, event m
 		metadata[k] = v
 	}
 	return &models.CognitiveEvent{
+		SessionID:    chainID,
 		TenantID:     tenantID,
 		UserID:       userID,
 		AgentID:      agentID,
@@ -223,6 +227,9 @@ func (s *MemoryServer) StoreInteraction(ctx context.Context, req *gen.StoreInter
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "session not found or invalid: %v", err)
 	}
+	if err := s.checkWritable(tenantID, userID, agentID, sessionID); err != nil {
+		return nil, err
+	}
 
 	// Create and process the user event
 	userEvent := memory.STMEvent{
@@ -231,19 +238,14 @@ func (s *MemoryServer) StoreInteraction(ctx context.Context, req *gen.StoreInter
 		Content:   req.UserMessage,
 		Timestamp: time.Now(),
 		ChainID:   sessionID,
+		SessionID: sessionID,
 	}
 
-	// Always save the user event to the STM cache
+	// Persist user event to MongoDB immediately for durability (P5), then cache it in
+	// STM with a reference to that copy so chain formation promotes it in place.
+	s.persistForSTM(ctx, tenantID, userID, agentID, sessionID, &userEvent)
 	if err := s.stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, userEvent); err != nil {
 		slog.Error("Failed to add user event to STM cache", slog.String("error", err.Error()))
-	}
-
-	// Persist user event to MongoDB immediately for durability (P5)
-	cogEvent := stmEventToCognitiveEvent(tenantID, userID, agentID, sessionID, userEvent)
-	if s.stmStore != nil {
-		if _, err := s.stmStore.StoreCognitiveEvent(ctx, cogEvent); err != nil {
-			slog.Warn("Failed to persist user event to MongoDB", slog.String("session_id", sessionID), slog.String("error", err.Error()))
-		}
 	}
 
 	// Conditionally trigger the worker only for user messages
@@ -292,17 +294,11 @@ func (s *MemoryServer) StoreInteraction(ctx context.Context, req *gen.StoreInter
 			Content:   req.AgentResponse,
 			Timestamp: time.Now(),
 			ChainID:   sessionID,
+			SessionID: sessionID,
 		}
+		s.persistForSTM(ctx, tenantID, userID, agentID, sessionID, &agentEvent)
 		if err := s.stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, agentEvent); err != nil {
 			slog.Error("Failed to add agent event to STM cache", slog.String("error", err.Error()))
-		}
-
-		// Persist agent event to MongoDB immediately for durability (P5)
-		agentCogEvent := stmEventToCognitiveEvent(tenantID, userID, agentID, sessionID, agentEvent)
-		if s.stmStore != nil {
-			if _, err := s.stmStore.StoreCognitiveEvent(ctx, agentCogEvent); err != nil {
-				slog.Warn("Failed to persist agent event to MongoDB", slog.String("session_id", sessionID), slog.String("error", err.Error()))
-			}
 		}
 	}
 
@@ -322,6 +318,9 @@ func (s *MemoryServer) StoreEvent(ctx context.Context, req *gen.StoreEventReques
 	tenantID, userID, agentID, err := s.getIDsFromSessionFunc(s, ctx, sessionID)
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "session not found or invalid: %v", err)
+	}
+	if err := s.checkWritable(tenantID, userID, agentID, sessionID); err != nil {
+		return nil, err
 	}
 
 	eventType := models.STMEventType(req.Type)
@@ -370,11 +369,8 @@ func (s *MemoryServer) StoreEvent(ctx context.Context, req *gen.StoreEventReques
 		BlobMimeType: blobMimeType,
 		Timestamp:    time.Now(),
 		Metadata:     req.Metadata,
-	}
-
-	if err := s.stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, event); err != nil {
-		slog.Error("Failed to add event to STM cache", slog.String("error", err.Error()))
-		return nil, status.Errorf(codes.Internal, "failed to store event: %v", err)
+		ChainID:      sessionID,
+		SessionID:    sessionID,
 	}
 
 	// Persist event to MongoDB immediately for durability (P5)
@@ -388,6 +384,12 @@ func (s *MemoryServer) StoreEvent(ctx context.Context, req *gen.StoreEventReques
 		slog.Error("Failed to persist event to MongoDB", slog.String("session_id", sessionID), slog.String("error", err.Error()))
 		return nil, status.Errorf(codes.Internal, "failed to persist event: %v", err)
 	}
+	event.EventID = eventID.Hex()
+
+	if err := s.stmCache.AddSTMEvent(ctx, tenantID, userID, agentID, event); err != nil {
+		slog.Error("Failed to add event to STM cache", slog.String("error", err.Error()))
+		return nil, status.Errorf(codes.Internal, "failed to store event: %v", err)
+	}
 
 	s.enqueueChainCheck(tenantID, userID, agentID)
 
@@ -397,6 +399,41 @@ func (s *MemoryServer) StoreEvent(ctx context.Context, req *gen.StoreEventReques
 		Success: true,
 		EventId: eventID.Hex(),
 	}, nil
+}
+
+// persistForSTM writes the durable copy of an event and records its ID on the STM
+// event. A failed write is logged and the event is still cached; chain formation
+// then inserts the event itself.
+func (s *MemoryServer) persistForSTM(ctx context.Context, tenantID, userID, agentID, sessionID string, event *memory.STMEvent) {
+	persist := s.persistCognitiveEvent
+	if persist == nil {
+		if s.stmStore == nil {
+			return
+		}
+		persist = s.stmStore.StoreCognitiveEvent
+	}
+	id, err := persist(ctx, stmEventToCognitiveEvent(tenantID, userID, agentID, sessionID, *event))
+	if err != nil {
+		slog.Warn("Failed to persist event to MongoDB", slog.String("session_id", sessionID), slog.String("role", event.Role), slog.String("error", err.Error()))
+		return
+	}
+	event.EventID = id.Hex()
+}
+
+// checkWritable refuses writes to memory that is being erased (or a session that
+// has been). Without an STM store, as in some tests, there is nothing to check.
+func (s *MemoryServer) checkWritable(tenantID, userID, agentID, sessionID string) error {
+	if s.stmStore == nil {
+		return nil
+	}
+	err := s.stmStore.CheckWritable(tenantID, userID, agentID, sessionID)
+	if errors.Is(err, memory.ErrScopeErasing) {
+		return status.Error(codes.FailedPrecondition, err.Error())
+	}
+	if err != nil {
+		return status.Errorf(codes.Unavailable, "%v", err)
+	}
+	return nil
 }
 
 // enqueueChainCheck pushes a cognitive chain check task to the worker queue.
@@ -494,7 +531,7 @@ func (s *MemoryServer) GetContext(ctx context.Context, req *gen.GetContextReques
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to create query embedding: %v", err)
 		}
-		chains, err := s.stmStore.SearchSimilarChains(ctx, tenantID, userID, agentID, queryEmbedding.Vector, limit, nil)
+		chains, err := s.stmStore.SearchSimilarChains(ctx, tenantID, userID, agentID, queryEmbedding.Vector, limit, 0, nil)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to search similar chains: %v", err)
 		}
@@ -571,6 +608,9 @@ func (s *MemoryServer) CreateSession(ctx context.Context, req *gen.CreateSession
 	if agentID == "" {
 		agentID = "default"
 	}
+	if err := s.checkWritable(tenantID, userID, agentID, ""); err != nil {
+		return nil, err
+	}
 
 	sessionID := uuid.New().String()
 	now := time.Now()
@@ -581,6 +621,7 @@ func (s *MemoryServer) CreateSession(ctx context.Context, req *gen.CreateSession
 		UserID:      userID,
 		AgentID:     agentID,
 		ChainID:     sessionID,
+		Kind:        models.ChainKindSession,
 		Topic:       "",
 		Summary:     "",
 		StartedAt:   now,
@@ -629,7 +670,7 @@ func (s *MemoryServer) SearchMemory(ctx context.Context, req *gen.SearchMemoryRe
 
 	// Search for similar chains using the STM store's vector search.
 	// Pass empty agentID so Milvus searches across all agents for this user (user-scoped, not session-scoped).
-	chains, err := s.stmStore.SearchSimilarChains(ctx, tenantID, userID, "", queryEmbedding.Vector, limit, req.Filter)
+	chains, err := s.stmStore.SearchSimilarChains(ctx, tenantID, userID, "", queryEmbedding.Vector, limit, req.SimilarityThreshold, req.Filter)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to search similar chains: %v", err)
 	}
