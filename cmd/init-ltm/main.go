@@ -36,7 +36,7 @@ func main() {
 	}
 
 	log.Printf("Initializing ArangoDB LTM Graph at %s...", dbURL)
-	err := memory.InitializeLTMGraph(context.Background(), dbURL, user, pass)
+	err := memory.InitializeLTMGraph(context.Background(), dbURL, user, pass, os.Getenv("ARANGODB_DATABASE"))
 	if err != nil {
 		log.Fatalf("Failed to initialize LTM graph: %v", err)
 	}

@@ -46,15 +46,9 @@ Wait 10–15 seconds for the databases to fully boot. ArangoDB and Milvus take t
 
 ---
 
-## 4. Initialize the Graph Schema
+## 4. The Graph Schema
 
-Before the server can run, the ArangoDB `athena_ltm` database and its collections must be scaffolded.
-
-```bash
-go run cmd/init-ltm/main.go
-```
-
-If you see connections refused, ArangoDB is still booting. Wait 10 seconds and try again.
+The server creates the ArangoDB `athena_ltm` database and its collections on startup (it waits up to 90 seconds for ArangoDB). `go run cmd/init-ltm/main.go` does the same ahead of time if you prefer.
 
 ---
 

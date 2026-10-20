@@ -47,6 +47,8 @@ type MemoryServer struct {
 	promoter                             *memory.Promoter
 	ltmReader                            *memory.LTMReader
 	persistCognitiveEvent                func(context.Context, *models.CognitiveEvent) (primitive.ObjectID, error)
+	// ltmStatus holds "" when the LTM graph is available, else why it is not.
+	ltmStatus atomic.Value
 	// llmStatus is the result of the latest LLM check ("healthy" or "unhealthy: ...").
 	llmStatus atomic.Value
 	// checkLLM runs the LLM check; nil means the STM store's.
@@ -60,6 +62,11 @@ type MemoryServer struct {
 // SetPromoter injects the background Promoter so it can be manually triggered by the API
 func (s *MemoryServer) SetPromoter(p *memory.Promoter) {
 	s.promoter = p
+}
+
+// SetLTMStatus records why the LTM graph is unavailable; HealthCheck reports it.
+func (s *MemoryServer) SetLTMStatus(status string) {
+	s.ltmStatus.Store(status)
 }
 
 // SetLTMReader injects the LTMReader so SearchMemory can include graph results from ArangoDB
@@ -97,6 +104,13 @@ func (s *MemoryServer) HealthCheck(ctx context.Context, req *gen.HealthCheckRequ
 		}
 	} else {
 		deps["mongodb"] = "not_configured"
+	}
+
+	if st, _ := s.ltmStatus.Load().(string); st != "" {
+		deps["ltm"] = st
+		overallStatus = "degraded"
+	} else if s.ltmReader != nil {
+		deps["ltm"] = "healthy"
 	}
 
 	switch st, _ := s.llmStatus.Load().(string); {

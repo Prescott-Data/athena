@@ -9,9 +9,13 @@ import (
 	"github.com/arangodb/go-driver/http"
 )
 
+// DefaultLTMDatabase is the LTM database name when ARANGODB_DATABASE is unset.
+const DefaultLTMDatabase = "athena_ltm"
+
 // InitializeLTMGraph connects to ArangoDB, creates the database if it doesn't exist,
-// and ensures all required document and edge collections are present.
-func InitializeLTMGraph(ctx context.Context, dbURL, user, pass string) error {
+// and ensures all required document and edge collections are present. It is safe to
+// run repeatedly. An empty dbName means DefaultLTMDatabase.
+func InitializeLTMGraph(ctx context.Context, dbURL, user, pass, dbName string) error {
 	// 1. Connect to ArangoDB
 	conn, err := http.NewConnection(http.ConnectionConfig{
 		Endpoints: []string{dbURL},
@@ -29,7 +33,9 @@ func InitializeLTMGraph(ctx context.Context, dbURL, user, pass string) error {
 	}
 
 	// 2. Check if database exists, if not, create it
-	dbName := "athena_ltm"
+	if dbName == "" {
+		dbName = DefaultLTMDatabase
+	}
 	exists, err := client.DatabaseExists(ctx, dbName)
 	if err != nil {
 		return fmt.Errorf("failed to check if database exists: %w", err)

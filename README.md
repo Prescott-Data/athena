@@ -72,8 +72,7 @@ ARANGODB_PASSWORD=athena_dev   # matches docker-compose.local.yml
 
 ```bash
 docker compose -f docker-compose.local.yml up -d   # Redis, MongoDB, Milvus, etcd, MinIO, ArangoDB
-go run cmd/init-ltm/main.go                        # create the athena_ltm graph schema
-go run cmd/memory-server/main.go                   # REST :8080 · gRPC :9090 · metrics :8080/metrics
+go run cmd/memory-server/main.go                   # REST :8080 · gRPC :9090 · metrics :8080/metrics (creates the LTM graph on first start)
 ```
 
 > Embedding dimensions differ per provider: Azure OpenAI is 1536, Gemini is 768. The Milvus collection is created with `EMBEDDING_DIMENSIONS`, so switching providers later means dropping and recreating it.
@@ -596,7 +595,8 @@ All three modes are disabled by default and can be independently enabled:
 | `ARANGODB_URL` | `http://localhost:8529` | ArangoDB HTTP endpoint |
 | `ARANGODB_USER` | `root` | ArangoDB username |
 | `ARANGODB_PASSWORD` | Required | ArangoDB password |
-| `ARANGODB_DATABASE` | `athena_ltm` | Target database name |
+| `ARANGODB_DATABASE` | `athena_ltm` | Target database name (created at startup if missing) |
+| `LTM_INIT_TIMEOUT_SEC` | `90` | How long startup waits for ArangoDB to create the LTM schema |
 
 ### LLM & Embeddings
 
@@ -857,13 +857,13 @@ Starts:
 - **ArangoDB** — port 8529
 - **MinIO** — ports 9000 (API) / 9001 (console)
 
-### Initialize ArangoDB Collections
+### ArangoDB Collections
+
+The server creates the `ARANGODB_DATABASE` database (default `athena_ltm`) and its vertex and edge collections at startup if they are missing, retrying for up to `LTM_INIT_TIMEOUT_SEC` (90) while ArangoDB starts. If it cannot, long-term memory is disabled and `/api/v1/health` reports `"ltm": "unavailable: <reason>"`. To provision the schema separately (for example from a deployment job), run:
 
 ```bash
 go run cmd/init-ltm/main.go
 ```
-
-Creates the `athena_ltm` database and all vertex/edge collections with required indexes.
 
 ### Run the Server
 
