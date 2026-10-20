@@ -682,6 +682,7 @@ func (s *MemoryServer) CreateSession(ctx context.Context, req *gen.CreateSession
 
 	return &gen.CreateSessionResponse{
 		SessionId: sessionID,
+		CreatedAt: timestamppb.New(now),
 	}, nil
 }
 
