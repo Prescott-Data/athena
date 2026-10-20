@@ -379,7 +379,8 @@ Worker goroutine (×MEMORY_OS_NUM_WORKERS, default 2):
      d. LLM: ExtractEntities → []string of named entities
      e. QualityValidator.ValidateSegment → score + ShouldStore bool
         (if rejected → discard, log, return)
-     f. MongoDB UPDATE cognitive_events SET status="in_mtm"
+     f. MongoDB UPDATE cognitive_events (by _id) SET status="in_mtm", chainId
+        (each event keeps its sessionId; the chain records sessionIds)
      g. SessionManager.ProcessNewChain:
         - Milvus similarity search for existing chains ≥ MEMORY_OS_MTM_MERGE_THRESHOLD (0.85)
         - MERGE or INSERT cognitive_chains in MongoDB
@@ -463,8 +464,9 @@ All endpoints are available as both gRPC (port 9090) and REST HTTP (port 8080) v
 | Method | gRPC | REST | Description |
 |---|---|---|---|
 | Create session | `CreateSession` | `POST /sessions` | Creates a new session anchor in MongoDB. Returns `session_id`. |
-| Get session | `GetSession` | `GET /sessions/{session_id}` | Returns session metadata. |
-| Delete session | `DeleteSession` | `DELETE /sessions/{session_id}` | Deletes session record. |
+| Get session | `GetSession` | `GET /sessions/{session_id}` | Returns the session's tenant, user, agent, status, metadata, event count and last activity. |
+| Erase memory | `EraseMemory` | `POST /memory/erase` | Erases a user, an agent of a user, or a whole tenant: sessions, STM, events, blobs, chains, vectors and LTM graph. Safe to retry. |
+| Delete session | `DeleteSession` | `DELETE /sessions/{session_id}` | Erases the session's STM entries, events, blobs, and the MTM chains and vectors formed from them (a chain shared with other sessions is removed whole), and LTM graph entries no remaining chain supports. Safe to retry. |
 
 ### Memory Operations
 
@@ -479,9 +481,9 @@ All endpoints are available as both gRPC (port 9090) and REST HTTP (port 8080) v
 
 | Method | gRPC | REST | Description |
 |---|---|---|---|
-| Analyze topics | `AnalyzeTopics` | `GET /sessions/{session_id}/analysis/topics` | LLM topic analysis of recent STM events. |
-| Get heat metrics | `GetHeatMetrics` | `GET /sessions/{session_id}/analysis/heat` | Returns full Ebbinghaus heat score breakdown for a session. |
-| Get segments | `GetSegments` | `GET /sessions/{session_id}/segments` | Returns paginated list of MTM cognitive chains for a session. |
+| Analyze topics | `AnalyzeTopics` | `GET /sessions/{session_id}/analysis/topics` | LLM topic analysis of the session's latest 200 stored events. |
+| Get heat metrics | `GetHeatMetrics` | `GET /sessions/{session_id}/analysis/heat` | Mean and maximum current heat of the session's segments, with the mean Ebbinghaus factors. |
+| Get segments | `GetSegments` | `GET /sessions/{session_id}/segments` | MTM chains summarised from the session's events, newest first (`limit` default 10, max 100). |
 
 ### Admin
 

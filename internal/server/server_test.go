@@ -136,7 +136,10 @@ func TestStoreEventReturnsDurableEventID(t *testing.T) {
 	server.getIDsFromSessionFunc = func(*MemoryServer, context.Context, string) (string, string, string, error) {
 		return "test-tenant", "test-user", "test-agent", nil
 	}
-	mockCache.On("AddSTMEvent", ctx, "test-tenant", "test-user", "test-agent", mock.AnythingOfType("memory.STMEvent")).Return(nil).Once()
+	cachedWithReference := mock.MatchedBy(func(e memory.STMEvent) bool {
+		return e.EventID == eventID.Hex() && e.SessionID == "test-session"
+	})
+	mockCache.On("AddSTMEvent", ctx, "test-tenant", "test-user", "test-agent", cachedWithReference).Return(nil).Once()
 	scopedQueueName := memory.GenerateScopedQueueName("test-tenant", "test-user", "test-agent")
 	mockRedis.On("LPush", scopedQueueName, mock.Anything).Return(nil).Once()
 	mockRedis.On("LPush", memory.GlobalWorkQueueName, []interface{}{scopedQueueName}).Return(nil).Once()
@@ -167,7 +170,6 @@ func TestStoreEventFailsWhenDurablePersistenceFails(t *testing.T) {
 	server.getIDsFromSessionFunc = func(*MemoryServer, context.Context, string) (string, string, string, error) {
 		return "test-tenant", "test-user", "test-agent", nil
 	}
-	mockCache.On("AddSTMEvent", ctx, "test-tenant", "test-user", "test-agent", mock.AnythingOfType("memory.STMEvent")).Return(nil).Once()
 
 	response, err := server.StoreEvent(ctx, &gen.StoreEventRequest{
 		SessionId: "test-session",
@@ -179,5 +181,6 @@ func TestStoreEventFailsWhenDurablePersistenceFails(t *testing.T) {
 	assert.Nil(t, response)
 	assert.Equal(t, codes.Internal, status.Code(err))
 	assert.Contains(t, err.Error(), "failed to persist event")
-	mockCache.AssertExpectations(t)
+	// A failed request is retried by the client, so nothing may be cached.
+	mockCache.AssertNotCalled(t, "AddSTMEvent", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 }

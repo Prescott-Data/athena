@@ -15,6 +15,8 @@ type Interface interface {
 	LRange(key string, start, stop int64) ([]string, error)
 	LPush(key string, values ...interface{}) error
 	LTrim(key string, start, stop int64) error
+	// LRem removes up to count occurrences of value from a list (0 removes all).
+	LRem(key string, count int64, value interface{}) error
 	LLen(key string) (int64, error)
 	Expire(key string, expiration time.Duration) error
 	SetEX(key string, value string, expiration time.Duration) error

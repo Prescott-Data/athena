@@ -10,6 +10,7 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
 )
 
 // AzureBlobStore implements BlobStore for Azure Blob Storage.
@@ -93,6 +94,9 @@ func (s *AzureBlobStore) Delete(ctx context.Context, uri string) error {
 
 	_, err = s.client.DeleteBlob(ctx, container, blobName, nil)
 	if err != nil {
+		if bloberror.HasCode(err, bloberror.BlobNotFound) {
+			return nil
+		}
 		return fmt.Errorf("azure delete failed for %s: %w", uri, err)
 	}
 

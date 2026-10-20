@@ -175,6 +175,11 @@ func (r *RedisClient) LPush(key string, values ...interface{}) error {
 	return r.client.LPush(r.ctx, key, values...).Err()
 }
 
+// LRem removes up to count occurrences of value from a list (0 removes all)
+func (r *RedisClient) LRem(key string, count int64, value interface{}) error {
+	return r.client.LRem(r.ctx, key, count, value).Err()
+}
+
 // LTrim trims a list to the specified range
 func (r *RedisClient) LTrim(key string, start, stop int64) error {
 	return r.client.LTrim(r.ctx, key, start, stop).Err()
