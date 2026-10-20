@@ -9,12 +9,14 @@ Community detection and bridge scoring run as a scheduled job outside the reques
 
 ## Manual trigger
 
+The trigger is an administrative call, so it needs a **service key** (one configured as `key=*`); a tenant key is refused with 403.
+
 ```bash
-curl -X POST http://athena:8080/api/v1/admin/analytics/trigger
+curl -X POST -H "X-API-Key: $ATHENA_SERVICE_KEY" http://athena:8080/api/v1/admin/analytics/trigger
 ```
 
 ```json
-{"success": true, "message": "Graph analytics job (Community Detection + Bridge Entities) triggered in background"}
+{"success": true, "message": "Graph analytics job (Community Detection and Bridge Entities) has been triggered in the background."}
 ```
 
 The endpoint returns immediately; the job runs asynchronously for up to ~10 minutes on large graphs. Progress and completion are visible in server logs and metrics.
@@ -39,10 +41,18 @@ spec:
           containers:
             - name: trigger
               image: curlimages/curl:latest
+              env:
+                - name: ATHENA_SERVICE_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: athena-service-key   # holds a key configured as key=*
+                      key: api-key
               args:
                 - -fsS
                 - -X
                 - POST
+                - -H
+                - "X-API-Key: $(ATHENA_SERVICE_KEY)"
                 - http://athena:8080/api/v1/admin/analytics/trigger
 ```
 

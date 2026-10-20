@@ -22,10 +22,12 @@ Every environment variable the code reads, by category. Defaults are the code's 
 | Variable | Default | Description |
 |---|---|---|
 | `MEMORY_OS_REQUIRE_API_KEY` | `false` | Enforce API-key auth |
-| `MEMORY_OS_API_KEY` | | The accepted key |
+| `MEMORY_OS_API_KEYS` | | Accepted keys: `key=tenant` (tenant key) or `key=*` (service key), comma-separated |
+| `MEMORY_OS_API_KEY` | | One service key (earlier releases); same as `MEMORY_OS_API_KEYS=<key>=*` |
 | `MEMORY_OS_REQUIRE_JWT` | `false` | Enforce JWT auth |
-| `MEMORY_OS_JWT_SECRET` | | HMAC secret for token validation |
+| `MEMORY_OS_JWT_SECRET` | | HMAC secret for token validation; required with JWT, no default |
 | `MEMORY_OS_REQUIRE_MTLS` | `false` | Enforce client certificates |
+| `MEMORY_OS_ALLOW_UNAUTHENTICATED` | `false` | Start with no authentication (development only; every tenant's memory is open) |
 
 Recipes: [Enabling Authentication](../guides/authentication.md).
 
@@ -69,6 +71,7 @@ Recipes: [Enabling Authentication](../guides/authentication.md).
 | `ARANGODB_DATABASE` | `athena_ltm` | |
 | `MEMORY_OS_LTM_ENABLED` | `true` | Master switch for the LTM tier |
 | `MEMORY_OS_LTM_KG_ENABLED` | `true` | Knowledge-graph writes on/off |
+| `LTM_INIT_TIMEOUT_SEC` | `90` | How long startup retries creating the LTM database and collections while ArangoDB starts; after that LTM is disabled and `/api/v1/health` reports it |
 | `MEMORY_OS_LTM_PERSONA_THRESHOLD` | | Persona promotion threshold (reserved) |
 
 ## LLM and embeddings
@@ -87,11 +90,15 @@ Recipes: [Enabling Authentication](../guides/authentication.md).
 | `AZURE_OPENAI_ENDPOINT` | | Azure endpoint fallback when `LLM_BASE_URL` is unset |
 | `LLM_BASE_URL` / `EMBEDDING_BASE_URL` | | Azure deployment URLs (required for `azure`); custom base URL for `openai` |
 | `LLM_TIMEOUT_SECONDS` | `10` | General per-call timeout |
-| `LLM_SUMMARY_TIMEOUT_SEC` | | Summarization call timeout |
+| `LLM_SUMMARY_TIMEOUT_SEC` | `20` | Summarization call timeout |
 | `LLM_EMBEDDING_TIMEOUT_SEC` | | Embedding call timeout |
 | `LLM_RATE_LIMIT_PER_MINUTE` | `50` | Pipeline-wide rate cap |
 | `LLM_CIRCUIT_BREAKER_THRESHOLD` | `5` | Consecutive failures to open the breaker |
 | `LLM_CIRCUIT_BREAKER_TIMEOUT_SECONDS` | `60` | Breaker open duration |
+| `LLM_REASONING_MODEL` | `false` | Start in the reasoning request shape (o-series, gpt-5 and later); otherwise detected from the first rejected request ([details](../guides/llm-providers.md#reasoning-deployments-o-series-gpt-5-and-later)) |
+| `LLM_REASONING_TOKEN_HEADROOM` | `4096` | Completion tokens added to each request for a reasoning model's hidden reasoning |
+| `LLM_REASONING_EFFORT` | | `reasoning_effort` sent to reasoning models (for example `minimal`, `low`); dropped if the deployment rejects it |
+| `LLM_CHECK_INTERVAL_MIN` | `10` | Minutes between the LLM and embedding checks reported by `/api/v1/health`; `0` checks at startup only |
 
 ## Blob storage
 

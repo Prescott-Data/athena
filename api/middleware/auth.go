@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"crypto/subtle"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -45,13 +46,35 @@ type AuthContext struct {
 	SessionID string                 `json:"session_id,omitempty"`
 	Claims    map[string]interface{} `json:"claims,omitempty"`
 	APIKey    string                 `json:"api_key,omitempty"`
+	// Service is true for a trusted backend authenticated by a service API key and
+	// no JWT: it may act for any tenant, and the tenant comes from the request.
+	Service bool `json:"service,omitempty"`
+}
+
+type authContextKey struct{}
+
+// WithAuthContext returns ctx carrying the caller's authentication context.
+func WithAuthContext(ctx context.Context, a *AuthContext) context.Context {
+	return context.WithValue(ctx, authContextKey{}, a)
+}
+
+// AuthContextFrom returns the caller's authentication context, or nil when the
+// server runs without authentication.
+func AuthContextFrom(ctx context.Context) *AuthContext {
+	a, _ := ctx.Value(authContextKey{}).(*AuthContext)
+	return a
+}
+
+// Enabled reports whether requests must authenticate.
+func (am *AuthMiddleware) Enabled() bool {
+	return am.config.RequireAPIKey || am.config.RequireJWT
 }
 
 // GinAuthMiddleware returns a Gin middleware function for authentication
 func (am *AuthMiddleware) GinAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Skip authentication for health endpoint
-		if c.Request.URL.Path == "/health" {
+		// Skip authentication for liveness and metrics scraping
+		if c.Request.URL.Path == "/health" || c.Request.URL.Path == "/metrics" {
 			c.Next()
 			return
 		}
@@ -81,48 +104,50 @@ func (am *AuthMiddleware) GinAuthMiddleware() gin.HandlerFunc {
 	}
 }
 
-// GRPCAuthMiddleware returns a gRPC middleware function for authentication
-func (am *AuthMiddleware) GRPCAuthMiddleware() func(ctx context.Context, req interface{}, info interface{}, handler interface{}) (interface{}, error) {
-	return func(ctx context.Context, req interface{}, info interface{}, handler interface{}) (interface{}, error) {
-		// For gRPC, we need to extract headers from metadata
-		// This is a simplified version - in production, you'd use grpc/metadata
-		return handler.(func(context.Context, interface{}) (interface{}, error))(ctx, req)
-	}
-}
-
 // authenticate performs the actual authentication logic
 func (am *AuthMiddleware) authenticate(req *http.Request) (*AuthContext, error) {
-	authCtx := &AuthContext{}
-
-	// 1. mTLS Certificate Verification (if enabled)
+	// mTLS Certificate Verification (if enabled)
 	if am.config.RequireMTLS {
 		if err := am.verifyMTLS(req); err != nil {
 			return nil, fmt.Errorf("mTLS verification failed: %w", err)
 		}
 	}
+	return am.AuthenticateHeaders(req.Header.Get)
+}
 
-	// 2. API Key Verification (if enabled)
+// AuthenticateHeaders authenticates a request from its headers (HTTP headers or
+// gRPC metadata) and returns the caller's identity.
+//
+// An API key is bound to one tenant, or is a service key that may act for any
+// tenant. A JWT names its tenant and user (and optionally agent); with both, the
+// JWT's tenant must be the key's.
+func (am *AuthMiddleware) AuthenticateHeaders(header func(string) string) (*AuthContext, error) {
+	authCtx := &AuthContext{}
+
+	// API Key Verification (if enabled)
 	if am.config.RequireAPIKey {
-		apiKey, err := am.extractAPIKey(req)
+		apiKey, err := extractAPIKey(header)
 		if err != nil {
 			return nil, fmt.Errorf("API key extraction failed: %w", err)
 		}
 
-		serviceID, tenantID, userID, err := am.verifyAPIKey(apiKey)
+		tenantID, err := am.verifyAPIKey(apiKey)
 		if err != nil {
 			return nil, fmt.Errorf("API key verification failed: %w", err)
 		}
 
-		authCtx.ServiceID = serviceID
-		authCtx.TenantID = tenantID
-		authCtx.UserID = userID
-		authCtx.AgentID = getStringClaim(map[string]interface{}{}, "agent_id") // Default for API keys
+		authCtx.ServiceID = "memory-os"
 		authCtx.APIKey = apiKey
+		if tenantID == config.ServiceTenant {
+			authCtx.Service = true
+		} else {
+			authCtx.TenantID = tenantID
+		}
 	}
 
-	// 3. JWT Verification (if enabled)
+	// JWT Verification (if enabled)
 	if am.config.RequireJWT {
-		token, err := am.extractJWT(req)
+		token, err := extractJWT(header)
 		if err != nil {
 			return nil, fmt.Errorf("JWT extraction failed: %w", err)
 		}
@@ -143,11 +168,15 @@ func (am *AuthMiddleware) authenticate(req *http.Request) (*AuthContext, error) 
 			return nil, fmt.Errorf("missing or invalid user_id in JWT claims")
 		}
 
+		if authCtx.TenantID != "" && authCtx.TenantID != tenantID {
+			return nil, fmt.Errorf("JWT tenant_id does not match the API key's tenant")
+		}
 		authCtx.TenantID = tenantID
 		authCtx.UserID = userID
 		authCtx.AgentID = getStringClaim(claims, "agent_id")
 		authCtx.SessionID = getStringClaim(claims, "session_id")
 		authCtx.Claims = claims
+		authCtx.Service = false
 	}
 
 	return authCtx, nil
@@ -176,10 +205,10 @@ func (am *AuthMiddleware) verifyMTLS(req *http.Request) error {
 	return nil
 }
 
-// extractAPIKey extracts the API key from the request
-func (am *AuthMiddleware) extractAPIKey(req *http.Request) (string, error) {
+// extractAPIKey extracts the API key from the request headers
+func extractAPIKey(header func(string) string) (string, error) {
 	// Check Authorization header: "Bearer <api-key>"
-	authHeader := req.Header.Get("Authorization")
+	authHeader := header("Authorization")
 	if authHeader != "" {
 		parts := strings.SplitN(authHeader, " ", 2)
 		if len(parts) == 2 && parts[0] == "Bearer" {
@@ -188,7 +217,7 @@ func (am *AuthMiddleware) extractAPIKey(req *http.Request) (string, error) {
 	}
 
 	// Check X-API-Key header
-	apiKey := req.Header.Get("X-API-Key")
+	apiKey := header("X-API-Key")
 	if apiKey != "" {
 		return apiKey, nil
 	}
@@ -196,24 +225,21 @@ func (am *AuthMiddleware) extractAPIKey(req *http.Request) (string, error) {
 	return "", fmt.Errorf("API key not found in request headers")
 }
 
-// verifyAPIKey verifies the API key and returns service ID, tenant ID, and user ID
-func (am *AuthMiddleware) verifyAPIKey(apiKey string) (string, string, string, error) {
-	// Simple validation against configured keys
-	for _, validKey := range am.config.ValidAPIKeys {
-		if apiKey == validKey {
-			// In production, you'd map API keys to tenant/user/service metadata
-			// For now, return default values - in production this would lookup from database
-			return "memory-os", "default_tenant", "service_user", nil
+// verifyAPIKey checks the API key and returns the tenant it may act for, or
+// config.ServiceTenant for a service key.
+func (am *AuthMiddleware) verifyAPIKey(apiKey string) (string, error) {
+	for key, tenant := range am.config.APIKeys {
+		if subtle.ConstantTimeCompare([]byte(apiKey), []byte(key)) == 1 {
+			return tenant, nil
 		}
 	}
-
-	return "", "", "", fmt.Errorf("invalid API key")
+	return "", fmt.Errorf("invalid API key")
 }
 
-// extractJWT extracts the JWT token from the request
-func (am *AuthMiddleware) extractJWT(req *http.Request) (string, error) {
+// extractJWT extracts the JWT token from the request headers
+func extractJWT(header func(string) string) (string, error) {
 	// Check Authorization header: "JWT <token>"
-	authHeader := req.Header.Get("Authorization")
+	authHeader := header("Authorization")
 	if authHeader != "" {
 		parts := strings.SplitN(authHeader, " ", 2)
 		if len(parts) == 2 && parts[0] == "JWT" {
@@ -222,7 +248,7 @@ func (am *AuthMiddleware) extractJWT(req *http.Request) (string, error) {
 	}
 
 	// Check X-JWT-Token header
-	jwtToken := req.Header.Get("X-JWT-Token")
+	jwtToken := header("X-JWT-Token")
 	if jwtToken != "" {
 		return jwtToken, nil
 	}

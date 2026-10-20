@@ -7,10 +7,13 @@ An LLM has no memory of its own: every generation starts from whatever you put i
 
 `GetContext` delivers both in one call. The intended rhythm is one read per turn: fetch context, build the prompt, generate, [store the exchange](storing-memory.md), repeat. This guide covers the call's two modes, what comes back, and how to assemble it into a prompt.
 
+Examples assume `SESSION` holds a session ID ([Your First Session](../getting-started/first-session.md) creates one) and `ATHENA_KEY` an API key for its tenant (`change-me-local-key` on a local stack; see [Enabling Authentication](authentication.md)).
+
 ## The call
 
 ```bash
-curl "http://localhost:8080/api/v1/sessions/$SESSION/context?limit=10&query=database%20migration"
+curl -H "X-API-Key: $ATHENA_KEY" \
+  "http://localhost:8080/api/v1/sessions/$SESSION/context?limit=10&query=database%20migration"
 ```
 
 | Parameter | Default | Meaning |
@@ -23,19 +26,19 @@ curl "http://localhost:8080/api/v1/sessions/$SESSION/context?limit=10&query=data
 
 ```json
 {
-  "stm_events": [ {"role": "user", "type": "message", "content": "...", "timestamp": "..."} ],
-  "relevant_pages": [ {"summary": "...", "topic": "...", "similarity": 0.83} ],
+  "stmEvents": [ {"role": "user", "type": "message", "content": "...", "timestamp": "...", "metadata": {}} ],
+  "relevantPages": [ {"id": "...", "sessionId": "...", "topic": "...", "summary": "...", "timestamp": "..."} ],
   "segments": [],
-  "user_persona": "",
+  "userPersona": null,
   "ltpm": {"status": "not_implemented"}
 }
 ```
 
-- **`stm_events`**: the [STM window](../concepts/memory-tiers.md#stm-short-term-memory) in chronological order. All four event types are included, so tool observations and agent thoughts appear alongside messages.
-- **`relevant_pages`**: cognitive chains from MTM. With a `query`, these are semantic matches; without one, the most recent chains.
+- **`stmEvents`**: the [STM window](../concepts/memory-tiers.md#stm-short-term-memory) in chronological order. All four event types are included, so tool observations and agent thoughts appear alongside messages.
+- **`relevantPages`**: cognitive chains from MTM. With a `query`, these are semantic matches; without one, the most recent chains.
 
 !!! note "Fields that are not populated yet"
-    `ltpm` always returns `status: "not_implemented"`, and `user_persona` is empty <span class="nx-badge nx-badge-beta">Planned</span>. To pull long-term knowledge today, use [`SearchMemory`](semantic-search.md), which enriches results from the LTM graph.
+    `ltpm` always returns `status: "not_implemented"`, and `userPersona` is empty <span class="nx-badge nx-badge-beta">Planned</span>. To pull long-term knowledge today, use [`SearchMemory`](semantic-search.md), which enriches results from the LTM graph.
 
 ## Recency mode vs. semantic mode
 
@@ -50,15 +53,15 @@ The intended pattern, per turn:
 ```
 1. GetContext(session, limit=10, query=<user message>)
 2. System prompt
-   + "Relevant past context:"  ← relevant_pages summaries (oldest first)
-   + "Current conversation:"   ← stm_events verbatim
+   + "Relevant past context:"  ← relevantPages summaries (oldest first)
+   + "Current conversation:"   ← stmEvents verbatim
    + user message
 3. Generate; then StoreInteraction(user message, agent response)
 ```
 
 Two practical notes:
 
-- **Summaries are prose.** `relevant_pages` carry LLM-written summaries designed to be pasted into prompts as-is, not re-summarized.
+- **Summaries are prose.** `relevantPages` carry LLM-written summaries designed to be pasted into prompts as-is, not re-summarized.
 - **Reads warm memory.** Retrieval counts as access: returned chains get their heat recalled ([Heat & Decay](../concepts/heat-and-decay.md)), so the memories your agents actually use survive longer. This is a feature, not a side effect; do not "pre-warm" with synthetic reads.
 
 ## Reading across agents

@@ -9,12 +9,12 @@ Every memory operation happens inside a session scoped to a `tenant → user →
 ```bash
 curl -X POST http://localhost:8080/api/v1/sessions \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: default-api-key" \
+  -H "X-API-Key: change-me-local-key" \
   -d '{"user_id": "test-user-123", "agent_id": "curl-test"}'
 ```
 
 ```json
-{"session_id": "a1b2c3d4-...", "created_at": "2026-08-09T16:00:00Z"}
+{"sessionId": "a1b2c3d4-...", "createdAt": "2026-08-09T16:00:00Z"}
 ```
 
 Export it for the next steps:
@@ -24,7 +24,7 @@ export SESSION=a1b2c3d4-...
 ```
 
 !!! note
-    With auth disabled (the local default) the `X-API-Key` header is ignored but harmless. When JWT auth is enabled, `tenant_id` and `user_id` come from the token, never from the request body. See [Security Model](../concepts/security-model.md).
+    `change-me-local-key` is the tenant key from `.env.example`, bound to tenant `demo`, so the session is created in `demo` without naming it. A backend serving many tenants uses a service key and passes `tenant_id`. See [Security Model](../concepts/security-model.md).
 
 ## 2. Store an interaction
 
@@ -33,7 +33,7 @@ An *interaction* is one user↔agent turn. Athena writes both events to the STM 
 ```bash
 curl -X POST http://localhost:8080/api/v1/sessions/$SESSION/interactions \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: default-api-key" \
+  -H "X-API-Key: change-me-local-key" \
   -d '{
     "user_message": "My name is John and I love writing Go code.",
     "agent_response": "Nice to meet you John, Go is a great language."
@@ -48,10 +48,10 @@ curl -X POST http://localhost:8080/api/v1/sessions/$SESSION/interactions \
 
 ```bash
 curl "http://localhost:8080/api/v1/sessions/$SESSION/context?limit=10" \
-  -H "X-API-Key: default-api-key"
+  -H "X-API-Key: change-me-local-key"
 ```
 
-Your turn appears in `stm_events`, newest first. This is the short-term window an agent would prepend to its prompt. Add `&query=...` to blend in semantically relevant mid-term memories; see [Retrieving Context](../guides/retrieving-context.md).
+Your turn appears in `stmEvents`, oldest first. This is the short-term window an agent would prepend to its prompt. Add `&query=...` to blend in semantically relevant mid-term memories; see [Retrieving Context](../guides/retrieving-context.md).
 
 ## 4. Watch the pipeline work
 
@@ -74,7 +74,7 @@ curl -s http://localhost:8080/metrics | grep -E "memos_|stm_cache|cosine"
 ```bash
 curl -X POST http://localhost:8080/api/v1/sessions/$SESSION/context/search \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: default-api-key" \
+  -H "X-API-Key: change-me-local-key" \
   -d '{"query": "what programming language does the user like?", "limit": 5}'
 ```
 

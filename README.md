@@ -79,27 +79,31 @@ go run cmd/memory-server/main.go                   # REST :8080 · gRPC :9090 ·
 
 ## Your first memory
 
-Store something, then read it back. Full version: [Your First Session](https://athena.developers.prescottdata.io/getting-started/first-session/).
+Store something, then read it back. Every call carries an API key; `change-me-local-key` is the local key from `.env.example`, bound to tenant `demo`. Full version: [Your First Session](https://athena.developers.prescottdata.io/getting-started/first-session/).
 
 ```bash
+export ATHENA_KEY=change-me-local-key
+
 # 1. Open a session, scoped tenant -> user -> agent
 export SESSION=$(curl -s -X POST http://localhost:8080/api/v1/sessions \
   -H "Content-Type: application/json" \
-  -d '{"user_id": "test-user-123", "agent_id": "quickstart"}' | jq -r .session_id)
+  -H "X-API-Key: $ATHENA_KEY" \
+  -d '{"user_id": "test-user-123", "agent_id": "quickstart"}' | jq -r .sessionId)
 
 # 2. Store one user<->agent turn
 curl -X POST http://localhost:8080/api/v1/sessions/$SESSION/interactions \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: $ATHENA_KEY" \
   -d '{
     "user_message": "My name is John and I love writing Go code.",
     "agent_response": "Nice to meet you John, Go is a great language."
   }'
 
 # 3. Read back what the agent would prepend to its next prompt
-curl "http://localhost:8080/api/v1/sessions/$SESSION/context?limit=10"
+curl -H "X-API-Key: $ATHENA_KEY" "http://localhost:8080/api/v1/sessions/$SESSION/context?limit=10"
 ```
 
-Your turn comes back in `stm_events`, newest first. Add `&query=...` to blend in semantically relevant mid-term memories rather than just the recent window.
+Your turn comes back in `stmEvents`, oldest first. Add `&query=...` to blend in semantically relevant mid-term memories rather than just the recent window.
 
 What happens next is the part worth watching. A background worker compares your last two messages by cosine similarity, and when the topic shifts it summarises the closed stretch into a **cognitive chain**, embeds it, and stores it. Chains that keep getting recalled stay warm; chains that do not decay on an Ebbinghaus curve and are eventually archived. The warm ones get promoted into a knowledge graph. That whole pipeline is described in [Data Flow](#3-data-flow--end-to-end).
 
@@ -510,11 +514,11 @@ tenant_id
         └── agent_id
 ```
 
-`tenant_id` and `user_id` are always resolved from the authentication token or API key configuration — never trusted from the request body. All MongoDB indexes, Redis key patterns, Milvus field filters, and ArangoDB node properties scope data by this hierarchy.
+The tenant comes from the caller's credentials: a JWT names tenant and user, a tenant API key names the tenant, and only a service API key (held by a trusted backend) may name the tenant in the request. Calls on another tenant's session return `NotFound`, on REST and gRPC alike. Redis keys, MongoDB queries, Milvus filters and the ArangoDB knowledge graph are all scoped by this hierarchy. See [Security Model](docs/concepts/security-model.md).
 
 ### Auth Modes
 
-All three modes are disabled by default and can be independently enabled:
+Athena refuses to start unless API-key or JWT auth is enabled (or `MEMORY_OS_ALLOW_UNAUTHENTICATED=true` for local development). The modes can be combined:
 
 | Mode | Env flag | Header |
 |---|---|---|
@@ -548,8 +552,10 @@ All three modes are disabled by default and can be independently enabled:
 | `MEMORY_OS_REQUIRE_API_KEY` | `false` | Enforce `X-API-Key` header |
 | `MEMORY_OS_REQUIRE_JWT` | `false` | Enforce `X-JWT-Token` header |
 | `MEMORY_OS_REQUIRE_MTLS` | `false` | Enforce mutual TLS |
-| `MEMORY_OS_API_KEY` | `default-api-key` | Valid API key value |
-| `MEMORY_OS_JWT_SECRET` | `your-secret-key` | JWT HMAC signing secret |
+| `MEMORY_OS_API_KEYS` | `""` | Accepted keys: `key=tenant` or `key=*` (service key), comma-separated |
+| `MEMORY_OS_API_KEY` | `""` | One service key (earlier releases) |
+| `MEMORY_OS_JWT_SECRET` | `""` | JWT HMAC signing secret; required with JWT |
+| `MEMORY_OS_ALLOW_UNAUTHENTICATED` | `false` | Start with no authentication (development only) |
 | `MEMORY_OS_CLIENT_CA_CERT_FILE` | `""` | Path to CA certificate for mTLS |
 
 ### Redis (STM + Task Queues)
@@ -809,29 +815,19 @@ Exposed at `GET /metrics`.
 
 ## 10. CI/CD Pipeline
 
-All three branch pipelines (`dev`, `staging`, `main`) follow the same structure. `dev` deploys to Azure Container Apps; `staging` and `main` deploy to AKS.
+GitHub Actions builds, tests and releases Athena:
 
-```
-1. Generate Protobuf
-   apt-get install protobuf-compiler
-   go install protoc-gen-go + protoc-gen-go-grpc + protoc-gen-grpc-gateway
-   ./scripts/generate.sh  →  api/grpc/gen/*.go  (passed as Bitbucket artifacts)
+| Workflow | Trigger | What it does |
+|---|---|---|
+| **CI** (`ci.yml`) | Pull requests and pushes to `main` | `make generate` → `make build` → `make test`, plus a Docker image build (not pushed) |
+| **CodeQL** | Pull requests and pushes to `main` | Code scanning |
+| **Release** (`release.yml`) | `VERSION` changes on `main` | Tags `v<VERSION>`, creates the GitHub release, pushes a multi-arch (amd64, arm64) image to `ghcr.io/prescott-data/athena` and `ghcr.io/prescott-data/memory-os`, tagged with the version and `latest` |
+| **Deploy Documentation** (`docs.yml`) | `docs/` or `mkdocs.yml` changes on `main` | Builds the MkDocs site and publishes it to GitHub Pages |
+| **Mirror to Bitbucket** (`mirror-to-bitbucket.yml`) | Pushes to `main` | Copies `main` to Prescott Data's internal deployment repository, whose own pipeline deploys it |
 
-2. Parallel:
-   ├── Lint:  go fmt ./...  +  go vet ./...  +  go mod tidy
-   └── Test:  go test ./pkg/memoryos ./api/middleware  (unit only; integration skipped in CI)
+To release, bump `VERSION` and add a [changelog](docs/reference/changelog.md) entry in the same pull request.
 
-3. Build Binary:  CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w"  →  artifact: memory-server
-
-4. Docker Build & Push:  docker build → push to Azure Container Registry (dromos ACR)
-
-5. Deploy:
-   dev     → az containerapp update ... (Azure Container App: memory-os)
-   staging → kubectl set image deployment/memory-os ... (AKS: dromos-console-aks-staging)
-   main    → kubectl set image deployment/memory-os ... (AKS: dromos-console-aks-production)
-```
-
-**Generated protobufs are not committed to git.** They are generated fresh in every pipeline run and passed between steps as Bitbucket artifacts. If you need them locally, run `make generate`.
+The protobuf stubs in `api/grpc/gen/` are committed. After changing `api/grpc/memory.proto`, run `make generate` and commit the regenerated files with your change (CI also regenerates them before building).
 
 ---
 
@@ -1045,6 +1041,12 @@ spec:
           containers:
           - name: trigger
             image: curlimages/curl:latest
+            env:
+            - name: MEMORY_OS_API_KEY        # a service key (configured as key=*)
+              valueFrom:
+                secretKeyRef:
+                  name: memory-os-service-key
+                  key: api-key
             command:
             - curl
             - -X

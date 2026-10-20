@@ -48,15 +48,18 @@ Needed only if agents store binary payloads via `StoreEvent`:
 | `BLOB_ENDPOINT` / `BLOB_BUCKET` | `localhost:9000` / `athena-blobs` | Where payloads land |
 | `BLOB_ACCESS_KEY` / `BLOB_SECRET_KEY` | — | Credentials |
 
-### Authentication <span class="nx-badge nx-badge-optional">Off by default</span>
+### Authentication <span class="nx-badge nx-badge-required">Required</span>
 
-All auth is **disabled by default**. That is fine for local development, never for production:
+Athena refuses to start unless API-key or JWT authentication is enabled (or `MEMORY_OS_ALLOW_UNAUTHENTICATED=true` is set for local development):
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `MEMORY_OS_REQUIRE_API_KEY` | `false` | Enforce `X-API-Key` / `Authorization: Bearer` |
+| `MEMORY_OS_API_KEYS` | | Accepted keys, `key=tenant` or `key=*` (service key), comma-separated |
 | `MEMORY_OS_REQUIRE_JWT` | `false` | Enforce JWT with `tenant_id`/`user_id` claims |
+| `MEMORY_OS_JWT_SECRET` | | HMAC secret; required with JWT |
 | `MEMORY_OS_REQUIRE_MTLS` | `false` | Enforce client certificates |
+| `MEMORY_OS_ALLOW_UNAUTHENTICATED` | `false` | Start without authentication (development only) |
 
 See [Enabling Authentication](../guides/authentication.md) and the [Security Model](../concepts/security-model.md).
 

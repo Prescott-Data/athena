@@ -2,6 +2,8 @@ package memory
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"time"
@@ -19,7 +21,7 @@ type GraphExtractor interface {
 
 // GraphWriter defines the interface for upserting extracted graph data to a storage backend.
 type GraphWriter interface {
-	WriteExtractionToGraph(ctx context.Context, extraction *GraphExtraction, heatScore float64) error
+	WriteExtractionToGraph(ctx context.Context, tenantID, userID, chainID string, extraction *GraphExtraction, heatScore float64) error
 }
 
 // Promoter computes heat scores and promotes canonical triples to the LPM Knowledge Graph
@@ -50,7 +52,7 @@ func (p *Promoter) RunOnce(ctx context.Context, threshold float64) error {
 
 	col := p.db.Collection("cognitive_chains")
 	// In a real scenario, you might filter for chains updated since the last run.
-	cur, err := col.Find(ctx, bson.M{"status": "active", "eventCount": bson.M{"$gt": 0}})
+	cur, err := col.Find(ctx, bson.M{"status": "active", "eventCount": bson.M{"$gt": 0}, chainErasing: bson.M{"$ne": true}})
 	if err != nil {
 		return fmt.Errorf("failed to query cognitive_chains: %w", err)
 	}
@@ -88,7 +90,9 @@ func (p *Promoter) RunOnce(ctx context.Context, threshold float64) error {
 			slog.Float64("time_decay", heatFactors.TimeDecay),
 			slog.Float64("recall_strength", heatFactors.RecallStrength))
 
-		if heatScore >= threshold {
+		if heatScore >= threshold && chain.LTMPromotedSummary == summaryHash(chain.Summary) {
+			slog.Debug("Chain already promoted with this summary", slog.String("chain_id", chain.ChainID))
+		} else if heatScore >= threshold {
 			if err := p.promoteChainToLPM(ctx, &chain, heatScore); err != nil {
 				slog.Error("Failed to process promoted chain into LTM", slog.String("chain_id", chain.ChainID), slog.String("error", err.Error()))
 			} else {
@@ -142,9 +146,29 @@ func (p *Promoter) promoteChainToLPM(ctx context.Context, chain *models.Cognitiv
 	slog.Info("Graph extraction completed", slog.String("chain_id", chain.ChainID), slog.Int("nodes", len(extraction.Nodes)), slog.Int("edges", len(extraction.Edges)))
 
 	// 2. Upsert the Triples into the ArangoDB LTM Graph
-	err = p.writer.WriteExtractionToGraph(ctx, extraction, heatScore)
+	err = p.writer.WriteExtractionToGraph(ctx, chain.TenantID, chain.UserID, chain.ChainID, extraction, heatScore)
 	if err != nil {
 		return fmt.Errorf("failed to write extraction to LTM graph for chain %s: %w", chain.ChainID, err)
+	}
+
+	if p.db != nil {
+		col := p.db.Collection(CognitiveChainsCollection)
+		res, err := col.UpdateOne(ctx, bson.M{"chainId": chain.ChainID, chainErasing: bson.M{"$ne": true}},
+			bson.M{"$set": bson.M{"ltmPromotedSummary": summaryHash(chain.Summary)}})
+		if err == nil && res.MatchedCount == 0 {
+			// The chain was erased, or its erasure began, while it was being promoted:
+			// take back what was written (an erasure marks chains before clearing the
+			// graph, so a write after that is caught here).
+			if eraser, ok := p.writer.(GraphEraser); ok {
+				if _, err := eraser.EraseChains(ctx, chain.TenantID, chain.UserID, []string{chain.ChainID}); err != nil {
+					slog.Error("Failed to undo promotion of an erased chain", slog.String("chain_id", chain.ChainID), slog.String("error", err.Error()))
+				}
+			}
+			return nil
+		}
+		if err != nil {
+			slog.Warn("Failed to record promotion", slog.String("chain_id", chain.ChainID), slog.String("error", err.Error()))
+		}
 	}
 
 	PromoterChainsPromoted.Inc()
@@ -167,4 +191,13 @@ func (p *Promoter) TriggerAnalytics(ctx context.Context) error {
 
 	slog.Info("Manually triggering graph analytics job...")
 	return ltmWriter.TriggerCommunityDetection(ctx)
+}
+
+// chainErasing is the field an erasure sets on chains before it clears the graph.
+const chainErasing = "erasing"
+
+// summaryHash identifies the summary a chain was promoted with.
+func summaryHash(summary string) string {
+	sum := sha256.Sum256([]byte(summary))
+	return hex.EncodeToString(sum[:16])
 }
