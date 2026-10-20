@@ -4,6 +4,69 @@ Releases are cut automatically when the `VERSION` file changes on the default br
 
 <div class="changelog-release" markdown>
 
+## v0.2.0 <span class="changelog-date">October 2026</span>
+
+<div class="changelog-meta" markdown>
+<a class="changelog-release-link" href="https://github.com/Prescott-Data/athena/releases/tag/v0.2.0" target="_blank" rel="noopener">View release</a>
+</div>
+
+This release closes a tenant-isolation vulnerability ([GHSA-3w3p-cfpg-qr9c](https://github.com/Prescott-Data/athena/security/advisories/GHSA-3w3p-cfpg-qr9c)) and makes authentication mandatory, so existing deployments need a configuration change before they upgrade. See **Upgrading** below.
+
+**Security**
+
+- Every call is authenticated and authorised by one gRPC interceptor, for REST and gRPC alike. The tenant comes from the caller's credentials: a tenant API key or JWT can only reach its own tenant's sessions (others return `NotFound`), and only a service key may name the tenant in a request. Administrative calls require a service key.
+- Merging and archiving chains, vector search, and the knowledge graph are scoped to the tenant (and, in the graph, to the user). Graph nodes and edges record their tenant, user and the chains they came from.
+- Scope IDs containing quotes, backslashes or control characters are refused, closing a vector-store filter injection.
+- There is no default API key or JWT secret, and the old placeholder secret is refused. With mTLS required, gRPC listens on loopback only.
+
+**Breaking changes**
+
+- Athena refuses to start without authentication. Enable API keys (`MEMORY_OS_REQUIRE_API_KEY=true` with `MEMORY_OS_API_KEYS`) or JWT, or set `MEMORY_OS_ALLOW_UNAUTHENTICATED=true` for local development only.
+- API keys are now bound to a tenant: `MEMORY_OS_API_KEYS="<key>=<tenant>"` for a tenant key, `"<key>=*"` for a service key. The single `MEMORY_OS_API_KEY` from earlier releases still works and is treated as a service key.
+
+**Added**
+
+- `GetSession`, `DeleteSession` and `EraseMemory`. `EraseMemory` erases everything stored for a user, an agent or a whole tenant: short-term events, chains and their vectors, events, and what the knowledge graph learned from them. While an erasure runs, writes to that scope return `FailedPrecondition`.
+- `AnalyzeTopics` and `GetHeatMetrics` are implemented, and every RPC in the API contract now works.
+- Reasoning deployments (o-series, gpt-5 and later) on Azure OpenAI and OpenAI, detected from the first rejected request or declared with `LLM_REASONING_MODEL`. Azure resource endpoints are accepted as well as full deployment URLs.
+- The LLM and embedding model are checked at startup and every `LLM_CHECK_INTERVAL_MIN` minutes; failures are logged and reported in `/api/v1/health`.
+- The long-term memory graph is created at startup, retrying for up to `LTM_INIT_TIMEOUT_SEC` while ArangoDB starts. If it is unavailable, Athena still serves and `/api/v1/health` reports `ltm` as unavailable.
+- `ltm-purge-unscoped` (in the image and under `cmd/`) removes knowledge-graph entries written before tenant scoping.
+
+**Changed**
+
+- `SearchMemory` returns the most similar chains first, and `similarity_score` is the cosine similarity (−1 to 1, higher is closer). It was a squared L2 distance, and `similarity_threshold` is now compared against the cosine similarity, so thresholds set against the old value need revisiting.
+- A chain that is promoted again with an unchanged summary is skipped instead of being re-extracted by the LLM, and no longer inflates graph weights.
+
+**Fixed**
+
+- Short-term events are kept until they have been summarised; previously events evicted from the window before chain formation were lost ([#40](https://github.com/Prescott-Data/athena/issues/40)).
+- Concurrent workers no longer form duplicate chains from the same events ([#42](https://github.com/Prescott-Data/athena/issues/42)).
+- Chain formation no longer stores every event twice or drops its tenant, session and metadata ([#47](https://github.com/Prescott-Data/athena/issues/47)).
+- Session endpoints that returned `Unimplemented` work, and memory can be deleted ([#41](https://github.com/Prescott-Data/athena/issues/41)).
+- Search returned no chains at default limits ([#43](https://github.com/Prescott-Data/athena/issues/43)).
+- The Azure provider failed silently with reasoning deployments ([#44](https://github.com/Prescott-Data/athena/issues/44)).
+- Long-term memory was silently disabled on fresh deployments until the graph was created by hand ([#51](https://github.com/Prescott-Data/athena/issues/51)).
+
+**Upgrading**
+
+1. Choose credentials. A backend that serves many tenants (JarvisCore, for example) uses a service key: `MEMORY_OS_API_KEYS="<random key>=*"`. Callers that each belong to one tenant get tenant keys: `"<key>=acme,<key>=globex"`. Set `MEMORY_OS_REQUIRE_API_KEY=true`. An existing `MEMORY_OS_API_KEY` keeps working as a service key.
+2. Give each client its key. JarvisCore reads it from `ATHENA_API_KEY`.
+3. Remove graph entries written before tenant scoping. They are no longer returned, but they still hold extracted knowledge. The `ltm-purge-unscoped` tool ships in the image and reads the server's `ARANGODB_*` settings:
+
+    ```bash
+    docker exec <athena-container> ./ltm-purge-unscoped -dry-run   # count them
+    docker exec <athena-container> ./ltm-purge-unscoped
+    ```
+
+    From a source checkout, run `go run ./cmd/ltm-purge-unscoped` with the same environment. Hot chains are promoted again into the scoped graph.
+
+4. If you compare `similarity_score` against a threshold, set it again as a cosine similarity.
+
+</div>
+
+<div class="changelog-release" markdown>
+
 ## v0.1.6 <span class="changelog-date">September 2026</span>
 
 **Fixed**
