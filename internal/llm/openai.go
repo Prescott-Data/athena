@@ -17,6 +17,7 @@ type OpenAIProvider struct {
 	Model              string
 	EmbeddingModelName string
 	Client             *http.Client
+	compat             *chatCompat
 }
 
 func NewOpenAIProvider(baseURL, apiKey, model, embeddingModel string) *OpenAIProvider {
@@ -35,6 +36,7 @@ func NewOpenAIProvider(baseURL, apiKey, model, embeddingModel string) *OpenAIPro
 		Model:              model,
 		EmbeddingModelName: embeddingModel,
 		Client:             &http.Client{Timeout: 30 * time.Second},
+		compat:             newChatCompat(),
 	}
 }
 
@@ -44,60 +46,10 @@ func (p *OpenAIProvider) EmbeddingModel() string {
 }
 
 func (p *OpenAIProvider) GenerateCompletion(ctx context.Context, req CompletionRequest) (string, error) {
-	requestBody := map[string]interface{}{
-		"model": p.Model,
-		"messages": []map[string]string{
-			{"role": "user", "content": req.Prompt},
-		},
-		"max_tokens":  req.MaxTokens,
-		"temperature": req.Temperature,
-	}
-	if len(req.Stop) > 0 {
-		requestBody["stop"] = req.Stop
-	}
-
-	body, err := json.Marshal(requestBody)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal request: %w", err)
-	}
-
 	url := fmt.Sprintf("%s/chat/completions", p.BaseURL)
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
-	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", p.APIKey))
-
-	resp, err := p.Client.Do(httpReq)
-	if err != nil {
-		return "", fmt.Errorf("failed to call OpenAI: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("OpenAI API returned status %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var response struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return "", fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	if len(response.Choices) == 0 {
-		return "", fmt.Errorf("no choices in response")
-	}
-
-	return response.Choices[0].Message.Content, nil
+	return postChatCompletion(ctx, p.Client, url, "OpenAI", p.compat, req, map[string]interface{}{"model": p.Model}, func(r *http.Request) {
+		r.Header.Set("Authorization", fmt.Sprintf("Bearer %s", p.APIKey))
+	})
 }
 
 func (p *OpenAIProvider) CreateEmbedding(ctx context.Context, req EmbeddingRequest) ([]float64, error) {

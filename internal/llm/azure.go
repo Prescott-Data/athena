@@ -17,6 +17,7 @@ type AzureProvider struct {
 	EmbeddingURL       string
 	EmbeddingModelName string
 	Client             *http.Client
+	compat             *chatCompat
 }
 
 func NewAzureProvider(baseURL, apiKey, embeddingURL, embeddingModel string) *AzureProvider {
@@ -29,6 +30,7 @@ func NewAzureProvider(baseURL, apiKey, embeddingURL, embeddingModel string) *Azu
 		EmbeddingURL:       embeddingURL,
 		EmbeddingModelName: embeddingModel,
 		Client:             &http.Client{Timeout: 30 * time.Second},
+		compat:             newChatCompat(),
 	}
 }
 
@@ -38,70 +40,9 @@ func (p *AzureProvider) EmbeddingModel() string {
 }
 
 func (p *AzureProvider) GenerateCompletion(ctx context.Context, req CompletionRequest) (string, error) {
-	requestBody := map[string]interface{}{}
-	messages := []map[string]string{}
-
-	if req.SystemPrompt != "" {
-		messages = append(messages, map[string]string{"role": "system", "content": req.SystemPrompt})
-	}
-	messages = append(messages, map[string]string{"role": "user", "content": req.Prompt})
-
-	requestBody["messages"] = messages
-	requestBody["max_tokens"] = req.MaxTokens
-	requestBody["temperature"] = req.Temperature
-
-	if len(req.Stop) > 0 {
-		requestBody["stop"] = req.Stop
-	}
-
-	if req.JSONSchema != nil {
-		requestBody["response_format"] = map[string]interface{}{
-			"type":        "json_schema",
-			"json_schema": req.JSONSchema,
-		}
-	}
-
-	body, err := json.Marshal(requestBody)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", p.BaseURL, bytes.NewBuffer(body))
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
-	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("api-key", p.APIKey)
-
-	resp, err := p.Client.Do(httpReq)
-	if err != nil {
-		return "", fmt.Errorf("failed to call Azure OpenAI: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("Azure OpenAI API returned status %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var response struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return "", fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	if len(response.Choices) == 0 {
-		return "", fmt.Errorf("no choices in response")
-	}
-
-	return response.Choices[0].Message.Content, nil
+	return postChatCompletion(ctx, p.Client, p.BaseURL, "Azure OpenAI", p.compat, req, nil, func(r *http.Request) {
+		r.Header.Set("api-key", p.APIKey)
+	})
 }
 
 func (p *AzureProvider) CreateEmbedding(ctx context.Context, req EmbeddingRequest) ([]float64, error) {

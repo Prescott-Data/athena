@@ -197,3 +197,23 @@ func TestHealthCheckReportsUnavailableLTM(t *testing.T) {
 	assert.Equal(t, "degraded", resp.Status)
 	assert.Equal(t, "unavailable: connection refused", resp.Dependencies["ltm"])
 }
+
+func TestHealthCheckReportsLLMStatus(t *testing.T) {
+	ctx := context.Background()
+	s := &MemoryServer{}
+
+	resp, err := s.HealthCheck(ctx, &gen.HealthCheckRequest{})
+	assert.NoError(t, err)
+	assert.Equal(t, "not_checked", resp.Dependencies["llm"])
+
+	s.checkLLM = func(context.Context) error { return errors.New("completion failed: status 400") }
+	assert.Error(t, s.CheckLLM(ctx))
+	resp, _ = s.HealthCheck(ctx, &gen.HealthCheckRequest{})
+	assert.Equal(t, "degraded", resp.Status)
+	assert.Contains(t, resp.Dependencies["llm"], "status 400")
+
+	s.checkLLM = func(context.Context) error { return nil }
+	assert.NoError(t, s.CheckLLM(ctx))
+	resp, _ = s.HealthCheck(ctx, &gen.HealthCheckRequest{})
+	assert.Equal(t, "healthy", resp.Dependencies["llm"])
+}

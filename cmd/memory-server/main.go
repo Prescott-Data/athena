@@ -58,6 +58,22 @@ func main() {
 	// Register gRPC service
 	gw.RegisterMemoryServiceServer(grpcServer, memoryServer)
 
+	// Check the LLM and embedding model now and periodically, so a misconfigured
+	// deployment is reported in logs and /api/v1/health rather than as chains that
+	// never form.
+	go func() {
+		interval := time.Duration(getEnvInt("LLM_CHECK_INTERVAL_MIN", 10)) * time.Minute
+		for {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			_ = memoryServer.CheckLLM(ctx)
+			cancel()
+			if interval <= 0 {
+				return
+			}
+			time.Sleep(interval)
+		}
+	}()
+
 	grpcListener, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Server.GRPCPort))
 	if err != nil {
 		log.Fatalf("Failed to listen on gRPC port %d: %v", cfg.Server.GRPCPort, err)
