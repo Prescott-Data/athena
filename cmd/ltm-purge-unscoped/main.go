@@ -23,9 +23,17 @@ func main() {
 	dryRun := flag.Bool("dry-run", false, "count the unscoped entries without deleting them")
 	flag.Parse()
 
+	// Resolve ArangoDB as the server does, so the tool runs in the server's environment.
 	url := os.Getenv("ARANGODB_URL")
 	if url == "" {
-		log.Fatal("ARANGODB_URL must be set")
+		host, port := os.Getenv("ARANGODB_HOST"), os.Getenv("ARANGODB_PORT")
+		if host == "" {
+			log.Fatal("ARANGODB_HOST or ARANGODB_URL must be set")
+		}
+		if port == "" {
+			port = "8529"
+		}
+		url = fmt.Sprintf("http://%s:%s", host, port)
 	}
 	user := os.Getenv("ARANGODB_USER")
 	if user == "" {

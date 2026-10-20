@@ -36,6 +36,7 @@ RUN mkdir -p api/grpc/gen && \
 # Build the application binaries
 RUN CGO_ENABLED=0 GOOS=linux go build -o memory-server ./cmd/memory-server/main.go
 RUN CGO_ENABLED=0 GOOS=linux go build -o init-ltm ./cmd/init-ltm/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -o ltm-purge-unscoped ./cmd/ltm-purge-unscoped
 
 # Runtime stage
 FROM alpine:latest
@@ -51,9 +52,10 @@ WORKDIR /app
 # Copy the binaries from builder stage
 COPY --from=builder /app/memory-server .
 COPY --from=builder /app/init-ltm .
+COPY --from=builder /app/ltm-purge-unscoped .
 
 # Change ownership to non-root user
-RUN chown appuser:appuser memory-server init-ltm
+RUN chown appuser:appuser memory-server init-ltm ltm-purge-unscoped
 
 # Switch to non-root user
 USER 1000
