@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/Prescott-Data/athena/api/grpc/gen"
@@ -46,6 +47,10 @@ type MemoryServer struct {
 	promoter                             *memory.Promoter
 	ltmReader                            *memory.LTMReader
 	persistCognitiveEvent                func(context.Context, *models.CognitiveEvent) (primitive.ObjectID, error)
+	// llmStatus is the result of the latest LLM check ("healthy" or "unhealthy: ...").
+	llmStatus atomic.Value
+	// checkLLM runs the LLM check; nil means the STM store's.
+	checkLLM func(context.Context) error
 	// sessions serves the session lifecycle endpoints; nil means the STM store.
 	sessions sessionStore
 	// getIDsFromSessionFunc allows mocking the DB call in tests
@@ -94,11 +99,43 @@ func (s *MemoryServer) HealthCheck(ctx context.Context, req *gen.HealthCheckRequ
 		deps["mongodb"] = "not_configured"
 	}
 
+	switch st, _ := s.llmStatus.Load().(string); {
+	case st == "":
+		deps["llm"] = "not_checked"
+	case st == "healthy":
+		deps["llm"] = st
+	default:
+		deps["llm"] = st
+		overallStatus = "degraded"
+	}
+
 	return &gen.HealthCheckResponse{
 		Status:       overallStatus,
 		Dependencies: deps,
 		Timestamp:    timestamppb.Now(),
 	}, nil
+}
+
+// CheckLLM verifies the configured LLM and embedding model and records the result for
+// HealthCheck. A failure is logged as an error with the provider's reason.
+func (s *MemoryServer) CheckLLM(ctx context.Context) error {
+	check := s.checkLLM
+	if check == nil {
+		if s.stmStore == nil {
+			return fmt.Errorf("memory store is not configured")
+		}
+		check = s.stmStore.CheckLLM
+	}
+	if err := check(ctx); err != nil {
+		s.llmStatus.Store("unhealthy: " + err.Error())
+		slog.Error("LLM check failed: chains will not form until this is fixed", slog.String("error", err.Error()))
+		return err
+	}
+	if prev, _ := s.llmStatus.Load().(string); prev != "healthy" {
+		slog.Info("LLM check passed")
+	}
+	s.llmStatus.Store("healthy")
+	return nil
 }
 
 // NewMemoryServer creates a new Memory OS server instance
