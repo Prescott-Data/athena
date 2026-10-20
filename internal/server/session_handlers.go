@@ -30,6 +30,7 @@ type sessionStore interface {
 	ChainHeat(ctx context.Context, chain *models.CognitiveChain) (float64, *models.HeatFactors, error)
 	AnalyzeEventTopics(ctx context.Context, events []models.CognitiveEvent) (*memory.MultiTopicResult, error)
 	EraseSession(ctx context.Context, record *models.CognitiveChain) (*memory.SessionErasure, error)
+	EraseScope(ctx context.Context, tenantID, userID, agentID string) (*memory.ScopeErasure, error)
 }
 
 func (s *MemoryServer) sessionStore() sessionStore {
@@ -101,12 +102,44 @@ func (s *MemoryServer) DeleteSession(ctx context.Context, req *gen.DeleteSession
 		return nil, status.Errorf(codes.Internal, "failed to delete session (safe to retry): %v", err)
 	}
 	return &gen.DeleteSessionResponse{
-		Success:          true,
-		StmEventsDeleted: int32(report.STMEvents),
-		EventsDeleted:    int32(report.Events),
-		ChainsDeleted:    int32(report.Chains),
-		VectorsDeleted:   int32(report.Vectors),
-		BlobsDeleted:     int32(report.Blobs),
+		Success:           true,
+		StmEventsDeleted:  int32(report.STMEvents),
+		EventsDeleted:     int32(report.Events),
+		ChainsDeleted:     int32(report.Chains),
+		VectorsDeleted:    int32(report.Vectors),
+		BlobsDeleted:      int32(report.Blobs),
+		LtmEntriesDeleted: int32(report.GraphEntries),
+	}, nil
+}
+
+// EraseMemory erases a tenant's user, a user's agent, or a whole tenant. See
+// memory.STMStore.EraseScope.
+func (s *MemoryServer) EraseMemory(ctx context.Context, req *gen.EraseMemoryRequest) (*gen.EraseMemoryResponse, error) {
+	if req.TenantId == "" {
+		return nil, status.Error(codes.InvalidArgument, "tenant_id is required")
+	}
+	if req.AgentId != "" && req.UserId == "" {
+		return nil, status.Error(codes.InvalidArgument, "agent_id needs user_id")
+	}
+	store := s.sessionStore()
+	if store == nil {
+		return nil, status.Error(codes.FailedPrecondition, "memory store is not configured")
+	}
+	report, err := store.EraseScope(ctx, req.TenantId, req.UserId, req.AgentId)
+	if err != nil {
+		slog.Error("Failed to erase memory", slog.String("tenant_id", req.TenantId), slog.String("user_id", req.UserId),
+			slog.String("agent_id", req.AgentId), slog.String("error", err.Error()))
+		return nil, status.Errorf(codes.Internal, "failed to erase memory (safe to retry): %v", err)
+	}
+	return &gen.EraseMemoryResponse{
+		Success:           true,
+		SessionsDeleted:   int32(report.Sessions),
+		StmEventsDeleted:  int32(report.STMEvents),
+		EventsDeleted:     int32(report.Events),
+		ChainsDeleted:     int32(report.Chains),
+		VectorsDeleted:    int32(report.Vectors),
+		BlobsDeleted:      int32(report.Blobs),
+		LtmEntriesDeleted: int32(report.GraphEntries),
 	}, nil
 }
 

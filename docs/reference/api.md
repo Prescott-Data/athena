@@ -9,6 +9,7 @@ The complete `MemoryService` surface. Every operation is defined once in `api/gr
 | [CreateSession](#createsession) | `POST /api/v1/sessions` | <span class="nx-badge nx-badge-primary">Implemented</span> |
 | [GetSession](#getsession) | `GET /api/v1/sessions/{session_id}` | <span class="nx-badge nx-badge-primary">Implemented</span> |
 | [DeleteSession](#deletesession) | `DELETE /api/v1/sessions/{session_id}` | <span class="nx-badge nx-badge-primary">Implemented</span> |
+| [EraseMemory](#erasememory) | `POST /api/v1/memory/erase` | <span class="nx-badge nx-badge-primary">Implemented</span> |
 | [StoreInteraction](#storeinteraction) | `POST /api/v1/sessions/{session_id}/interactions` | <span class="nx-badge nx-badge-primary">Implemented</span> |
 | [StoreEvent](#storeevent) | `POST /api/v1/sessions/{session_id}/events` | <span class="nx-badge nx-badge-primary">Implemented</span> |
 | [GetContext](#getcontext) | `GET /api/v1/sessions/{session_id}/context` | <span class="nx-badge nx-badge-primary">Implemented</span> |
@@ -84,7 +85,7 @@ Erases everything Athena holds for the session, for example to honour a deletion
 
 A chain formation already running for the session when it is deleted discards its result. Vectors and blobs are removed before anything in MongoDB, so a failed call leaves the session in place and can be retried.
 
-Knowledge already promoted to the LTM graph is **not** removed: graph nodes do not record which chains they came from.
+Knowledge promoted to the LTM graph is removed when the graph records which chains each node and edge came from: an entry goes when no remaining chain supports it. Graph entries written before that provenance existed are not attributable and stay.
 
 Data written before this release lacks the links between events, sessions and chains. Its chains are matched by time instead: a chain in the session's scope whose span covers one of the session's events is removed. A chain an older release merged from several chains can span another session's events too, and is then removed as well (its source events stay). Only a session ID resolves; passing a segment (chain) ID returns `NotFound`.
 
@@ -98,8 +99,29 @@ Data written before this release lacks the links between events, sessions and ch
 | `chains_deleted` | int32 | |
 | `vectors_deleted` | int32 | Chain and event vectors targeted |
 | `blobs_deleted` | int32 | |
+| `ltm_entries_deleted` | int32 | LTM graph nodes and edges no longer supported by any chain |
 
 **Errors:** `InvalidArgument` (empty ID), `NotFound`, `Internal` (safe to retry).
+
+---
+
+## EraseMemory
+
+`POST /api/v1/memory/erase` <span class="nx-badge nx-badge-primary">Implemented</span>
+
+Erases everything Athena holds for a scope, for deletion requests and offboarding:
+
+| Request | Erases |
+|---|---|
+| `{"tenant_id", "user_id"}` | One user: every session, STM list, event, blob, chain and vector of the user, across all agents, and the user's LTM graph |
+| `{"tenant_id", "user_id", "agent_id"}` | One agent of a user: as above for that agent, including chains of the user's other agents that the agent's conversations were merged into (removed whole); from the graph, only what those chains contributed (the graph is shared by the user's agents) |
+| `{"tenant_id"}` | A whole tenant |
+
+Sessions in the scope are marked erased first, so chain formations already running discard their result. Stop writing to the scope before erasing it: sessions created while the erasure runs are not included. Vectors, blobs and the graph are removed before MongoDB and session records go last, so a failed call can be retried; erasing an empty scope succeeds with zero counts.
+
+**Response** (`EraseMemoryResponse`): `success`, and counts `sessions_deleted`, `stm_events_deleted`, `events_deleted`, `chains_deleted`, `vectors_deleted`, `blobs_deleted`, `ltm_entries_deleted`.
+
+**Errors:** `InvalidArgument` (no `tenant_id`, or `agent_id` without `user_id`), `Internal` (safe to retry).
 
 ---
 

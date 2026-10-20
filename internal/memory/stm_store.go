@@ -214,6 +214,7 @@ type STMStore struct {
 	topicAnalyzer     *TopicAnalyzer
 	sessionManager    *SessionManager
 	parallelProcessor *ParallelProcessor
+	graphEraser       GraphEraser
 }
 
 // NewSTMStore creates a new STM store instance

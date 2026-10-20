@@ -194,6 +194,12 @@ func main() {
 		log.Printf("INFO: LTMReader initialized — SearchMemory will include ArangoDB graph results")
 	}
 
+	// Erasure removes what the LTM graph learned from erased memory when the graph
+	// writer supports it.
+	if eraser, ok := interface{}(ltmWriter).(memory.GraphEraser); ok && ltmWriter != nil {
+		memoryServer.GetSTMStore().SetGraphEraser(eraser)
+	}
+
 	promoter := memory.NewPromoter(mongoDB, memoryServer.GetSTMStore(), ltmWriter)
 	memoryServer.SetPromoter(promoter)
 

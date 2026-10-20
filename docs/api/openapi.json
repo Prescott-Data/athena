@@ -62,6 +62,39 @@
         ]
       }
     },
+    "/api/v1/memory/erase": {
+      "post": {
+        "summary": "Memory Operations\nErases all memory of a tenant's user, a user's agent, or a whole tenant.",
+        "operationId": "MemoryService_EraseMemory",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1EraseMemoryResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1EraseMemoryRequest"
+            }
+          }
+        ],
+        "tags": [
+          "MemoryService"
+        ]
+      }
+    },
     "/api/v1/sessions": {
       "post": {
         "summary": "Session Management",
@@ -390,7 +423,6 @@
     },
     "/api/v1/sessions/{sessionId}/interactions": {
       "post": {
-        "summary": "Memory Operations",
         "operationId": "MemoryService_StoreInteraction",
         "responses": {
           "200": {
@@ -580,6 +612,11 @@
         "blobsDeleted": {
           "type": "integer",
           "format": "int32"
+        },
+        "ltmEntriesDeleted": {
+          "type": "integer",
+          "format": "int32",
+          "description": "LTM graph nodes and edges removed because no remaining chain supports them."
         }
       }
     },
@@ -616,6 +653,57 @@
           "additionalProperties": {
             "type": "string"
           }
+        }
+      }
+    },
+    "v1EraseMemoryRequest": {
+      "type": "object",
+      "properties": {
+        "tenantId": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "agentId": {
+          "type": "string"
+        }
+      },
+      "description": "Erases a tenant's user, a user's agent, or (with user_id empty) a whole tenant."
+    },
+    "v1EraseMemoryResponse": {
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "sessionsDeleted": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "stmEventsDeleted": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "eventsDeleted": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "chainsDeleted": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "vectorsDeleted": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "blobsDeleted": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "ltmEntriesDeleted": {
+          "type": "integer",
+          "format": "int32"
         }
       }
     },

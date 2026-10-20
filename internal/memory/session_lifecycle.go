@@ -237,6 +237,9 @@ type SessionErasure struct {
 	Chains    int
 	Vectors   int
 	Blobs     int
+	// GraphEntries counts LTM graph nodes and edges removed because no remaining
+	// chain supports them.
+	GraphEntries int
 }
 
 // EraseSession deletes everything Athena holds for a session: its STM entries, its
@@ -245,8 +248,8 @@ type SessionErasure struct {
 // from several sessions is deleted as a whole, because its summary contains this
 // session's content; the other sessions keep their own events.
 //
-// Knowledge already promoted to the LTM graph is not removed: graph nodes carry
-// no reference to the chains they came from.
+// With a GraphEraser, knowledge the LTM graph extracted from those chains is removed
+// too, unless another remaining chain also supports it.
 func (s *STMStore) EraseSession(ctx context.Context, record *models.CognitiveChain) (*SessionErasure, error) {
 	sessionID := record.ChainID
 
@@ -316,6 +319,29 @@ func (s *STMStore) eraseSession(ctx context.Context, record *models.CognitiveCha
 			}
 			report.Blobs++
 		}
+	}
+
+	if len(chains) > 0 {
+		ids := make([]string, 0, len(chains))
+		for _, chain := range chains {
+			ids = append(ids, chain.ChainID)
+		}
+		// Mark before the graph step (see ChainErasingField).
+		if _, err := s.db.Collection(CognitiveChainsCollection).UpdateMany(ctx,
+			bson.M{"chainId": bson.M{"$in": ids}}, bson.M{"$set": bson.M{ChainErasingField: true}}); err != nil {
+			return nil, fmt.Errorf("failed to mark session chains for erasure: %w", err)
+		}
+	}
+	if s.graphEraser != nil && len(chains) > 0 {
+		ids := make([]string, 0, len(chains))
+		for _, chain := range chains {
+			ids = append(ids, chain.ChainID)
+		}
+		n, err := s.graphEraser.EraseChains(ctx, record.TenantID, record.UserID, ids)
+		if err != nil {
+			return nil, fmt.Errorf("failed to erase session knowledge from the LTM graph: %w", err)
+		}
+		report.GraphEntries = n
 	}
 
 	// Chains go before the events they are found through, so a retry after a

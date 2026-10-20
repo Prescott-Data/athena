@@ -26,6 +26,7 @@ type fakeSessions struct {
 	topicsIn  []models.CognitiveEvent
 	erased    *models.CognitiveChain
 	eraseErr  error
+	scope     []string
 	chainsLim int
 }
 
@@ -59,6 +60,11 @@ func (f *fakeSessions) EraseSession(_ context.Context, r *models.CognitiveChain)
 		return nil, f.eraseErr
 	}
 	return &memory.SessionErasure{STMEvents: 1, Events: 2, Chains: 3, Vectors: 4, Blobs: 5}, nil
+}
+
+func (f *fakeSessions) EraseScope(_ context.Context, t, u, a string) (*memory.ScopeErasure, error) {
+	f.scope = []string{t, u, a}
+	return &memory.ScopeErasure{Sessions: 2, Events: 9, GraphEntries: 4}, nil
 }
 
 func sessionFixture() *fakeSessions {
@@ -185,4 +191,20 @@ func TestAnalyzeTopicsUsesStoredEventsOnly(t *testing.T) {
 	assert.True(t, resp.Topics[0].LastMentioned.AsTime().Equal(t0))
 	assert.Equal(t, "Billing", resp.Topics[1].Topic)
 	assert.True(t, resp.Topics[1].LastMentioned.AsTime().Equal(t0.Add(time.Minute)))
+}
+
+func TestEraseMemoryValidatesScope(t *testing.T) {
+	f := sessionFixture()
+	s := &MemoryServer{sessions: f}
+	_, err := s.EraseMemory(context.Background(), &gen.EraseMemoryRequest{UserId: "u"})
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+	_, err = s.EraseMemory(context.Background(), &gen.EraseMemoryRequest{TenantId: "t", AgentId: "a"})
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+
+	resp, err := s.EraseMemory(context.Background(), &gen.EraseMemoryRequest{TenantId: "t", UserId: "u"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"t", "u", ""}, f.scope)
+	assert.Equal(t, int32(2), resp.SessionsDeleted)
+	assert.Equal(t, int32(9), resp.EventsDeleted)
+	assert.Equal(t, int32(4), resp.LtmEntriesDeleted)
 }

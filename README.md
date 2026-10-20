@@ -461,7 +461,8 @@ All endpoints are available as both gRPC (port 9090) and REST HTTP (port 8080) v
 |---|---|---|---|
 | Create session | `CreateSession` | `POST /sessions` | Creates a new session anchor in MongoDB. Returns `session_id`. |
 | Get session | `GetSession` | `GET /sessions/{session_id}` | Returns the session's tenant, user, agent, status, metadata, event count and last activity. |
-| Delete session | `DeleteSession` | `DELETE /sessions/{session_id}` | Erases the session's STM entries, events, blobs, and the MTM chains and vectors formed from them (a chain shared with other sessions is removed whole). LTM graph knowledge is not removed. Safe to retry. |
+| Erase memory | `EraseMemory` | `POST /memory/erase` | Erases a user, an agent of a user, or a whole tenant: sessions, STM, events, blobs, chains, vectors and LTM graph. Safe to retry. |
+| Delete session | `DeleteSession` | `DELETE /sessions/{session_id}` | Erases the session's STM entries, events, blobs, and the MTM chains and vectors formed from them (a chain shared with other sessions is removed whole), and LTM graph entries no remaining chain supports. Safe to retry. |
 
 ### Memory Operations
 

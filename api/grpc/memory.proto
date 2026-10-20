@@ -30,6 +30,14 @@ service MemoryService {
   }
 
   // Memory Operations
+  // Erases all memory of a tenant's user, a user's agent, or a whole tenant.
+  rpc EraseMemory(EraseMemoryRequest) returns (EraseMemoryResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/memory/erase"
+      body: "*"
+    };
+  }
+
   rpc StoreInteraction(StoreInteractionRequest) returns (StoreInteractionResponse) {
     option (google.api.http) = {
       post: "/api/v1/sessions/{session_id}/interactions"
@@ -127,6 +135,26 @@ message DeleteSessionResponse {
   int32 chains_deleted = 4;
   int32 vectors_deleted = 5;
   int32 blobs_deleted = 6;
+  // LTM graph nodes and edges removed because no remaining chain supports them.
+  int32 ltm_entries_deleted = 7;
+}
+
+// Erases a tenant's user, a user's agent, or (with user_id empty) a whole tenant.
+message EraseMemoryRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+  string agent_id = 3;
+}
+
+message EraseMemoryResponse {
+  bool success = 1;
+  int32 sessions_deleted = 2;
+  int32 stm_events_deleted = 3;
+  int32 events_deleted = 4;
+  int32 chains_deleted = 5;
+  int32 vectors_deleted = 6;
+  int32 blobs_deleted = 7;
+  int32 ltm_entries_deleted = 8;
 }
 
 message StoreInteractionRequest {
