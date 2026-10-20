@@ -46,7 +46,7 @@ func TestWriteExtraction_Nodes(t *testing.T) {
 
 	heatScore := 0.75
 
-	err := writer.WriteExtractionToGraph(context.Background(), "acme", "alice", extraction, heatScore)
+	err := writer.WriteExtractionToGraph(context.Background(), "acme", "alice", "chain-1", extraction, heatScore)
 	assert.NoError(t, err)
 
 	// Since "Unknown" label is invalid, we should only have 2 queries executed.
@@ -56,8 +56,8 @@ func TestWriteExtraction_Nodes(t *testing.T) {
 	// Verify first query (Identities)
 	q1 := mockDB.queries[0]
 	assert.Contains(t, q1, "UPSERT { _key: @key }")
-	assert.Contains(t, q1, "INSERT { _key: @key, entity_id: @entity, tenant_id: @tenant, user_id: @user, name: @name, created_at: @now, last_seen: @now }")
-	assert.Contains(t, q1, "UPDATE { last_seen: @now }")
+	assert.Contains(t, q1, "INSERT { _key: @key, entity_id: @entity, tenant_id: @tenant, user_id: @user, name: @name, sources: [@chain], created_at: @now, last_seen: @now }")
+	assert.Contains(t, q1, "UPDATE { last_seen: @now, sources: UNION_DISTINCT(OLD.sources || [@legacy], [@chain]) }")
 	assert.Contains(t, q1, "IN Identities") // Verification of dynamic table placement
 
 	// Verify first bindVars
@@ -95,7 +95,7 @@ func TestWriteExtraction_Edges(t *testing.T) {
 
 	heatScore := 0.65
 
-	err := writer.WriteExtractionToGraph(context.Background(), "acme", "alice", extraction, heatScore)
+	err := writer.WriteExtractionToGraph(context.Background(), "acme", "alice", "chain-1", extraction, heatScore)
 	assert.NoError(t, err)
 
 	// 2 queries for nodes + 1 query for the valid edge (the second edge is unresolvable since `unknown_node` isn't in nodes list)
@@ -110,8 +110,9 @@ func TestWriteExtraction_Edges(t *testing.T) {
 	assert.Contains(t, edgeQuery, "UPSERT { _from: @from, _to: @to, relation: @relation }")
 	// Clean the query slightly from tabs for exact string assert OR use Contains
 	assert.Contains(t, edgeQuery, "IN MemoryEdges")
-	assert.Contains(t, edgeQuery, "confidence: (OLD.confidence + @confidence) / 2")
-	assert.Contains(t, edgeQuery, "weight: OLD.weight + 1")
+	assert.Contains(t, edgeQuery, "confidence: POSITION(OLD.sources || [@legacy], @chain) ? OLD.confidence : (OLD.confidence + @confidence) / 2")
+	assert.Contains(t, edgeQuery, "weight: POSITION(OLD.sources || [@legacy], @chain) ? OLD.weight : OLD.weight + 1")
+	assert.Equal(t, "chain-1", edgeVars["chain"])
 	assert.Contains(t, edgeQuery, "heat_score: @heat")
 
 	// Verify path formatting and correct propagation of all fields
@@ -141,7 +142,7 @@ func TestWriteExtraction_Edges_InvalidRelation(t *testing.T) {
 
 	heatScore := 0.70
 
-	err := writer.WriteExtractionToGraph(context.Background(), "acme", "alice", extraction, heatScore)
+	err := writer.WriteExtractionToGraph(context.Background(), "acme", "alice", "chain-1", extraction, heatScore)
 	assert.NoError(t, err)
 
 	assert.Len(t, mockDB.queries, 3) // 2 nodes + 1 edge
@@ -166,6 +167,6 @@ func TestWriteExtraction_Edges_InvalidRelation(t *testing.T) {
 
 func TestWriteExtractionRequiresScope(t *testing.T) {
 	writer := &LTMWriter{db: &mockDatabase{}}
-	err := writer.WriteExtractionToGraph(context.Background(), "", "alice", &GraphExtraction{}, 0.5)
+	err := writer.WriteExtractionToGraph(context.Background(), "", "alice", "chain-1", &GraphExtraction{}, 0.5)
 	assert.Error(t, err)
 }

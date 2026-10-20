@@ -59,7 +59,7 @@ Within a tenant, memory is scoped by user and agent ([Sessions & Identity](sessi
 
 - **STM** (Redis), **events and chains** (MongoDB) and **vectors** (Milvus) are keyed and queried by tenant, user and agent.
 - **Chain merging and archival** only consider chains of the same tenant and user.
-- **The knowledge graph** (ArangoDB) is per tenant and user: node keys carry a hashed scope prefix and every node and edge records its tenant and user, so the same entity in two tenants is two nodes, and searches and traversals never leave the caller's graph. Nodes written by releases before this scoping carry no tenant and are not returned.
+- **The knowledge graph** (ArangoDB) is per tenant and user: node keys carry a hashed scope prefix and every node and edge records its tenant and user, so the same entity in two tenants is two nodes, and searches and traversals never leave the caller's graph. Each node and edge also records the chains it was extracted from, so erasing memory removes the graph knowledge no remaining chain supports. Nodes written by releases before this scoping carry no tenant and are never returned; they still hold extracted knowledge, so remove them after upgrading with `go run ./cmd/ltm-purge-unscoped` (`-dry-run` counts them first).
 
 ## Recommended postures
 

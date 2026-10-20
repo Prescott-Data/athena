@@ -137,3 +137,13 @@ func TestSessionLookupFailuresDenyAccess(t *testing.T) {
 	_, err = call(t, am, md, "/memory.v1.MemoryService/GetContext", &gen.GetContextRequest{SessionId: "missing"})
 	assert.Equal(t, codes.NotFound, code(err))
 }
+
+func TestScopeFieldsAreFilledFromTheToken(t *testing.T) {
+	am := middleware.NewAuthMiddleware(&config.AuthConfig{RequireJWT: true, JWTSecret: "s3cret"})
+	tok := signedJWT(t, "s3cret", "acme", "alice", "bot")
+	out, err := call(t, am, map[string]string{"x-jwt-token": tok}, createSessionMethod, &gen.CreateSessionRequest{})
+	require.NoError(t, err)
+	r := out.(*gen.CreateSessionRequest)
+	assert.Equal(t, []string{"acme", "alice", "bot"}, []string{r.TenantId, r.UserId, r.AgentId},
+		"a request naming no scope acts on the caller's own, so a user cannot address the whole tenant")
+}

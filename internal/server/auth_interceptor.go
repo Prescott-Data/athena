@@ -5,13 +5,14 @@ import (
 	"errors"
 	"log/slog"
 
-	"github.com/Prescott-Data/athena/api/grpc/gen"
 	"github.com/Prescott-Data/athena/api/middleware"
 	"go.mongodb.org/mongo-driver/mongo"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 const (
@@ -70,17 +71,6 @@ func (s *MemoryServer) authorize(ctx context.Context, caller *middleware.AuthCon
 		return status.Error(codes.PermissionDenied, "credentials do not identify a tenant")
 	}
 
-	if r, ok := req.(*gen.CreateSessionRequest); ok {
-		// Identity comes from the credentials; a body naming someone else is refused.
-		if err := claim(&r.TenantId, caller.TenantID, "tenant_id"); err != nil {
-			return err
-		}
-		if err := claim(&r.UserId, caller.UserID, "user_id"); err != nil {
-			return err
-		}
-		return claim(&r.AgentId, caller.AgentID, "agent_id")
-	}
-
 	if r, ok := req.(sessionBound); ok {
 		tenantID, userID, agentID, err := s.getIDsFromSessionFunc(s, ctx, r.GetSessionId())
 		if errors.Is(err, mongo.ErrNoDocuments) {
@@ -101,21 +91,48 @@ func (s *MemoryServer) authorize(ctx context.Context, caller *middleware.AuthCon
 		return nil
 	}
 
+	if m, ok := req.(proto.Message); ok && hasScopeFields(m) {
+		// Requests that name a scope (CreateSession, EraseMemory, ...) act on the
+		// caller's own: identity comes from the credentials, and a request naming
+		// someone else is refused. A JWT confines the request to its user (and
+		// agent), so a user cannot address a whole tenant.
+		if err := bindScopeField(m, "tenant_id", caller.TenantID); err != nil {
+			return err
+		}
+		if err := bindScopeField(m, "user_id", caller.UserID); err != nil {
+			return err
+		}
+		return bindScopeField(m, "agent_id", caller.AgentID)
+	}
+
 	if method == graphAnalyticsAdmin {
 		return status.Error(codes.PermissionDenied, "administrative call requires a service API key")
 	}
 	return status.Errorf(codes.PermissionDenied, "method %s is not available to tenant credentials", method)
 }
 
-// claim binds a request field to the caller's identity: an empty field takes the
-// identity, a different value is refused. An empty identity leaves the field as is.
-func claim(field *string, identity, name string) error {
+// hasScopeFields reports whether a request message names a tenant.
+func hasScopeFields(m proto.Message) bool {
+	fd := m.ProtoReflect().Descriptor().Fields().ByName("tenant_id")
+	return fd != nil && fd.Kind() == protoreflect.StringKind
+}
+
+// bindScopeField binds a request's scope field to the caller's identity: an empty
+// field takes the identity, a different value is refused. An empty identity (for
+// example the user of a tenant key) leaves the field as the request gives it.
+func bindScopeField(m proto.Message, name, identity string) error {
 	if identity == "" {
 		return nil
 	}
-	if *field != "" && *field != identity {
+	msg := m.ProtoReflect()
+	fd := msg.Descriptor().Fields().ByName(protoreflect.Name(name))
+	if fd == nil || fd.Kind() != protoreflect.StringKind {
+		return nil
+	}
+	current := msg.Get(fd).String()
+	if current != "" && current != identity {
 		return status.Errorf(codes.PermissionDenied, "%s in the request does not match the credentials", name)
 	}
-	*field = identity
+	msg.Set(fd, protoreflect.ValueOfString(identity))
 	return nil
 }

@@ -155,8 +155,8 @@ type MockGraphWriter struct {
 	mock.Mock
 }
 
-func (m *MockGraphWriter) WriteExtractionToGraph(ctx context.Context, tenantID, userID string, extraction *GraphExtraction, heatScore float64) error {
-	args := m.Called(ctx, tenantID, userID, extraction, heatScore)
+func (m *MockGraphWriter) WriteExtractionToGraph(ctx context.Context, tenantID, userID, chainID string, extraction *GraphExtraction, heatScore float64) error {
+	args := m.Called(ctx, tenantID, userID, chainID, extraction, heatScore)
 	return args.Error(0)
 }
 
@@ -182,7 +182,7 @@ func TestPromoteChainToLPM_Success(t *testing.T) {
 	}
 
 	mockExtractor.On("ExtractGraphFromSummary", mock.Anything, "Test summary for success path").Return(expectedExtraction, nil)
-	mockWriter.On("WriteExtractionToGraph", mock.Anything, "acme", "alice", expectedExtraction, 0.9).Return(nil)
+	mockWriter.On("WriteExtractionToGraph", mock.Anything, "acme", "alice", "chain-123", expectedExtraction, 0.9).Return(nil)
 
 	err := promoter.promoteChainToLPM(context.Background(), chain, heatScore)
 	assert.NoError(t, err)

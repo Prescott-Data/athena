@@ -60,6 +60,9 @@ type CognitiveChain struct {
 	DensityScore        float64      `json:"densityScore" bson:"densityScore"`               // Score for contextual density/system events
 	HeatScore           float64      `json:"heatScore" bson:"heatScore,omitempty"`
 	HeatFactors         *HeatFactors `json:"heatFactors" bson:"heatFactors,omitempty"`
+	// LTMPromotedSummary is a hash of the summary last promoted to the LTM graph; the
+	// chain is promoted again only when its summary changes (for example on a merge).
+	LTMPromotedSummary string `json:"ltmPromotedSummary,omitempty" bson:"ltmPromotedSummary,omitempty"`
 	// --- END NEW FIELDS ---
 	// Service-level metadata (e.g. origin_service, context_type) set at session creation.
 	Metadata map[string]string `json:"metadata" bson:"metadata,omitempty"`

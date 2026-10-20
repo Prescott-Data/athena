@@ -84,6 +84,19 @@ func InitializeLTMGraph(ctx context.Context, dbURL, user, pass string) error {
 		}
 	}
 
+	// Every query is scoped by tenant and user (reads, erasure), so index the scope.
+	for _, colName := range append(docCollections, edgeCollections...) {
+		col, err := db.Collection(ctx, colName)
+		if err != nil {
+			return fmt.Errorf("failed to get collection %s for indexing: %w", colName, err)
+		}
+		if _, _, err := col.EnsurePersistentIndex(ctx, []string{"tenant_id", "user_id"}, &driver.EnsurePersistentIndexOptions{
+			Name: "idx_scope",
+		}); err != nil {
+			return fmt.Errorf("failed to create scope index on %s: %w", colName, err)
+		}
+	}
+
 	slog.Info("Successfully initialized LTM graph in ArangoDB.")
 	return nil
 }
