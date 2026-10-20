@@ -226,17 +226,17 @@ Semantic search over the user's cognitive chains (all agents), enriched from the
 | `session_id` | string | path | Scope resolves to the session's user |
 | `query` | string | yes | Empty returns `InvalidArgument` |
 | `limit` | int32 | no | Max results |
-| `similarity_threshold` | double | no | Accepted, **not enforced** <span class="nx-badge nx-badge-beta">Planned</span> |
+| `similarity_threshold` | double | no | Minimum cosine similarity (−1 to 1) for chain results; 0 or unset returns all |
 | `filter` | map<string,string> | no | Metadata equality filter; all pairs must match |
 
-**Response** (`SearchMemoryResponse`): `results` (SearchResult[]).
+**Response** (`SearchMemoryResponse`): `results` (SearchResult[]). Chain results come first, most similar first, followed by graph results (which have no score).
 
 **SearchResult**
 
 | Field | Type | Notes |
 |---|---|---|
 | `content` | string | Chain summary or enriched fact |
-| `similarity_score` | double | Higher is closer |
+| `similarity_score` | double | Cosine similarity between the query and the chain summary (−1 to 1, higher is closer); 0 for graph results |
 | `source_type` | string | e.g. `dialogue_page` |
 | `source_id` | string | Chain/entity ID |
 | `timestamp` | timestamp | |

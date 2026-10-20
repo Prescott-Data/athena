@@ -346,7 +346,8 @@ func TestSTMStore_EmbeddingCache_HitAndMiss(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, embedding)
 		assert.Equal(t, 3, embedding.Dimensions)
-		assert.Equal(t, cachedEmbedding.Vector, embedding.Vector)
+		// Cached vectors written before embeddings were normalised come back unit length.
+		assert.InDeltaSlice(t, normalizeVector([]float64{0.5, 0.6, 0.7}), embedding.Vector, 1e-12)
 
 		// Verify the provider was NOT called
 		mockProvider2.AssertNotCalled(t, "CreateEmbedding", mock.Anything, mock.Anything)

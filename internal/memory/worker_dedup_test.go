@@ -40,7 +40,7 @@ func (s *slowFormingStore) ProcessMTMFormation(_ context.Context, _, _, _ string
 func (s *slowFormingStore) StoreCognitiveEvent(context.Context, *models.CognitiveEvent) (primitive.ObjectID, error) {
 	return primitive.NewObjectID(), nil
 }
-func (s *slowFormingStore) SearchSimilarChains(context.Context, string, string, string, []float64, int, map[string]string) ([]*models.CognitiveChain, error) {
+func (s *slowFormingStore) SearchSimilarChains(context.Context, string, string, string, []float64, int, float64, map[string]string) ([]*models.CognitiveChain, error) {
 	return nil, nil
 }
 

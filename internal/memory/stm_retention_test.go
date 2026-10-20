@@ -38,7 +38,7 @@ func (r *recordingStore) ProcessMTMFormation(_ context.Context, _, _, _ string, 
 func (r *recordingStore) StoreCognitiveEvent(context.Context, *models.CognitiveEvent) (primitive.ObjectID, error) {
 	return primitive.NewObjectID(), nil
 }
-func (r *recordingStore) SearchSimilarChains(context.Context, string, string, string, []float64, int, map[string]string) ([]*models.CognitiveChain, error) {
+func (r *recordingStore) SearchSimilarChains(context.Context, string, string, string, []float64, int, float64, map[string]string) ([]*models.CognitiveChain, error) {
 	return nil, nil
 }
 
