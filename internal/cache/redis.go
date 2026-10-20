@@ -246,3 +246,18 @@ func (r *RedisClient) LSet(key string, index int64, value interface{}) error {
 	// If we pass a string (JSON) to LSet, go-redis handles it.
 	return r.client.LSet(r.ctx, key, index, value).Err()
 }
+
+// HSet sets one field of a hash
+func (r *RedisClient) HSet(key, field, value string) error {
+	return r.client.HSet(r.ctx, key, field, value).Err()
+}
+
+// HGetAll returns every field of a hash
+func (r *RedisClient) HGetAll(key string) (map[string]string, error) {
+	return r.client.HGetAll(r.ctx, key).Result()
+}
+
+// HDel removes fields from a hash
+func (r *RedisClient) HDel(key string, fields ...string) error {
+	return r.client.HDel(r.ctx, key, fields...).Err()
+}

@@ -19,8 +19,12 @@ services:
       - MEMORY_OS_REQUIRE_MTLS=false
       
       # Memory Configuration
-      - MEMORY_OS_STM_CACHE_MAX_TURNS=10
-      - MEMORY_OS_STM_CACHE_TTL_HOURS=2
+      # Read by the STM cache and workers (the MEMORY_OS_STM_* names were never read)
+      - STM_CACHE_MAX_TURNS=10
+      - STM_CACHE_TTL=2
+      - STM_MAX_EVENTS=200
+      - STM_MAX_EVENTS_BEFORE_FLUSH=20
+      - STM_IDLE_FLUSH_MINUTES=30
       - MEMORY_OS_MTM_QUALITY_MODE=balanced
       - MEMORY_OS_MTM_HEAT_THRESHOLD=0.8
       - MEMORY_OS_LTM_ENABLED=true
