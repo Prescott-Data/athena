@@ -8,7 +8,7 @@ Everything Athena does is reachable with plain HTTP and JSON on port **8080**. T
 http://<host>:8080/api/v1/...
 ```
 
-All request and response bodies are JSON. Field names are `snake_case`, matching the protobuf definitions (the REST surface is generated from the same proto as gRPC; see [Architecture](../concepts/architecture.md#one-api-two-protocols)).
+All request and response bodies are JSON, using the standard protobuf JSON mapping (the REST surface is generated from the same proto as gRPC; see [Architecture](../concepts/architecture.md#one-api-two-protocols)). Responses name fields in `lowerCamelCase`: the proto's `session_id` arrives as `sessionId`, `stm_events` as `stmEvents`. Request bodies accept either form, so `{"user_id": "u1"}` and `{"userId": "u1"}` are equivalent.
 
 ```bash
 # The core workflow in four calls

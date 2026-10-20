@@ -1,6 +1,6 @@
 # API Reference
 
-The complete `MemoryService` surface. Every operation is defined once in `api/grpc/memory.proto` and served as gRPC (port 9090) and REST (port 8080); the REST mappings below are generated from the proto's HTTP annotations. Conventions (headers, error mapping, auth) are in [Using the REST API](../guides/rest-api.md).
+The complete `MemoryService` surface. Every operation is defined once in `api/grpc/memory.proto` and served as gRPC (port 9090) and REST (port 8080); the REST mappings below are generated from the proto's HTTP annotations. Fields are listed with their proto names (`snake_case`); REST responses carry them in `lowerCamelCase` (`session_id` → `sessionId`), and requests accept either. Conventions (headers, error mapping, auth) are in [Using the REST API](../guides/rest-api.md).
 
 **Implementation status legend:** <span class="nx-badge nx-badge-primary">Implemented</span> <span class="nx-badge nx-badge-beta">Planned</span>
 

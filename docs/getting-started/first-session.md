@@ -14,7 +14,7 @@ curl -X POST http://localhost:8080/api/v1/sessions \
 ```
 
 ```json
-{"session_id": "a1b2c3d4-...", "created_at": "2026-08-09T16:00:00Z"}
+{"sessionId": "a1b2c3d4-...", "createdAt": "2026-08-09T16:00:00Z"}
 ```
 
 Export it for the next steps:
@@ -51,7 +51,7 @@ curl "http://localhost:8080/api/v1/sessions/$SESSION/context?limit=10" \
   -H "X-API-Key: change-me-local-key"
 ```
 
-Your turn appears in `stm_events`, newest first. This is the short-term window an agent would prepend to its prompt. Add `&query=...` to blend in semantically relevant mid-term memories; see [Retrieving Context](../guides/retrieving-context.md).
+Your turn appears in `stmEvents`, oldest first. This is the short-term window an agent would prepend to its prompt. Add `&query=...` to blend in semantically relevant mid-term memories; see [Retrieving Context](../guides/retrieving-context.md).
 
 ## 4. Watch the pipeline work
 

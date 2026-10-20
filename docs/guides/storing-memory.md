@@ -2,6 +2,8 @@
 
 Everything Athena knows arrives through two write endpoints. This guide covers when to use each, how to shape events so the pipeline works *for* you, and how binary payloads are handled.
 
+Examples assume `SESSION` holds a session ID ([Your First Session](../getting-started/first-session.md) creates one) and `ATHENA_KEY` an API key for its tenant (`change-me-local-key` on a local stack; see [Enabling Authentication](authentication.md)).
+
 ## Interactions vs. events
 
 **`StoreInteraction`** is the high-level call for the standard chat pattern. One request records a full turn (the user's message plus the agent's response) as two STM events:
@@ -9,6 +11,7 @@ Everything Athena knows arrives through two write endpoints. This guide covers w
 ```bash
 curl -X POST http://localhost:8080/api/v1/sessions/$SESSION/interactions \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: $ATHENA_KEY" \
   -d '{
     "user_message": "Can you review my Go service for race conditions?",
     "agent_response": "Yes. Share the repository and I will start with the worker pool.",
@@ -21,6 +24,7 @@ curl -X POST http://localhost:8080/api/v1/sessions/$SESSION/interactions \
 ```bash
 curl -X POST http://localhost:8080/api/v1/sessions/$SESSION/events \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: $ATHENA_KEY" \
   -d '{
     "role": "agent",
     "type": "thought",
@@ -68,6 +72,7 @@ Consecutive `observation` events with the same `execution_id` and `step_id` merg
 ```bash
 curl -X POST http://localhost:8080/api/v1/sessions/$SESSION/events \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: $ATHENA_KEY" \
   -d '{
     "role": "agent",
     "type": "observation",

@@ -2,11 +2,14 @@
 
 `SearchMemory` answers questions against everything a user's agents have ever discussed: a vector search over cognitive chains, enriched with facts from the knowledge graph.
 
+Examples assume `SESSION` holds a session ID ([Your First Session](../getting-started/first-session.md) creates one) and `ATHENA_KEY` an API key for its tenant (`change-me-local-key` on a local stack; see [Enabling Authentication](authentication.md)).
+
 ## The call
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/sessions/$SESSION/context/search \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: $ATHENA_KEY" \
   -d '{
     "query": "what deployment platform does the user prefer?",
     "limit": 5

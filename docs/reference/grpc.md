@@ -19,7 +19,7 @@ resp, err := client.CreateSession(ctx, &gen.CreateSessionRequest{
 })
 ```
 
-With auth enabled, send credentials as metadata:
+Every call except `HealthCheck` must carry credentials, sent as metadata:
 
 ```go
 ctx = metadata.AppendToOutgoingContext(ctx,
@@ -32,18 +32,22 @@ The same header names apply as in REST; see [Enabling Authentication](../guides/
 
 ## Exploring with grpcurl
 
+Athena does not register the gRPC reflection service, so point grpcurl at the proto. From the repository root:
+
 ```bash
-grpcurl -plaintext athena:9090 list                        # services
-grpcurl -plaintext athena:9090 list memory.v1.MemoryService
-grpcurl -plaintext -d '{"tenant_id":"acme","user_id":"u1"}' \
+PROTO="-import-path . -import-path third_party/googleapis -proto api/grpc/memory.proto"
+
+grpcurl $PROTO list memory.v1.MemoryService                  # the RPCs
+grpcurl -plaintext $PROTO -H "x-api-key: $ATHENA_SERVICE_KEY" \
+  -d '{"tenant_id":"acme","user_id":"u1"}' \
   athena:9090 memory.v1.MemoryService/CreateSession
 ```
 
-If reflection is not enabled on your build, pass the proto instead: `-proto api/grpc/memory.proto -import-path api/grpc`.
+Naming `tenant_id` takes a service key; with a tenant key, leave it out and the session is created in that key's tenant.
 
 ## Generating code
 
-Generated stubs are **never committed**; `api/grpc/gen/` is produced locally and in CI:
+The generated stubs in `api/grpc/gen/` are committed, so the module builds with a plain `go build`. Regenerate them whenever `memory.proto` changes:
 
 ```bash
 make generate          # runs scripts/generate.sh
@@ -66,7 +70,7 @@ Two paths, both first-class:
 
 ## Versioning and compatibility
 
-The package is `memory.v1`; additive changes (new fields, new RPCs) are backward-compatible per proto3 semantics, and field numbers are never reused. The five [Planned](api.md) RPCs are already present in the contract, so regenerating against a newer server proto will not break existing clients.
+The package is `memory.v1`; additive changes (new fields, new RPCs) are backward-compatible per proto3 semantics, and field numbers are never reused. Fields still marked [Planned](api.md) (segments, user persona, LTPM) are already present in the contract, so regenerating against a newer server proto will not break existing clients.
 
 ## gRPC or REST?
 

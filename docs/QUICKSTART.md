@@ -75,7 +75,7 @@ curl -X POST http://localhost:8080/api/v1/sessions \
   -H "X-API-Key: change-me-local-key" \
   -d '{"user_id": "test-user-123", "agent_id": "curl-test"}'
 ```
-*Copy the `session_id` from the JSON response for the next steps.*
+*Copy the `sessionId` from the JSON response for the next steps.*
 
 **(2) Store an interaction:**
 ```bash
@@ -93,7 +93,7 @@ curl -X POST http://localhost:8080/api/v1/sessions/<YOUR_SESSION_ID>/interaction
 curl -X GET http://localhost:8080/api/v1/sessions/<YOUR_SESSION_ID>/context \
   -H "X-API-Key: change-me-local-key"
 ```
-*You should see your interaction returned in the `stm_events` array.*
+*You should see your interaction returned in the `stmEvents` array.*
 
 ---
 
