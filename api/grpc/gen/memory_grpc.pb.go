@@ -27,6 +27,8 @@ type MemoryServiceClient interface {
 	GetSession(ctx context.Context, in *GetSessionRequest, opts ...grpc.CallOption) (*GetSessionResponse, error)
 	DeleteSession(ctx context.Context, in *DeleteSessionRequest, opts ...grpc.CallOption) (*DeleteSessionResponse, error)
 	// Memory Operations
+	// Erases all memory of a tenant's user, a user's agent, or a whole tenant.
+	EraseMemory(ctx context.Context, in *EraseMemoryRequest, opts ...grpc.CallOption) (*EraseMemoryResponse, error)
 	StoreInteraction(ctx context.Context, in *StoreInteractionRequest, opts ...grpc.CallOption) (*StoreInteractionResponse, error)
 	StoreEvent(ctx context.Context, in *StoreEventRequest, opts ...grpc.CallOption) (*StoreEventResponse, error)
 	GetContext(ctx context.Context, in *GetContextRequest, opts ...grpc.CallOption) (*GetContextResponse, error)
@@ -70,6 +72,15 @@ func (c *memoryServiceClient) GetSession(ctx context.Context, in *GetSessionRequ
 func (c *memoryServiceClient) DeleteSession(ctx context.Context, in *DeleteSessionRequest, opts ...grpc.CallOption) (*DeleteSessionResponse, error) {
 	out := new(DeleteSessionResponse)
 	err := c.cc.Invoke(ctx, "/memory.v1.MemoryService/DeleteSession", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *memoryServiceClient) EraseMemory(ctx context.Context, in *EraseMemoryRequest, opts ...grpc.CallOption) (*EraseMemoryResponse, error) {
+	out := new(EraseMemoryResponse)
+	err := c.cc.Invoke(ctx, "/memory.v1.MemoryService/EraseMemory", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -166,6 +177,8 @@ type MemoryServiceServer interface {
 	GetSession(context.Context, *GetSessionRequest) (*GetSessionResponse, error)
 	DeleteSession(context.Context, *DeleteSessionRequest) (*DeleteSessionResponse, error)
 	// Memory Operations
+	// Erases all memory of a tenant's user, a user's agent, or a whole tenant.
+	EraseMemory(context.Context, *EraseMemoryRequest) (*EraseMemoryResponse, error)
 	StoreInteraction(context.Context, *StoreInteractionRequest) (*StoreInteractionResponse, error)
 	StoreEvent(context.Context, *StoreEventRequest) (*StoreEventResponse, error)
 	GetContext(context.Context, *GetContextRequest) (*GetContextResponse, error)
@@ -193,6 +206,9 @@ func (UnimplementedMemoryServiceServer) GetSession(context.Context, *GetSessionR
 }
 func (UnimplementedMemoryServiceServer) DeleteSession(context.Context, *DeleteSessionRequest) (*DeleteSessionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteSession not implemented")
+}
+func (UnimplementedMemoryServiceServer) EraseMemory(context.Context, *EraseMemoryRequest) (*EraseMemoryResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method EraseMemory not implemented")
 }
 func (UnimplementedMemoryServiceServer) StoreInteraction(context.Context, *StoreInteractionRequest) (*StoreInteractionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method StoreInteraction not implemented")
@@ -284,6 +300,24 @@ func _MemoryService_DeleteSession_Handler(srv interface{}, ctx context.Context, 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(MemoryServiceServer).DeleteSession(ctx, req.(*DeleteSessionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MemoryService_EraseMemory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EraseMemoryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MemoryServiceServer).EraseMemory(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/memory.v1.MemoryService/EraseMemory",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MemoryServiceServer).EraseMemory(ctx, req.(*EraseMemoryRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -468,6 +502,10 @@ var MemoryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteSession",
 			Handler:    _MemoryService_DeleteSession_Handler,
+		},
+		{
+			MethodName: "EraseMemory",
+			Handler:    _MemoryService_EraseMemory_Handler,
 		},
 		{
 			MethodName: "StoreInteraction",

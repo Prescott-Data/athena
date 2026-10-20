@@ -30,6 +30,14 @@ service MemoryService {
   }
 
   // Memory Operations
+  // Erases all memory of a tenant's user, a user's agent, or a whole tenant.
+  rpc EraseMemory(EraseMemoryRequest) returns (EraseMemoryResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/memory/erase"
+      body: "*"
+    };
+  }
+
   rpc StoreInteraction(StoreInteractionRequest) returns (StoreInteractionResponse) {
     option (google.api.http) = {
       post: "/api/v1/sessions/{session_id}/interactions"
@@ -119,6 +127,34 @@ message DeleteSessionRequest {
 
 message DeleteSessionResponse {
   bool success = 1;
+  // What was removed: the session's STM entries, its stored events, the MTM chains
+  // summarised from them (a chain shared with other sessions is removed whole), the
+  // vectors of those chains and events, and the events' blob payloads.
+  int32 stm_events_deleted = 2;
+  int32 events_deleted = 3;
+  int32 chains_deleted = 4;
+  int32 vectors_deleted = 5;
+  int32 blobs_deleted = 6;
+  // LTM graph nodes and edges removed because no remaining chain supports them.
+  int32 ltm_entries_deleted = 7;
+}
+
+// Erases a tenant's user, a user's agent, or (with user_id empty) a whole tenant.
+message EraseMemoryRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+  string agent_id = 3;
+}
+
+message EraseMemoryResponse {
+  bool success = 1;
+  int32 sessions_deleted = 2;
+  int32 stm_events_deleted = 3;
+  int32 events_deleted = 4;
+  int32 chains_deleted = 5;
+  int32 vectors_deleted = 6;
+  int32 blobs_deleted = 7;
+  int32 ltm_entries_deleted = 8;
 }
 
 message StoreInteractionRequest {
@@ -229,8 +265,14 @@ message Session {
   string session_id = 1;
   string user_id = 2;
   google.protobuf.Timestamp created_at = 3;
+  // Time of the session's most recent stored event, or created_at if it has none.
   google.protobuf.Timestamp updated_at = 4;
   map<string, string> metadata = 5;
+  string tenant_id = 6;
+  string agent_id = 7;
+  string status = 8;
+  // Number of events stored through the session.
+  int32 event_count = 9;
 }
 
 message STMEvent {
@@ -269,14 +311,27 @@ message Segment {
   HeatFactors heat_factors = 5;
   double quality_score = 6;
   google.protobuf.Timestamp created_at = 7;
+  // Current heat of the segment (heat decays with time since last access).
+  double heat = 8;
+  int32 event_count = 9;
+  google.protobuf.Timestamp last_event_at = 10;
 }
 
+// Heat follows the Ebbinghaus forgetting curve:
+// heat = base_importance * time_decay, where time_decay = exp(-hours_since_access / (tau * recall_strength)).
 message HeatFactors {
-  double access_frequency = 1;
-  double interaction_depth = 2;
-  double recency_score = 3;
-  double user_engagement = 4;
-  double topic_importance = 5;
+  // Fields 1-5 were never populated; heat is described by fields 6-8.
+  double access_frequency = 1 [deprecated = true];
+  double interaction_depth = 2 [deprecated = true];
+  double recency_score = 3 [deprecated = true];
+  double user_engagement = 4 [deprecated = true];
+  double topic_importance = 5 [deprecated = true];
+  // Importance of the content: intrinsic importance plus contextual density, capped at 1.
+  double base_importance = 6;
+  // Forgetting-curve factor in (0, 1]; 1 means just accessed.
+  double time_decay = 7;
+  // Grows each time the memory is recalled, which slows decay.
+  double recall_strength = 8;
 }
 
 message UserPersona {
@@ -294,10 +349,16 @@ message TopicSummary {
 }
 
 message HeatMetrics {
+  // Mean current heat of the session's segments.
   double overall_heat = 1;
+  // Mean of each heat factor across the session's segments.
   HeatFactors breakdown = 2;
+  // Number of events stored through the session.
   int32 total_interactions = 3;
   google.protobuf.Timestamp last_activity = 4;
+  int32 segment_count = 5;
+  // Heat of the session's hottest segment.
+  double max_heat = 6;
 }
 
 message SearchResult {
