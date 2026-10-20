@@ -170,3 +170,50 @@ func TestEraseScopeOfAnAgentFollowsChainsItsSessionsMergedInto(t *testing.T) {
 	require.Len(t, graph.chains, 1)
 	assert.ElementsMatch(t, []string{"chain-" + gone, "merged"}, graph.chains[0][2:])
 }
+
+// probingGraphEraser checks, while the erasure runs, which writes are refused.
+type probingGraphEraser struct {
+	store  *STMStore
+	probes map[string]error
+}
+
+func (g *probingGraphEraser) EraseChains(context.Context, string, string, []string) (int, error) {
+	return 0, nil
+}
+func (g *probingGraphEraser) EraseScope(_ context.Context, tenant, _ string) (int, error) {
+	g.probes = map[string]error{
+		"same user, new session":    g.store.CheckWritable(tenant, "alice", "bot", ""),
+		"same user, another agent":  g.store.CheckWritable(tenant, "alice", "other", ""),
+		"another user":              g.store.CheckWritable(tenant, "bob", "bot", ""),
+		"another tenant, same user": g.store.CheckWritable(tenant+"-x", "alice", "bot", ""),
+	}
+	return 0, nil
+}
+
+func TestWritesToAScopeAreRefusedWhileItIsErased(t *testing.T) {
+	store, _ := newLifecycleStore(t)
+	tenant := fmt.Sprintf("acme-%d", time.Now().UnixNano())
+	sid := seedScope(t, store, tenant, "alice", "bot")
+	probe := &probingGraphEraser{store: store}
+	store.SetGraphEraser(probe)
+
+	_, err := store.EraseScope(context.Background(), tenant, "alice", "")
+	require.NoError(t, err)
+
+	assert.ErrorIs(t, probe.probes["same user, new session"], ErrScopeErasing)
+	assert.ErrorIs(t, probe.probes["same user, another agent"], ErrScopeErasing)
+	assert.NoError(t, probe.probes["another user"])
+	assert.NoError(t, probe.probes["another tenant, same user"])
+
+	assert.NoError(t, store.CheckWritable(tenant, "alice", "bot", ""), "the scope reopens when the erasure ends")
+	assert.ErrorIs(t, store.CheckWritable(tenant, "alice", "bot", sid), ErrScopeErasing, "an erased session stays closed")
+}
+
+func TestATenantErasureClosesEveryUser(t *testing.T) {
+	store, _ := newLifecycleStore(t)
+	tenant := fmt.Sprintf("acme-%d", time.Now().UnixNano())
+	require.NoError(t, store.redis.SetEX(erasingScopeKey(tenant, "", ""), "1", time.Minute))
+	t.Cleanup(func() { _ = store.redis.Delete(erasingScopeKey(tenant, "", "")) })
+	assert.ErrorIs(t, store.CheckWritable(tenant, "anyone", "any", ""), ErrScopeErasing)
+	assert.NoError(t, store.CheckWritable(tenant+"2", "anyone", "any", ""))
+}

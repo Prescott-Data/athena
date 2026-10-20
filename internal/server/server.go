@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"log/slog"
@@ -211,6 +212,9 @@ func (s *MemoryServer) StoreInteraction(ctx context.Context, req *gen.StoreInter
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "session not found or invalid: %v", err)
 	}
+	if err := s.checkWritable(tenantID, userID, agentID, sessionID); err != nil {
+		return nil, err
+	}
 
 	// Create and process the user event
 	userEvent := memory.STMEvent{
@@ -299,6 +303,9 @@ func (s *MemoryServer) StoreEvent(ctx context.Context, req *gen.StoreEventReques
 	tenantID, userID, agentID, err := s.getIDsFromSessionFunc(s, ctx, sessionID)
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "session not found or invalid: %v", err)
+	}
+	if err := s.checkWritable(tenantID, userID, agentID, sessionID); err != nil {
+		return nil, err
 	}
 
 	eventType := models.STMEventType(req.Type)
@@ -396,6 +403,22 @@ func (s *MemoryServer) persistForSTM(ctx context.Context, tenantID, userID, agen
 		return
 	}
 	event.EventID = id.Hex()
+}
+
+// checkWritable refuses writes to memory that is being erased (or a session that
+// has been). Without an STM store, as in some tests, there is nothing to check.
+func (s *MemoryServer) checkWritable(tenantID, userID, agentID, sessionID string) error {
+	if s.stmStore == nil {
+		return nil
+	}
+	err := s.stmStore.CheckWritable(tenantID, userID, agentID, sessionID)
+	if errors.Is(err, memory.ErrScopeErasing) {
+		return status.Error(codes.FailedPrecondition, err.Error())
+	}
+	if err != nil {
+		return status.Errorf(codes.Unavailable, "%v", err)
+	}
+	return nil
 }
 
 // enqueueChainCheck pushes a cognitive chain check task to the worker queue.
@@ -569,6 +592,9 @@ func (s *MemoryServer) CreateSession(ctx context.Context, req *gen.CreateSession
 	}
 	if agentID == "" {
 		agentID = "default"
+	}
+	if err := s.checkWritable(tenantID, userID, agentID, ""); err != nil {
+		return nil, err
 	}
 
 	sessionID := uuid.New().String()

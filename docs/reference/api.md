@@ -117,11 +117,13 @@ Erases everything Athena holds for a scope, for deletion requests and offboardin
 | `{"tenant_id", "user_id", "agent_id"}` | One agent of a user: as above for that agent, including chains of the user's other agents that the agent's conversations were merged into (removed whole); from the graph, only what those chains contributed (the graph is shared by the user's agents) |
 | `{"tenant_id"}` | A whole tenant |
 
-Sessions in the scope are marked erased first, so chain formations already running discard their result. Stop writing to the scope before erasing it: sessions created while the erasure runs are not included. Vectors, blobs and the graph are removed before MongoDB and session records go last, so a failed call can be retried; erasing an empty scope succeeds with zero counts.
+While the erasure runs, the scope is closed: writes to its sessions and new sessions in it are refused with `FailedPrecondition` ("this memory is being erased"), and a final sweep after the session records are gone catches a write that was already in flight. Chain formations already running discard their result. Erased sessions stay closed; the scope reopens for new sessions when the erasure ends. Vectors, blobs and the graph are removed before MongoDB and session records go last, so a failed call can be retried; erasing an empty scope succeeds with zero counts.
 
 **Response** (`EraseMemoryResponse`): `success`, and counts `sessions_deleted`, `stm_events_deleted`, `events_deleted`, `chains_deleted`, `vectors_deleted`, `blobs_deleted`, `ltm_entries_deleted`.
 
 **Errors:** `InvalidArgument` (no `tenant_id`, or `agent_id` without `user_id`), `Internal` (safe to retry).
+
+Writes (`CreateSession`, `StoreInteraction`, `StoreEvent`) to a scope being erased return `FailedPrecondition`; retry them after the erasure.
 
 ---
 
