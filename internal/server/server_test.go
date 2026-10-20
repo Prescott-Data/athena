@@ -181,3 +181,16 @@ func TestStoreEventFailsWhenDurablePersistenceFails(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to persist event")
 	mockCache.AssertExpectations(t)
 }
+
+func TestHealthCheckReportsUnavailableLTM(t *testing.T) {
+	s := &MemoryServer{}
+	resp, err := s.HealthCheck(context.Background(), &gen.HealthCheckRequest{})
+	assert.NoError(t, err)
+	_, reported := resp.Dependencies["ltm"]
+	assert.False(t, reported, "no LTM configured, nothing to report")
+
+	s.SetLTMStatus("unavailable: connection refused")
+	resp, _ = s.HealthCheck(context.Background(), &gen.HealthCheckRequest{})
+	assert.Equal(t, "degraded", resp.Status)
+	assert.Equal(t, "unavailable: connection refused", resp.Dependencies["ltm"])
+}

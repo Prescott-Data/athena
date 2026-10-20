@@ -48,16 +48,9 @@ This boots six containers:
 
 Give it 10–15 seconds. ArangoDB and Milvus take the longest to become ready.
 
-## 3. Initialize the graph schema
+## 3. The graph schema
 
-The ArangoDB `athena_ltm` database, its vertex collections, and the `MemoryEdges` edge collection must exist before the server starts:
-
-```bash
-go run cmd/init-ltm/main.go
-```
-
-!!! tip "Connection refused?"
-    ArangoDB is still booting. Wait ten seconds and run it again; the command is idempotent.
+The server creates the ArangoDB `athena_ltm` database, its vertex collections, and the `MemoryEdges` edge collection when it starts, waiting up to 90 seconds for ArangoDB. To create them ahead of time instead (for example in a deployment job), run the idempotent `go run cmd/init-ltm/main.go`.
 
 ## 4. Start the server
 

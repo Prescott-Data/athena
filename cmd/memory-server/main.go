@@ -24,6 +24,7 @@ import (
 	"github.com/Prescott-Data/athena/internal/config"
 	"github.com/Prescott-Data/athena/internal/memory"
 	"github.com/Prescott-Data/athena/internal/server"
+	ltmsetup "github.com/Prescott-Data/athena/pkg/memory"
 )
 
 func main() {
@@ -178,23 +179,39 @@ func main() {
 	}
 	dbName := os.Getenv("ARANGODB_DATABASE")
 	if dbName == "" {
-		dbName = "athena_ltm"
+		dbName = ltmsetup.DefaultLTMDatabase
+	}
+
+	// Create the LTM database and collections if needed. ArangoDB may still be
+	// starting, so retry for up to LTM_INIT_TIMEOUT_SEC (default 90).
+	if err := initLTMWithRetry(promoterCtx, dbURL, dbUser, dbPass, dbName,
+		time.Duration(getEnvInt("LTM_INIT_TIMEOUT_SEC", 90))*time.Second); err != nil {
+		log.Printf("ERROR: LTM graph unavailable, long-term memory is disabled: %v", err)
+		memoryServer.SetLTMStatus("unavailable: " + err.Error())
 	}
 
 	ltmWriter, err := memory.NewLTMWriter(promoterCtx, dbURL, dbUser, dbPass, dbName)
 	if err != nil {
-		log.Printf("WARN: Failed to initialize LTMWriter (is ArangoDB running and InitializeLTMGraph called?): %v", err)
+		log.Printf("ERROR: Failed to initialize LTMWriter, long-term memory is disabled: %v", err)
+		memoryServer.SetLTMStatus("unavailable: " + err.Error())
 	}
 
 	ltmReader, err := memory.NewLTMReader(promoterCtx, dbURL, dbUser, dbPass, dbName)
 	if err != nil {
-		log.Printf("WARN: Failed to initialize LTMReader: %v", err)
+		log.Printf("ERROR: Failed to initialize LTMReader: %v", err)
+		memoryServer.SetLTMStatus("unavailable: " + err.Error())
 	} else {
 		memoryServer.SetLTMReader(ltmReader)
 		log.Printf("INFO: LTMReader initialized — SearchMemory will include ArangoDB graph results")
 	}
 
-	promoter := memory.NewPromoter(mongoDB, memoryServer.GetSTMStore(), ltmWriter)
+	// A nil *LTMWriter in the interface would look configured to the promoter and
+	// panic at the first promotion; without a writer, promotion is skipped.
+	var graphWriter memory.GraphWriter
+	if ltmWriter != nil {
+		graphWriter = ltmWriter
+	}
+	promoter := memory.NewPromoter(mongoDB, memoryServer.GetSTMStore(), graphWriter)
 	memoryServer.SetPromoter(promoter)
 
 	go func() {
@@ -278,6 +295,26 @@ func main() {
 // registerGatewayEndpoints registers the gRPC gateway endpoints
 func registerGatewayEndpoints(ctx context.Context, mux *runtime.ServeMux, grpcEndpoint string, opts []grpc.DialOption) error {
 	return gw.RegisterMemoryServiceHandlerFromEndpoint(ctx, mux, grpcEndpoint, opts)
+}
+
+// initLTMWithRetry runs InitializeLTMGraph until it succeeds or timeout elapses.
+func initLTMWithRetry(ctx context.Context, dbURL, user, pass, dbName string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		err := ltmsetup.InitializeLTMGraph(ctx, dbURL, user, pass, dbName)
+		if err == nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return err
+		}
+		log.Printf("INFO: ArangoDB not ready for LTM setup (%v); retrying", err)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(3 * time.Second):
+		}
+	}
 }
 
 // getEnvInt reads an integer from env with a default
