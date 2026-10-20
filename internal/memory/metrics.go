@@ -9,6 +9,13 @@ var (
 		prometheus.CounterOpts{Name: "stm_cache_ops_total", Help: "STM cache operations"},
 		[]string{"op", "result"},
 	)
+	// MetricSTMEventsEvicted counts events dropped from STM before any chain held them.
+	// Anything above zero is lost memory: STM_MAX_EVENTS is too small for the load,
+	// or the workers are not keeping up.
+	MetricSTMEventsEvicted = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "stm_events_evicted_unsummarised_total",
+		Help: "STM events dropped before they were summarised into a chain",
+	})
 	MetricEmbeddingLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
 		Name:    "embedding_latency_seconds",
 		Help:    "Latency for embedding creation",
@@ -127,6 +134,7 @@ var (
 func init() {
 	prometheus.MustRegister(
 		MetricSTMCacheOps,
+		MetricSTMEventsEvicted,
 		MetricEmbeddingLatency,
 		MetricMilvusLatency,
 		MetricCosineSimilarity,

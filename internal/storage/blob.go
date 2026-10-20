@@ -13,6 +13,7 @@ type BlobStore interface {
 	// Download returns a reader for the blob data given its URI.
 	Download(ctx context.Context, uri string) (io.ReadCloser, error)
 
-	// Delete removes a blob from the store given its URI.
+	// Delete removes a blob from the store given its URI. Deleting a blob that does
+	// not exist is not an error, so deletions can be retried.
 	Delete(ctx context.Context, uri string) error
 }

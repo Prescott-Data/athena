@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -73,6 +74,9 @@ func (s *GCSBlobStore) Delete(ctx context.Context, uri string) error {
 	}
 
 	if err := s.client.Bucket(bucket).Object(key).Delete(ctx); err != nil {
+		if errors.Is(err, gcstorage.ErrObjectNotExist) {
+			return nil
+		}
 		return fmt.Errorf("failed to delete object %s from bucket %s: %w", key, bucket, err)
 	}
 

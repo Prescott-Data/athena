@@ -146,6 +146,24 @@ func main() {
 	}
 	log.Printf("Started %d background worker(s)", numWorkers)
 
+	// STM must be able to hold a forced flush, and a quiet scope must be summarised
+	// before its STM expires; otherwise events are dropped unsummarised.
+	if flush := int64(getEnvInt("STM_MAX_EVENTS_BEFORE_FLUSH", 20)); memory.STMRetentionLimit() <= flush {
+		log.Fatalf("STM_MAX_EVENTS (%d) must be greater than STM_MAX_EVENTS_BEFORE_FLUSH (%d), "+
+			"or events are dropped before they can be summarised", memory.STMRetentionLimit(), flush)
+	}
+	idle := memory.STMIdleFlushAfter()
+	if ttl := time.Duration(getEnvInt("STM_CACHE_TTL", 2)) * time.Hour; idle >= ttl {
+		log.Fatalf("STM_IDLE_FLUSH_MINUTES (%v) must be shorter than STM_CACHE_TTL (%v), "+
+			"or a quiet scope's events expire before they are summarised", idle, ttl)
+	}
+	sweepEvery := idle / 4
+	if sweepEvery > 5*time.Minute {
+		sweepEvery = 5 * time.Minute
+	}
+	go worker.RunIdleSweeper(workerCtx, sweepEvery)
+	log.Printf("STM idle sweeper started (flush after %v quiet, checked every %v)", idle, sweepEvery)
+
 	// Start promoter scheduler (MTM → LTM promotion)
 	promoterCtx, promoterCancel := context.WithCancel(context.Background())
 	promoterIntervalMin := getEnvInt("MEMORY_OS_PROMOTER_INTERVAL_MIN", 30)
@@ -192,6 +210,12 @@ func main() {
 	} else {
 		memoryServer.SetLTMReader(ltmReader)
 		log.Printf("INFO: LTMReader initialized — SearchMemory will include ArangoDB graph results")
+	}
+
+	// Erasure removes what the LTM graph learned from erased memory when the graph
+	// writer supports it.
+	if eraser, ok := interface{}(ltmWriter).(memory.GraphEraser); ok && ltmWriter != nil {
+		memoryServer.GetSTMStore().SetGraphEraser(eraser)
 	}
 
 	promoter := memory.NewPromoter(mongoDB, memoryServer.GetSTMStore(), ltmWriter)

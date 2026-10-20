@@ -366,6 +366,10 @@ func (sm *SessionManager) mergeChains(ctx context.Context, targetChain *models.C
 		},
 	}
 
+	if len(newChain.SessionIDs) > 0 {
+		update["$addToSet"] = bson.M{"sessionIds": bson.M{"$each": newChain.SessionIDs}}
+	}
+
 	filter := bson.M{"chainId": targetChain.ChainID}
 	_, err = chainsCollection.UpdateOne(ctx, filter, update)
 	if err != nil {

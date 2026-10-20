@@ -644,6 +644,44 @@ func squaredL2ToCosine(d float32) float32 {
 }
 
 // DeleteSegmentEmbedding removes a segment embedding from Milvus with tenant/user/agent scope
+// vectorIDPattern matches the IDs Athena uses for vectors (chain UUIDs and event
+// ObjectIDs), so they can be placed in a filter expression safely.
+var vectorIDPattern = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
+
+// DeleteSegmentEmbeddingsByID deletes segment vectors by ID, whatever their scope.
+// Chain and event IDs are globally unique, so no scope is needed to target them.
+func (mc *MilvusClient) DeleteSegmentEmbeddingsByID(ctx context.Context, ids []string) error {
+	return mc.deleteByID(ctx, SegmentCollectionName, SegmentIDFieldName, ids)
+}
+
+// DeleteEventEmbeddingsByID deletes event vectors stored in the STM collection, whose
+// page ID is the event ID.
+func (mc *MilvusClient) DeleteEventEmbeddingsByID(ctx context.Context, ids []string) error {
+	return mc.deleteByID(ctx, STMCollectionName, PageIDFieldName, ids)
+}
+
+func (mc *MilvusClient) deleteByID(ctx context.Context, collection, field string, ids []string) error {
+	const batch = 500
+	for start := 0; start < len(ids); start += batch {
+		end := start + batch
+		if end > len(ids) {
+			end = len(ids)
+		}
+		quoted := make([]string, 0, end-start)
+		for _, id := range ids[start:end] {
+			if !vectorIDPattern.MatchString(id) {
+				return fmt.Errorf("refusing to delete vector with malformed id %q", id)
+			}
+			quoted = append(quoted, `"`+id+`"`)
+		}
+		expr := fmt.Sprintf(`%s in [%s]`, field, strings.Join(quoted, ","))
+		if err := mc.client.Delete(ctx, collection, "", expr); err != nil {
+			return fmt.Errorf("failed to delete vectors from %s: %w", collection, err)
+		}
+	}
+	return nil
+}
+
 func (mc *MilvusClient) DeleteSegmentEmbedding(ctx context.Context, tenantID, userID, agentID, segmentID string) error {
 	// Filter expression for tenant/user/agent scope and segment ID
 	expr := fmt.Sprintf(`%s == "%s" && %s == "%s" && %s == "%s" && %s == "%s"`,

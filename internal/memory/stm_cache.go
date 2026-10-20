@@ -43,6 +43,52 @@ type STMEvent struct {
 	// ChainID ties this event to its session chain so the worker can associate
 	// events with the correct chain without generating a new random ID.
 	ChainID string `json:"chainId,omitempty"`
+	// SessionID is the session the event was stored through.
+	SessionID string `json:"sessionId,omitempty"`
+	// EventID is the hex ObjectID of the event's durable copy in cognitive_events,
+	// so chain formation promotes that document instead of inserting a duplicate.
+	EventID string `json:"eventId,omitempty"`
+}
+
+// STMActivityKey is the hash of STM scopes with events, and when each last received one.
+// The idle sweeper (Worker.RunIdleSweeper) reads it to summarise a scope that went
+// quiet before its STM expires.
+const STMActivityKey = "stm_activity:v1"
+
+// STMRetentionLimit is how many events a scope's STM keeps before the oldest are
+// dropped (STM_MAX_EVENTS, default 200). It bounds Redis memory if the workers fall
+// behind; it is not the context window (STM_CACHE_MAX_TURNS), and it must exceed
+// STM_MAX_EVENTS_BEFORE_FLUSH, or events are dropped before a summary can be forced.
+func STMRetentionLimit() int64 {
+	return int64(parseIntEnv("STM_MAX_EVENTS", 200))
+}
+
+// STMScopeField identifies a scope in STMActivityKey. JSON, because tenant, user and
+// agent ids may contain the separators the Redis keys use.
+func STMScopeField(tenantID, userID, agentID string) string {
+	field, _ := json.Marshal([]string{tenantID, userID, agentID})
+	return string(field)
+}
+
+// ParseSTMScopeField is the inverse of STMScopeField.
+func ParseSTMScopeField(field string) (tenantID, userID, agentID string, ok bool) {
+	var parts []string
+	if err := json.Unmarshal([]byte(field), &parts); err != nil || len(parts) != 3 {
+		return "", "", "", false
+	}
+	return parts[0], parts[1], parts[2], true
+}
+
+// trimToRetention keeps a scope's newest STMRetentionLimit events, and reports any it
+// drops: those were never summarised.
+func (s *STMCache) trimToRetention(cacheKey, userID string) error {
+	limit := STMRetentionLimit()
+	if count, err := s.redis.LLen(cacheKey); err == nil && count > limit {
+		MetricSTMEventsEvicted.Add(float64(count - limit))
+		slog.Error("STM over its retention limit: dropping events that were never summarised",
+			slog.String("user_id", userID), slog.Int64("dropped", count-limit), slog.Int64("limit", limit))
+	}
+	return s.redis.LTrim(cacheKey, 0, limit-1)
 }
 
 // STMCache provides Short-Term Memory caching for conversations and agent events.
@@ -98,7 +144,6 @@ func (s *STMCache) GetSTMContext(ctx context.Context, tenantID, userID, agentID 
 func (s *STMCache) AddSTMEvent(ctx context.Context, tenantID, userID, agentID string, event STMEvent) error {
 	start := time.Now()
 
-	StmCacheMaxTurns := int64(parseIntEnv("STM_CACHE_MAX_TURNS", 10))
 	StmCacheTTL := parseDurationEnv("STM_CACHE_TTL", 2) // 2 hours default
 	cacheKey := s.generateSTMKeyWithScope(tenantID, userID, agentID)
 
@@ -176,10 +221,17 @@ func (s *STMCache) AddSTMEvent(ctx context.Context, tenantID, userID, agentID st
 		return fmt.Errorf("failed to push STM event: %w", err)
 	}
 
-	// LTRIM to maintain sliding window of max events
-	if err := s.redis.LTrim(cacheKey, 0, StmCacheMaxTurns-1); err != nil {
+	// Bound the list. Events leave STM when a chain is formed from them (the worker
+	// trims what it summarised); this only drops events if the workers fall behind.
+	if err := s.trimToRetention(cacheKey, userID); err != nil {
 		MetricSTMCacheOps.WithLabelValues("append", "error").Inc()
 		return fmt.Errorf("failed to trim STM events: %w", err)
+	}
+
+	// Record the activity, so a scope that goes quiet is summarised before it expires.
+	if err := s.redis.HSet(STMActivityKey, STMScopeField(tenantID, userID, agentID),
+		strconv.FormatInt(time.Now().Unix(), 10)); err != nil {
+		slog.Warn("Failed to record STM activity", slog.String("user_id", userID), slog.String("error", err.Error()))
 	}
 
 	// Set expiration on the key to auto-cleanup stale conversations
@@ -204,8 +256,6 @@ func (s *STMCache) UpdateSTMEntries(ctx context.Context, tenantID, userID, agent
 
 	StmCacheTTL := parseDurationEnv("STM_CACHE_TTL", 2) // 2 hours default
 
-	StmCacheMaxTurns := int64(parseIntEnv("STM_CACHE_MAX_TURNS", 10))
-
 	cacheKey := s.generateSTMKeyWithScope(tenantID, userID, agentID)
 
 	// Clear existing cache
@@ -228,8 +278,8 @@ func (s *STMCache) UpdateSTMEntries(ctx context.Context, tenantID, userID, agent
 		}
 	}
 
-	// Ensure we don't exceed max events
-	if err := s.redis.LTrim(cacheKey, 0, StmCacheMaxTurns-1); err != nil {
+	// Ensure we don't exceed the retention limit
+	if err := s.trimToRetention(cacheKey, userID); err != nil {
 		slog.Warn("Failed to trim STM cache", slog.String("user_id", userID), slog.String("error", err.Error()))
 	}
 
