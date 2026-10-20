@@ -299,11 +299,12 @@ func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, ag
 	}
 
 	// Idempotency check: ensure we don't process the same chain twice
-	if !s.acquireProcessingLock(ctx, chainID) {
-		log.Printf("INFO: Chain %s is already being processed or has been processed recently. Skipping.", chainID)
+	release := s.acquireProcessingLock(ctx, chainID)
+	if release == nil {
+		log.Printf("INFO: Chain %s is already being processed. Skipping.", chainID)
 		return nil
 	}
-	defer s.releaseProcessingLock(ctx, chainID)
+	defer release()
 
 	log.Printf("INFO: Starting MTM formation for user %s with %d events.", userID, len(events))
 
@@ -621,46 +622,29 @@ func (s *STMStore) generateEmbeddingCacheKey(text, model string) string {
 	return fmt.Sprintf("embedding:cache:%s", hash)
 }
 
-// acquireProcessingLock attempts to acquire a lock for processing a chain
-// Returns true if lock was acquired, false if chain is already being processed
-func (s *STMStore) acquireProcessingLock(_ context.Context, chainID string) bool {
+// acquireProcessingLock takes the exclusive lock for forming chain chainID. It returns
+// a release function, or nil if another worker holds it. Without Redis it allows
+// processing (fail-open), as before.
+func (s *STMStore) acquireProcessingLock(_ context.Context, chainID string) func() {
 	if s.redis == nil {
-		// If Redis is not available, allow processing (fail-open for availability)
 		slog.Warn("Redis not available for idempotency check, proceeding with processing")
-		return true
+		return func() {}
 	}
-
 	lockKey := fmt.Sprintf("mtm:processing:lock:%s", chainID)
-	lockTTL := 5 * time.Minute // Lock expires after 5 minutes to prevent deadlocks
-
-	// Try to set the lock with NX (only if not exists)
-	err := s.redis.SetWithTTL(lockKey, "processing", lockTTL)
+	holder := uuid.New().String()
+	acquired, err := s.redis.SetNX(lockKey, holder, 5*time.Minute) // expires so a crashed worker cannot block it
 	if err != nil {
-		// Lock already exists or error occurred
-		slog.Warn("Failed to acquire processing lock", slog.String("chain_id", chainID), slog.String("error", err.Error()))
-
-		// Check if the key already exists to distinguish between "already processing" and other errors
-		exists, checkErr := s.redis.Exists(lockKey)
-		if checkErr == nil && exists {
-			return false // Chain is already being processed
+		slog.Warn("Processing lock unavailable, proceeding", slog.String("chain_id", chainID), slog.String("error", err.Error()))
+		return func() {}
+	}
+	if !acquired {
+		return nil
+	}
+	return func() {
+		// Only the holder releases it: after expiry another worker may hold it.
+		if err := s.redis.DeleteIfEquals(lockKey, holder); err != nil {
+			slog.Warn("Failed to release processing lock for chain", slog.String("chain_id", chainID), slog.String("error", err.Error()))
 		}
-		// For other errors, fail-open for availability
-		return true
-	}
-
-	return true
-}
-
-// releaseProcessingLock releases the processing lock for a chain
-func (s *STMStore) releaseProcessingLock(_ context.Context, chainID string) {
-	if s.redis == nil {
-		return
-	}
-
-	lockKey := fmt.Sprintf("mtm:processing:lock:%s", chainID)
-	err := s.redis.Delete(lockKey)
-	if err != nil {
-		slog.Warn("Failed to release processing lock for chain", slog.String("chain_id", chainID), slog.String("error", err.Error()))
 	}
 }
 

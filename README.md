@@ -238,13 +238,17 @@ Athena MemOS is a multi-tenant **memory service** for AI agents, implementing a 
 
 **Storage:** Redis  
 **Key pattern:** `stm:{tenantId}:{userId}:{agentId}`  
-**TTL:** `STM_CACHE_TTL` hours (default: 3600 seconds)  
+**TTL:** `STM_CACHE_TTL` hours (default: 2)  
 
-STM is the agent's immediate working memory. Every event is `LPUSH`'d into a Redis list (newest first) and trimmed to a sliding window of `STM_CACHE_MAX_TURNS` events. The list is also written to MongoDB (`cognitive_events`, `status="in_stm"`) for durability.
+STM is the agent's immediate working memory. Every event is `LPUSH`'d into a Redis list (newest first); `GetContext` returns the newest `STM_CACHE_MAX_TURNS` of them. The list is also written to MongoDB (`cognitive_events`, `status="in_stm"`) for durability.
+
+Events leave STM only when a chain is formed from them, so nothing is dropped before it is summarised. The list is bounded by `STM_MAX_EVENTS` (default 200) in case the workers fall behind; events dropped at that bound are logged as errors and counted in `stm_events_evicted_unsummarised_total`.
 
 **Event coalescing:** Automation events sharing the same `workflow_id` or `execution_id` in `metadata` are deduplicated so repeated action-observation pairs don't pollute the context window.
 
-**Automatic flush:** When the STM list grows to `STM_MAX_EVENTS_BEFORE_FLUSH` (default: 20), the older half is force-promoted to MTM even without a topic change.
+**Automatic flush:** When the STM list grows to `STM_MAX_EVENTS_BEFORE_FLUSH` (default: 20), the older half is force-promoted to MTM even without a topic change. `STM_MAX_EVENTS` must be larger; the server refuses to start otherwise.
+
+**Idle flush:** A scope that receives no events for `STM_IDLE_FLUSH_MINUTES` (default 30) has its remaining STM summarised, so a short session is in MTM before its STM expires. `STM_IDLE_FLUSH_MINUTES` must be shorter than `STM_CACHE_TTL`.
 
 ---
 
@@ -560,8 +564,11 @@ All three modes are disabled by default and can be independently enabled:
 | `REDIS_POOL_SIZE` | `10` | Connection pool size |
 | `REDIS_POOL_TIMEOUT` | `5s` | Pool checkout timeout |
 | `CACHE_TTL` | `3600` | Default TTL for STM entries (seconds) |
-| `STM_CACHE_MAX_TURNS` | `10` | Max events in STM sliding window |
-| `STM_CACHE_TTL` | `3600` | STM Redis key TTL (seconds) |
+| `STM_CACHE_MAX_TURNS` | `10` | Newest STM events returned as context by `GetContext` |
+| `STM_CACHE_TTL` | `2` | STM Redis key TTL (hours) |
+| `STM_MAX_EVENTS` | `200` | Most events a scope's STM keeps while waiting to be summarised; must exceed `STM_MAX_EVENTS_BEFORE_FLUSH` |
+| `STM_MAX_EVENTS_BEFORE_FLUSH` | `20` | STM size at which the older half is summarised without a topic change |
+| `STM_IDLE_FLUSH_MINUTES` | `30` | Quiet time after which a scope's remaining STM is summarised; must be shorter than `STM_CACHE_TTL` |
 | `STM_TASK_TIMEOUT` | `300` | Worker task execution timeout (seconds) |
 
 ### MongoDB (MTM)
