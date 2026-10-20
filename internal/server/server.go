@@ -47,14 +47,14 @@ type MemoryServer struct {
 	promoter                             *memory.Promoter
 	ltmReader                            *memory.LTMReader
 	persistCognitiveEvent                func(context.Context, *models.CognitiveEvent) (primitive.ObjectID, error)
-	// ltmStatus holds "" when the LTM graph is available, else why it is not.
-	ltmStatus atomic.Value
+	// sessions serves the session lifecycle endpoints; nil means the STM store.
+	sessions sessionStore
 	// llmStatus is the result of the latest LLM check ("healthy" or "unhealthy: ...").
 	llmStatus atomic.Value
 	// checkLLM runs the LLM check; nil means the STM store's.
 	checkLLM func(context.Context) error
-	// sessions serves the session lifecycle endpoints; nil means the STM store.
-	sessions sessionStore
+	// ltmStatus holds "" when the LTM graph is available, else why it is not.
+	ltmStatus atomic.Value
 	// getIDsFromSessionFunc allows mocking the DB call in tests
 	getIDsFromSessionFunc func(s *MemoryServer, ctx context.Context, sessionID string) (string, string, string, error)
 }
@@ -106,13 +106,6 @@ func (s *MemoryServer) HealthCheck(ctx context.Context, req *gen.HealthCheckRequ
 		deps["mongodb"] = "not_configured"
 	}
 
-	if st, _ := s.ltmStatus.Load().(string); st != "" {
-		deps["ltm"] = st
-		overallStatus = "degraded"
-	} else if s.ltmReader != nil {
-		deps["ltm"] = "healthy"
-	}
-
 	switch st, _ := s.llmStatus.Load().(string); {
 	case st == "":
 		deps["llm"] = "not_checked"
@@ -121,6 +114,13 @@ func (s *MemoryServer) HealthCheck(ctx context.Context, req *gen.HealthCheckRequ
 	default:
 		deps["llm"] = st
 		overallStatus = "degraded"
+	}
+
+	if st, _ := s.ltmStatus.Load().(string); st != "" {
+		deps["ltm"] = st
+		overallStatus = "degraded"
+	} else if s.ltmReader != nil {
+		deps["ltm"] = "healthy"
 	}
 
 	return &gen.HealthCheckResponse{
@@ -644,6 +644,11 @@ func (s *MemoryServer) CreateSession(ctx context.Context, req *gen.CreateSession
 	if agentID == "" {
 		agentID = "default"
 	}
+	for _, f := range []struct{ kind, id string }{{"tenant_id", tenantID}, {"user_id", userID}, {"agent_id", agentID}} {
+		if err := memory.ValidateScopeID(f.kind, f.id); err != nil {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		}
+	}
 	if err := s.checkWritable(tenantID, userID, agentID, ""); err != nil {
 		return nil, err
 	}
@@ -726,7 +731,7 @@ func (s *MemoryServer) SearchMemory(ctx context.Context, req *gen.SearchMemoryRe
 
 	// Augment with LTM graph results if the reader is available
 	if s.ltmReader != nil {
-		ltmExtraction, ltmErr := s.ltmReader.SearchByQuery(ctx, tenantID, query)
+		ltmExtraction, ltmErr := s.ltmReader.SearchByQuery(ctx, tenantID, userID, query)
 		if ltmErr != nil {
 			slog.Warn("LTM SearchByQuery failed, returning MTM results only", slog.String("error", ltmErr.Error()))
 		} else {

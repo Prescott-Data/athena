@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -51,9 +52,14 @@ func main() {
 	authMiddleware := middleware.NewAuthMiddleware(&cfg.Auth)
 
 	// Start gRPC server
+	// Every gRPC call, direct or through the REST gateway, is authenticated and
+	// authorised against the session's tenant here.
 	grpcServer := grpc.NewServer(
-	// Add gRPC interceptors here if needed
+		grpc.UnaryInterceptor(memoryServer.AuthUnaryInterceptor(authMiddleware)),
 	)
+	if !authMiddleware.Enabled() {
+		log.Printf("WARNING: authentication is disabled (MEMORY_OS_ALLOW_UNAUTHENTICATED=true): any caller can read and write every tenant's memory")
+	}
 
 	// Register gRPC service
 	gw.RegisterMemoryServiceServer(grpcServer, memoryServer)
@@ -74,7 +80,15 @@ func main() {
 		}
 	}()
 
-	grpcListener, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Server.GRPCPort))
+	// mTLS is verified on the HTTP server only. When it is required, the gRPC port
+	// listens on loopback, where only the REST gateway reaches it, so a client
+	// without a certificate cannot bypass the check by calling gRPC directly.
+	grpcAddr := fmt.Sprintf(":%d", cfg.Server.GRPCPort)
+	if cfg.Auth.RequireMTLS {
+		grpcAddr = fmt.Sprintf("127.0.0.1:%d", cfg.Server.GRPCPort)
+		log.Printf("MEMORY_OS_REQUIRE_MTLS is set: gRPC listens on %s only; external clients use the REST API", grpcAddr)
+	}
+	grpcListener, err := net.Listen("tcp", grpcAddr)
 	if err != nil {
 		log.Fatalf("Failed to listen on gRPC port %d: %v", cfg.Server.GRPCPort, err)
 	}
@@ -92,7 +106,14 @@ func main() {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	mux := runtime.NewServeMux()
+	// Forward the auth headers to the gRPC server, where they are verified.
+	mux := runtime.NewServeMux(runtime.WithIncomingHeaderMatcher(func(key string) (string, bool) {
+		switch strings.ToLower(key) {
+		case "x-api-key", "x-jwt-token":
+			return strings.ToLower(key), true
+		}
+		return runtime.DefaultHeaderMatcher(key)
+	}))
 
 	// Register gRPC gateway endpoints
 	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
@@ -244,6 +265,7 @@ func main() {
 	if eraser, ok := interface{}(ltmWriter).(memory.GraphEraser); ok && ltmWriter != nil {
 		memoryServer.GetSTMStore().SetGraphEraser(eraser)
 	}
+
 
 	// A nil *LTMWriter in the interface would look configured to the promoter and
 	// panic at the first promotion; without a writer, promotion is skipped.

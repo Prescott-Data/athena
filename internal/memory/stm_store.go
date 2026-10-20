@@ -430,7 +430,7 @@ func (s *STMStore) ProcessMTMFormation(ctx context.Context, tenantID, userID, ag
 	}
 
 	// Post-processing: Cleanup old chains for the user
-	if err := s.sessionManager.CleanupOldChains(ctx, userID); err != nil {
+	if err := s.sessionManager.CleanupOldChains(ctx, tenantID, userID); err != nil {
 		log.Printf("WARN: Failed to cleanup old chains for user %s: %v", userID, err)
 	}
 

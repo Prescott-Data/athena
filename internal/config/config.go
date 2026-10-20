@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -26,14 +27,51 @@ type ServerConfig struct {
 	EnableTLS    bool          `yaml:"enable_tls"`
 }
 
+// ServiceTenant marks an API key held by a trusted backend that may act for any
+// tenant; the tenant then comes from the request.
+const ServiceTenant = "*"
+
 // AuthConfig holds authentication configuration
 type AuthConfig struct {
-	RequireAPIKey    bool     `yaml:"require_api_key"`
-	RequireJWT       bool     `yaml:"require_jwt"`
-	RequireMTLS      bool     `yaml:"require_mtls"`
-	JWTSecret        string   `yaml:"jwt_secret"`
-	ValidAPIKeys     []string `yaml:"valid_api_keys"`
-	ClientCACertFile string   `yaml:"client_ca_cert_file"`
+	RequireAPIKey bool   `yaml:"require_api_key"`
+	RequireJWT    bool   `yaml:"require_jwt"`
+	RequireMTLS   bool   `yaml:"require_mtls"`
+	JWTSecret     string `yaml:"jwt_secret"`
+	// APIKeys maps each accepted API key to the tenant it may act for, or to
+	// ServiceTenant for a trusted backend that acts for any tenant.
+	APIKeys map[string]string `yaml:"api_keys"`
+	// AllowUnauthenticated permits starting with no authentication at all, so any
+	// caller can read and write any tenant's memory. For local development only.
+	AllowUnauthenticated bool   `yaml:"allow_unauthenticated"`
+	ClientCACertFile     string `yaml:"client_ca_cert_file"`
+}
+
+// placeholderJWTSecret was the default JWT secret of earlier releases. Tokens signed
+// with it can be forged by anyone, so it is refused.
+const placeholderJWTSecret = "your-secret-key"
+
+// parseAPIKeys reads MEMORY_OS_API_KEYS ("key=tenant,key2=*") and the single
+// MEMORY_OS_API_KEY of earlier releases, which is treated as a service key.
+func parseAPIKeys(list, single string) (map[string]string, error) {
+	keys := map[string]string{}
+	for _, entry := range strings.Split(list, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		key, tenant, ok := strings.Cut(entry, "=")
+		key, tenant = strings.TrimSpace(key), strings.TrimSpace(tenant)
+		if !ok || key == "" || tenant == "" {
+			return nil, fmt.Errorf("MEMORY_OS_API_KEYS entry %q must be key=tenant or key=*", entry)
+		}
+		keys[key] = tenant
+	}
+	if single = strings.TrimSpace(single); single != "" {
+		if _, dup := keys[single]; !dup {
+			keys[single] = ServiceTenant
+		}
+	}
+	return keys, nil
 }
 
 // MemoryConfig holds memory system configuration
@@ -106,12 +144,12 @@ func LoadConfig() (*Config, error) {
 			EnableTLS:    getEnvBool("MEMORY_OS_ENABLE_TLS", false),
 		},
 		Auth: AuthConfig{
-			RequireAPIKey:    getEnvBool("MEMORY_OS_REQUIRE_API_KEY", false),
-			RequireJWT:       getEnvBool("MEMORY_OS_REQUIRE_JWT", false),
-			RequireMTLS:      getEnvBool("MEMORY_OS_REQUIRE_MTLS", false),
-			JWTSecret:        getEnv("MEMORY_OS_JWT_SECRET", "your-secret-key"),
-			ValidAPIKeys:     []string{getEnv("MEMORY_OS_API_KEY", "default-api-key")},
-			ClientCACertFile: getEnv("MEMORY_OS_CLIENT_CA_CERT_FILE", ""),
+			RequireAPIKey:        getEnvBool("MEMORY_OS_REQUIRE_API_KEY", false),
+			RequireJWT:           getEnvBool("MEMORY_OS_REQUIRE_JWT", false),
+			RequireMTLS:          getEnvBool("MEMORY_OS_REQUIRE_MTLS", false),
+			JWTSecret:            getEnv("MEMORY_OS_JWT_SECRET", ""),
+			AllowUnauthenticated: getEnvBool("MEMORY_OS_ALLOW_UNAUTHENTICATED", false),
+			ClientCACertFile:     getEnv("MEMORY_OS_CLIENT_CA_CERT_FILE", ""),
 		},
 		Memory: MemoryConfig{
 			STM: STMConfig{
@@ -149,6 +187,12 @@ func LoadConfig() (*Config, error) {
 			},
 		},
 	}
+
+	apiKeys, err := parseAPIKeys(os.Getenv("MEMORY_OS_API_KEYS"), os.Getenv("MEMORY_OS_API_KEY"))
+	if err != nil {
+		return nil, err
+	}
+	config.Auth.APIKeys = apiKeys
 
 	return config, nil
 }
@@ -199,11 +243,19 @@ func (c *Config) Validate() error {
 	}
 
 	if c.Auth.RequireJWT && c.Auth.JWTSecret == "" {
-		return fmt.Errorf("JWT secret is required when JWT authentication is enabled")
+		return fmt.Errorf("MEMORY_OS_JWT_SECRET is required when JWT authentication is enabled")
+	}
+	if c.Auth.RequireJWT && c.Auth.JWTSecret == placeholderJWTSecret {
+		return fmt.Errorf("MEMORY_OS_JWT_SECRET is the published placeholder %q; set a secret of your own", placeholderJWTSecret)
 	}
 
-	if c.Auth.RequireAPIKey && len(c.Auth.ValidAPIKeys) == 0 {
-		return fmt.Errorf("valid API keys are required when API key authentication is enabled")
+	if c.Auth.RequireAPIKey && len(c.Auth.APIKeys) == 0 {
+		return fmt.Errorf("MEMORY_OS_API_KEYS (or MEMORY_OS_API_KEY) is required when API key authentication is enabled")
+	}
+
+	if !c.Auth.RequireAPIKey && !c.Auth.RequireJWT && !c.Auth.AllowUnauthenticated {
+		return fmt.Errorf("authentication is disabled: set MEMORY_OS_REQUIRE_API_KEY and/or MEMORY_OS_REQUIRE_JWT, " +
+			"or MEMORY_OS_ALLOW_UNAUTHENTICATED=true to run without it (any caller can then read every tenant's memory)")
 	}
 
 	if c.Database.MongoDB.URI == "" {

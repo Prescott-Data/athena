@@ -56,7 +56,9 @@ func NewLTMReader(ctx context.Context, dbURL, user, pass, dbName string) (*LTMRe
 // FetchContext retrieves a sub-graph starting from the provided entity node IDs.
 // It executes an AQL graph traversal (1-2 hops) from each start vertex via MemoryEdges,
 // filtering by confidence >= 0.5 and ranking by weight and heat_score.
-func (r *LTMReader) FetchContext(ctx context.Context, tenantID string, startNodeIDs []string) (*GraphExtraction, error) {
+//
+// Only nodes and edges in the tenant and user's own graph are traversed.
+func (r *LTMReader) FetchContext(ctx context.Context, tenantID, userID string, startNodeIDs []string) (*GraphExtraction, error) {
 	if len(startNodeIDs) == 0 {
 		return &GraphExtraction{Nodes: []GraphNode{}, Edges: []GraphEdge{}}, nil
 	}
@@ -73,7 +75,11 @@ func (r *LTMReader) FetchContext(ctx context.Context, tenantID string, startNode
 	query := `
 		FOR startNode IN @startNodes
 			FOR v, e, p IN 1..2 ANY startNode MemoryEdges
+				// e is null at depth 0; without the guard every traversal is pruned at its start.
+				PRUNE e != null && (e.tenant_id != @tenant || e.user_id != @user)
 				FILTER e != null && e.confidence >= 0.5
+				FILTER p.edges[*].tenant_id ALL == @tenant AND p.edges[*].user_id ALL == @user
+				FILTER p.vertices[*].tenant_id ALL == @tenant AND p.vertices[*].user_id ALL == @user
 				SORT e.weight DESC, e.heat_score DESC
 				LIMIT 50
 				RETURN DISTINCT {
@@ -84,6 +90,8 @@ func (r *LTMReader) FetchContext(ctx context.Context, tenantID string, startNode
 
 	bindVars := map[string]interface{}{
 		"startNodes": startNodeIDs,
+		"tenant":     tenantID,
+		"user":       userID,
 	}
 
 	fetchStart := time.Now()
@@ -108,9 +116,10 @@ func (r *LTMReader) FetchContext(ctx context.Context, tenantID string, startNode
 	for {
 		var result struct {
 			Node struct {
-				ID     string `json:"_key"`
-				IDFull string `json:"_id"`
-				Name   string `json:"name"`
+				ID       string `json:"_key"`
+				EntityID string `json:"entity_id"`
+				IDFull   string `json:"_id"`
+				Name     string `json:"name"`
 			} `json:"node"`
 			Edge struct {
 				ID            string  `json:"_key"`
@@ -135,15 +144,15 @@ func (r *LTMReader) FetchContext(ctx context.Context, tenantID string, startNode
 		// We store the key as ID and derive the label from the collection prefix.
 		label := determineLabelFromID(result.Node.IDFull)
 		nodesMap[result.Node.IDFull] = GraphNode{
-			ID:    result.Node.ID,
+			ID:    result.Node.EntityID,
 			Label: label,
 			Name:  result.Node.Name,
 		}
 
 		edgeKey := fmt.Sprintf("%s-%s-%s", result.Edge.From, result.Edge.Relation, result.Edge.To)
 		edgesMap[edgeKey] = GraphEdge{
-			From:          stripCollectionPrefix(result.Edge.From),
-			To:            stripCollectionPrefix(result.Edge.To),
+			From:          strings.TrimPrefix(stripCollectionPrefix(result.Edge.From), ltmScopePrefix(tenantID, userID)),
+			To:            strings.TrimPrefix(stripCollectionPrefix(result.Edge.To), ltmScopePrefix(tenantID, userID)),
 			Relation:      result.Edge.Relation,
 			ContextNuance: result.Edge.ContextNuance,
 			Confidence:    result.Edge.Confidence,
@@ -188,7 +197,7 @@ func (r *LTMReader) FetchContext(ctx context.Context, tenantID string, startNode
 
 // SearchByQuery resolves a free-text query to matching ArangoDB node IDs (via name keyword search)
 // and then calls FetchContext to retrieve the surrounding sub-graph.
-func (r *LTMReader) SearchByQuery(ctx context.Context, tenantID, query string) (*GraphExtraction, error) {
+func (r *LTMReader) SearchByQuery(ctx context.Context, tenantID, userID, query string) (*GraphExtraction, error) {
 	keywords := extractLTMKeywords(query)
 	if len(keywords) == 0 {
 		return &GraphExtraction{Nodes: []GraphNode{}, Edges: []GraphEdge{}}, nil
@@ -196,7 +205,7 @@ func (r *LTMReader) SearchByQuery(ctx context.Context, tenantID, query string) (
 
 	nodeIDSet := make(map[string]bool)
 	for _, kw := range keywords {
-		ids, err := r.findNodeIDsByKeyword(ctx, kw)
+		ids, err := r.findNodeIDsByKeyword(ctx, tenantID, userID, kw)
 		if err != nil {
 			slog.Warn("LTM keyword search failed", slog.String("keyword", kw), slog.String("error", err.Error()))
 			continue
@@ -215,11 +224,11 @@ func (r *LTMReader) SearchByQuery(ctx context.Context, tenantID, query string) (
 		startNodes = append(startNodes, id)
 	}
 
-	return r.FetchContext(ctx, tenantID, startNodes)
+	return r.FetchContext(ctx, tenantID, userID, startNodes)
 }
 
-// findNodeIDsByKeyword searches all node collections for documents whose name contains the keyword.
-func (r *LTMReader) findNodeIDsByKeyword(ctx context.Context, keyword string) ([]string, error) {
+// findNodeIDsByKeyword searches the tenant and user's nodes for names containing the keyword.
+func (r *LTMReader) findNodeIDsByKeyword(ctx context.Context, tenantID, userID, keyword string) ([]string, error) {
 	query := `
 		FOR doc IN UNION(
 			(FOR d IN Concepts    RETURN d),
@@ -227,11 +236,12 @@ func (r *LTMReader) findNodeIDsByKeyword(ctx context.Context, keyword string) ([
 			(FOR d IN Projects    RETURN d),
 			(FOR d IN Tools       RETURN d)
 		)
+		FILTER doc.tenant_id == @tenant && doc.user_id == @user
 		FILTER CONTAINS(LOWER(doc.name), @kw)
 		LIMIT 5
 		RETURN doc._id
 	`
-	cursor, err := r.db.Query(ctx, query, map[string]interface{}{"kw": keyword})
+	cursor, err := r.db.Query(ctx, query, map[string]interface{}{"kw": keyword, "tenant": tenantID, "user": userID})
 	if err != nil {
 		return nil, fmt.Errorf("keyword search AQL failed: %w", err)
 	}

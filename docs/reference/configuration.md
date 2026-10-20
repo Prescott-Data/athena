@@ -22,10 +22,12 @@ Every environment variable the code reads, by category. Defaults are the code's 
 | Variable | Default | Description |
 |---|---|---|
 | `MEMORY_OS_REQUIRE_API_KEY` | `false` | Enforce API-key auth |
-| `MEMORY_OS_API_KEY` | | The accepted key |
+| `MEMORY_OS_API_KEYS` | | Accepted keys: `key=tenant` (tenant key) or `key=*` (service key), comma-separated |
+| `MEMORY_OS_API_KEY` | | One service key (earlier releases); same as `MEMORY_OS_API_KEYS=<key>=*` |
 | `MEMORY_OS_REQUIRE_JWT` | `false` | Enforce JWT auth |
-| `MEMORY_OS_JWT_SECRET` | | HMAC secret for token validation |
+| `MEMORY_OS_JWT_SECRET` | | HMAC secret for token validation; required with JWT, no default |
 | `MEMORY_OS_REQUIRE_MTLS` | `false` | Enforce client certificates |
+| `MEMORY_OS_ALLOW_UNAUTHENTICATED` | `false` | Start with no authentication (development only; every tenant's memory is open) |
 
 Recipes: [Enabling Authentication](../guides/authentication.md).
 

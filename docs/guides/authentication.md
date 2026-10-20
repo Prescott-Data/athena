@@ -1,31 +1,42 @@
 # Enabling Authentication
 
-Athena starts with all auth off. This guide is the recipes; the reasoning and threat model live in [Security Model](../concepts/security-model.md).
+Athena will not start without authentication unless `MEMORY_OS_ALLOW_UNAUTHENTICATED=true` is set (local development only). This guide is the recipes; the reasoning and the authorisation rules are in [Security Model](../concepts/security-model.md).
 
-## Recipe 1: API key (service gate)
+## Recipe 1: a backend that serves many tenants
+
+An agent framework or platform backend that stores memory for many tenants holds one **service key** and names the tenant in each request:
 
 ```bash title="environment"
 MEMORY_OS_REQUIRE_API_KEY=true
-MEMORY_OS_API_KEY=$(openssl rand -hex 32)
+MEMORY_OS_API_KEYS="$(openssl rand -hex 32)=*"
 ```
-
-Clients send the key on every request, either header form:
 
 ```bash
-curl -H "X-API-Key: $KEY" http://athena:8080/api/v1/sessions ...
-curl -H "Authorization: Bearer $KEY" http://athena:8080/api/v1/sessions ...
+curl -H "X-API-Key: $KEY" -X POST http://athena:8080/api/v1/sessions \
+  -d '{"tenant_id": "acme", "user_id": "user_123", "agent_id": "support-bot"}'
 ```
 
-Missing or wrong key returns **401**. Store the key in your secret manager, inject it as an env var, and rotate by redeploying (there is no rotation API; overlap windows require running two replicas with different keys behind your ingress).
+A service key can act for every tenant. Keep it in the backend's secret store and keep Athena on a private network.
 
-## Recipe 2: JWT (identity and tenancy)
+## Recipe 2: one key per tenant
+
+When tenants (or per-tenant services) call Athena themselves, give each a **tenant key**:
+
+```bash title="environment"
+MEMORY_OS_REQUIRE_API_KEY=true
+MEMORY_OS_API_KEYS="<acme key>=acme,<globex key>=globex"
+```
+
+A tenant key creates sessions in its own tenant (the body's `tenant_id` may be omitted; a different one is refused with 403) and sees only its tenant's sessions (others return 404).
+
+## Recipe 3: JWT for per-user identity
 
 ```bash title="environment"
 MEMORY_OS_REQUIRE_JWT=true
 MEMORY_OS_JWT_SECRET=<shared HMAC secret>
 ```
 
-Your platform's auth service mints short-lived tokens carrying the scope:
+Your auth service mints short-lived tokens carrying the scope:
 
 ```json
 {
@@ -36,7 +47,7 @@ Your platform's auth service mints short-lived tokens carrying the scope:
 }
 ```
 
-Clients send `X-JWT-Token: <token>` (or `Authorization: JWT <token>`). With JWT enabled, **scope in request bodies is ignored**; the token is the identity. `tenant_id`, `user_id`, and `exp` are required; expired or tampered tokens return 401.
+Clients send `X-JWT-Token: <token>` (or `Authorization: JWT <token>`). The token is the identity: `CreateSession` takes tenant, user and agent from it and refuses a body naming anyone else, and calls on a session succeed only for that session's tenant, user and (if the token names one) agent.
 
 Minting example (Go):
 
@@ -50,10 +61,9 @@ token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 signed, err := token.SignedString([]byte(os.Getenv("MEMORY_OS_JWT_SECRET")))
 ```
 
-!!! danger "Multi-tenant deployments need JWT"
-    An API key alone lets any caller name any tenant in the request body. If more than one tenant's data is in the deployment, enable JWT (or terminate identity at a trusted gateway in front of Athena).
+API key and JWT can be required together; the token then decides identity, and a tenant key must match the token's tenant.
 
-## Recipe 3: mTLS (transport identity)
+## Recipe 4: mTLS (transport identity)
 
 ```bash title="environment"
 MEMORY_OS_ENABLE_TLS=true
@@ -61,32 +71,23 @@ MEMORY_OS_REQUIRE_MTLS=true
 # plus certificate, key, and CA bundle paths; see the Configuration Reference
 ```
 
-The server presents its certificate and verifies client certificates against the CA. Connections without a valid client cert are rejected before any HTTP is parsed. Combine with JWT for per-request identity on top of the authenticated channel.
+mTLS authenticates the HTTP channel but names no tenant: combine it with JWT or API keys. With mTLS required, the gRPC port is bound to loopback and external clients use the REST API.
 
-## Combining mechanisms
+## gRPC clients
 
-Enabled checks run in order (mTLS, then API key, then JWT) and all must pass:
-
-| Posture | Enable |
-|---|---|
-| Local development | nothing (default) |
-| Internal single tenant | API key |
-| Multi-tenant platform | API key + JWT |
-| Zero-trust network | mTLS + JWT |
-
-`/health` and `/metrics` always bypass auth, so probes and Prometheus need no credentials.
+Direct gRPC calls (port 9090) are authenticated and authorised exactly like REST (unless mTLS is required, which keeps gRPC on loopback). Send the credentials as metadata: `x-api-key`, `x-jwt-token`, or `authorization`.
 
 ## Verifying your setup
 
 ```bash
-# should be 401 (no credentials)
+# 401: no credentials
 curl -s -o /dev/null -w "%{http_code}\n" -X POST http://athena:8080/api/v1/sessions -d '{}'
 
-# should be 200 regardless of auth config
+# 404: a tenant key reading another tenant's session
+curl -s -o /dev/null -w "%{http_code}\n" -H "X-API-Key: $ACME_KEY" http://athena:8080/api/v1/sessions/$GLOBEX_SESSION/context
+
+# 200 regardless of auth config
 curl -s -o /dev/null -w "%{http_code}\n" http://athena:8080/health
 ```
 
-Auth outcomes are logged; failed attempts appear in server logs with the mechanism that rejected them.
-
-!!! note "Admin endpoints"
-    There is no per-endpoint authorization: any authenticated caller can hit `POST /api/v1/admin/analytics/trigger`. Restrict admin paths at your ingress or network policy layer.
+Denied calls are logged with the method and the caller's tenant and user.

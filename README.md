@@ -510,11 +510,11 @@ tenant_id
         └── agent_id
 ```
 
-`tenant_id` and `user_id` are always resolved from the authentication token or API key configuration — never trusted from the request body. All MongoDB indexes, Redis key patterns, Milvus field filters, and ArangoDB node properties scope data by this hierarchy.
+The tenant comes from the caller's credentials: a JWT names tenant and user, a tenant API key names the tenant, and only a service API key (held by a trusted backend) may name the tenant in the request. Calls on another tenant's session return `NotFound`, on REST and gRPC alike. Redis keys, MongoDB queries, Milvus filters and the ArangoDB knowledge graph are all scoped by this hierarchy. See [Security Model](docs/concepts/security-model.md).
 
 ### Auth Modes
 
-All three modes are disabled by default and can be independently enabled:
+Athena refuses to start unless API-key or JWT auth is enabled (or `MEMORY_OS_ALLOW_UNAUTHENTICATED=true` for local development). The modes can be combined:
 
 | Mode | Env flag | Header |
 |---|---|---|
@@ -548,8 +548,10 @@ All three modes are disabled by default and can be independently enabled:
 | `MEMORY_OS_REQUIRE_API_KEY` | `false` | Enforce `X-API-Key` header |
 | `MEMORY_OS_REQUIRE_JWT` | `false` | Enforce `X-JWT-Token` header |
 | `MEMORY_OS_REQUIRE_MTLS` | `false` | Enforce mutual TLS |
-| `MEMORY_OS_API_KEY` | `default-api-key` | Valid API key value |
-| `MEMORY_OS_JWT_SECRET` | `your-secret-key` | JWT HMAC signing secret |
+| `MEMORY_OS_API_KEYS` | `""` | Accepted keys: `key=tenant` or `key=*` (service key), comma-separated |
+| `MEMORY_OS_API_KEY` | `""` | One service key (earlier releases) |
+| `MEMORY_OS_JWT_SECRET` | `""` | JWT HMAC signing secret; required with JWT |
+| `MEMORY_OS_ALLOW_UNAUTHENTICATED` | `false` | Start with no authentication (development only) |
 | `MEMORY_OS_CLIENT_CA_CERT_FILE` | `""` | Path to CA certificate for mTLS |
 
 ### Redis (STM + Task Queues)
