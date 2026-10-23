@@ -51,7 +51,8 @@ Every call (REST, which the gateway forwards to gRPC with the credentials, and d
 | `CreateSession` | Tenant, and user/agent if the token names them, come from the credentials; a body naming anyone else is refused (`PermissionDenied`) | Identity from the request |
 | Calls on a session (`/sessions/{id}/…`) | Allowed only if the session's tenant (and user/agent, when the token names them) match; otherwise `NotFound`, so other tenants' session IDs cannot be probed | Allowed |
 | `TriggerGraphAnalytics` | `PermissionDenied` | Allowed |
-| `HealthCheck`, `/health`, `/metrics` | No credentials needed | No credentials needed |
+| `HealthCheck`, `/health` | No credentials needed | No credentials needed |
+| `/metrics` (aggregated across tenants) | `403` | Allowed; `MEMORY_OS_METRICS_PUBLIC=true` opens it to anyone |
 
 ## Data-layer isolation
 

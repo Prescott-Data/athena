@@ -46,7 +46,7 @@ Two routes live outside `/api/v1` and never require auth:
 
 ```bash
 curl http://localhost:8080/health    # {"status":"healthy","service":"memory-os",...}
-curl http://localhost:8080/metrics   # Prometheus text format
+curl -H "X-API-Key: $ATHENA_SERVICE_KEY" http://localhost:8080/metrics   # Prometheus text format; needs a service key
 ```
 
 `/health` reports `degraded` when Redis or MongoDB checks fail; wire it to liveness probes. The richer dependency-by-dependency check is `GET /api/v1/health`.

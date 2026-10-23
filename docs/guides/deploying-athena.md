@@ -76,7 +76,8 @@ Replicas are safe by construction: all state lives in the stores, workers coordi
 - [ ] [Authentication enabled](authentication.md); JWT if multi-tenant
 - [ ] `/api/v1/admin/*` restricted at ingress
 - [ ] `EMBEDDING_DIMENSIONS` matches the provider ([the trap](llm-providers.md#the-dimension-trap))
-- [ ] `/metrics` scraped; alerts on queue depth and `llm_fallback_calls_total`
+- [ ] `/metrics` scraped with a service key ([scrape config](../reference/metrics.md)); alerts on queue depth and `llm_fallback_calls_total`
+- [ ] `/api/v1/health` reports `milvus` healthy: without Milvus, memory is stored but never searchable
 - [ ] Analytics CronJob scheduled off-peak with `concurrencyPolicy: Forbid`
 - [ ] Datastore backups: MongoDB and ArangoDB are the system of record (Redis and Milvus are reconstructible in principle, but archived-chain vectors are not; treat Milvus as valuable)
 - [ ] TLS at the edge or `MEMORY_OS_ENABLE_TLS` end-to-end

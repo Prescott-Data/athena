@@ -321,7 +321,7 @@ Dependency-aware health. Distinct from the auth-free Gin `/health` liveness rout
 | Field | Type | Notes |
 |---|---|---|
 | `status` | string | `healthy` \| `degraded` |
-| `dependencies` | map<string,string> | Per-store status (`redis`, `mongodb`), error text on failure |
+| `dependencies` | map<string,string> | Per-dependency status (`redis`, `mongodb`, `milvus`, `llm`, `ltm`), error text on failure; any failure makes `status` `degraded` |
 | `timestamp` | timestamp | |
 
 ---
@@ -343,4 +343,4 @@ Starts community detection + bridge scoring in the background; returns immediate
 | Route | Auth | Purpose |
 |---|---|---|
 | `GET /health` | never required | Liveness: `{"status", "service": "memory-os", "timestamp"}`; `degraded` if Redis/MongoDB checks fail |
-| `GET /metrics` | never required | Prometheus text format ([Metrics reference](metrics.md)) |
+| `GET /metrics` | service key (tenant keys get `403`); none with `MEMORY_OS_METRICS_PUBLIC=true` or when authentication is off | Prometheus text format ([Metrics reference](metrics.md)) |

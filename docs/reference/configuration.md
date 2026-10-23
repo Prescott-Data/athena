@@ -24,6 +24,7 @@ Every environment variable the code reads, by category. Defaults are the code's 
 | `MEMORY_OS_REQUIRE_API_KEY` | `false` | Enforce API-key auth |
 | `MEMORY_OS_API_KEYS` | | Accepted keys: `key=tenant` (tenant key) or `key=*` (service key), comma-separated |
 | `MEMORY_OS_API_KEY` | | One service key (earlier releases); same as `MEMORY_OS_API_KEYS=<key>=*` |
+| `MEMORY_OS_METRICS_PUBLIC` | `false` | Serve `/metrics` without credentials. By default it needs a service key, since the metrics cover every tenant |
 | `MEMORY_OS_REQUIRE_JWT` | `false` | Enforce JWT auth |
 | `MEMORY_OS_JWT_SECRET` | | HMAC secret for token validation; required with JWT, no default |
 | `MEMORY_OS_REQUIRE_MTLS` | `false` | Enforce client certificates |
@@ -56,7 +57,7 @@ Recipes: [Enabling Authentication](../guides/authentication.md).
 
 | Variable | Default | Description |
 |---|---|---|
-| `MEMORY_OS_MILVUS_HOST` / `MILVUS_HOST` (alias) | `localhost` | |
+| `MEMORY_OS_MILVUS_HOST` / `MILVUS_HOST` (alias) | | Required: without it chains are stored without vectors and semantic search returns nothing; `/api/v1/health` reports `milvus` |
 | `MEMORY_OS_MILVUS_PORT` / `MILVUS_PORT` (alias) | `19530` | |
 | `MILVUS_VECTOR_DIMENSION` | | Overrides vector dimension; normally derive from `EMBEDDING_DIMENSIONS` |
 

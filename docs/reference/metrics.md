@@ -1,6 +1,6 @@
 # Metrics
 
-Athena exposes Prometheus metrics at `GET /metrics` on port 8080 (no auth required). Two naming families exist: cognitive-pipeline metrics are unprefixed; promoter, LTM, blob, and analytics metrics carry the `memos_` prefix.
+Athena exposes Prometheus metrics at `GET /metrics` on port 8080. The metrics are aggregated across tenants, so reading them takes a service key (`X-API-Key`; a tenant key gets `403`), unless `MEMORY_OS_METRICS_PUBLIC=true` or authentication is off. Two naming families exist: cognitive-pipeline metrics are unprefixed; promoter, LTM, blob, and analytics metrics carry the `memos_` prefix.
 
 ## Pipeline (worker / STM path)
 
@@ -70,4 +70,17 @@ Athena exposes Prometheus metrics at `GET /metrics` on port 8080 (no auth requir
   expr: rate(memos_ltm_fetch_errors_total[10m]) > 0
 ```
 
-Standard Go runtime and process metrics (`go_*`, `process_*`) are exported alongside; scrape configuration is ordinary Prometheus (`/metrics`, no credentials).
+Standard Go runtime and process metrics (`go_*`, `process_*`) are exported alongside; scrape configuration is ordinary Prometheus with the service key as a header:
+
+```yaml
+scrape_configs:
+  - job_name: athena
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["athena:8080"]
+    http_headers:
+      X-API-Key:
+        files: [/etc/prometheus/athena-service-key]
+```
+
+Prometheus versions without `http_headers` in scrape configs cannot send the key; with those, set `MEMORY_OS_METRICS_PUBLIC=true` and restrict `/metrics` at your network edge instead.
