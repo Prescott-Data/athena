@@ -4,6 +4,40 @@ Releases are cut automatically when the `VERSION` file changes on the default br
 
 <div class="changelog-release" markdown>
 
+## v0.3.0 <span class="changelog-date">October 2026</span>
+
+<div class="changelog-meta" markdown>
+<a class="changelog-release-link" href="https://github.com/Prescott-Data/athena/releases/tag/v0.3.0" target="_blank" rel="noopener">View release</a>
+</div>
+
+`/metrics` now needs a service key, so Prometheus scrapers need a configuration change before they upgrade. See **Upgrading** below.
+
+**Security**
+
+- `/metrics` needs a service key. The metrics are aggregated across tenants and were readable by anyone who could reach the server; a tenant key now gets `403`. `MEMORY_OS_METRICS_PUBLIC=true` serves them without credentials, and a server running without authentication is unaffected. `/health` stays open.
+- Dependencies with published advisories are upgraded: `google.golang.org/grpc` 1.83.1, `github.com/klauspost/compress` 1.18.7 and `go.opentelemetry.io/otel/sdk` 1.45.0 in the server; `golang.org/x/crypto`, `golang.org/x/net` and `compress` in the benchmark and test-script modules, which now need Go 1.25.
+
+**Breaking changes**
+
+- Scraping `/metrics` without a service key returns `401` (no key) or `403` (tenant key).
+
+**Fixed**
+
+- Milvus was used only when `MILVUS_HOST` and `MILVUS_PORT` were both set, although the documented `MEMORY_OS_MILVUS_HOST` and `MEMORY_OS_MILVUS_PORT` were read elsewhere. With the two split across the names, Athena ran without vectors: chains were stored but semantic search returned nothing, and every health check stayed green. Both names are now read, and the port defaults to `19530`.
+
+**Added**
+
+- `/api/v1/health` reports `milvus`, and `status` is `degraded` when it is not configured or does not answer. Starting without Milvus is logged as an error.
+
+**Upgrading**
+
+1. Give your Prometheus scraper a service key (`MEMORY_OS_API_KEYS="<key>=*"`) and send it as `X-API-Key`; the [Metrics reference](metrics.md) has a scrape config. Or set `MEMORY_OS_METRICS_PUBLIC=true` to keep `/metrics` open.
+2. Check `/api/v1/health` after the upgrade. If `milvus` is not `healthy`, chains stored before it was fixed have no vectors and are not found by semantic search; new chains are.
+
+</div>
+
+<div class="changelog-release" markdown>
+
 ## v0.2.1 <span class="changelog-date">October 2026</span>
 
 <div class="changelog-meta" markdown>

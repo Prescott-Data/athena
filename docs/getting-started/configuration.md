@@ -34,7 +34,7 @@ Most variables use the `MEMORY_OS_` prefix and are read once at startup by `inte
 |---|---|---|
 | `MONGO_URI` | — | MongoDB connection string (STM durability + MTM chains) |
 | `REDIS_HOST` / `REDIS_PORT` | `127.0.0.1` / `6379` | STM hot path + task queues |
-| `MILVUS_HOST` / `MILVUS_PORT` | `127.0.0.1` / `19530` | MTM embedding search |
+| `MILVUS_HOST` / `MILVUS_PORT` | `127.0.0.1` / `19530` | MTM embedding search (`MEMORY_OS_MILVUS_*` also accepted) |
 | `ARANGODB_URL` | `http://localhost:8529` | LTM knowledge graph |
 | `ARANGODB_PASSWORD` | — | Server exits if LTM is enabled and this is empty |
 

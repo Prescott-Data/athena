@@ -51,7 +51,7 @@ All defaults are reasonable; change one at a time and watch the [metrics](../ref
 ## What to monitor
 
 ```bash
-curl -s http://localhost:8080/metrics | grep -E "memos_|stm_cache|llm_fallback|cosine"
+curl -s -H "X-API-Key: $ATHENA_SERVICE_KEY" http://localhost:8080/metrics | grep -E "memos_|stm_cache|llm_fallback|cosine"
 ```
 
 The signals that matter operationally:

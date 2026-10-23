@@ -73,8 +73,10 @@ func (am *AuthMiddleware) Enabled() bool {
 // GinAuthMiddleware returns a Gin middleware function for authentication
 func (am *AuthMiddleware) GinAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Skip authentication for liveness and metrics scraping
-		if c.Request.URL.Path == "/health" || c.Request.URL.Path == "/metrics" {
+		// Liveness is open. Metrics are aggregated across tenants, so they need a
+		// service key unless MEMORY_OS_METRICS_PUBLIC opts out or authentication is off.
+		metrics := c.Request.URL.Path == "/metrics"
+		if c.Request.URL.Path == "/health" || (metrics && (am.config.MetricsPublic || !am.Enabled())) {
 			c.Next()
 			return
 		}
@@ -84,6 +86,15 @@ func (am *AuthMiddleware) GinAuthMiddleware() gin.HandlerFunc {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"error":   "authentication_failed",
 				"message": err.Error(),
+			})
+			c.Abort()
+			return
+		}
+
+		if metrics && !authCtx.Service {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error":   "forbidden",
+				"message": "metrics require a service key",
 			})
 			c.Abort()
 			return

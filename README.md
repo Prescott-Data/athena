@@ -500,7 +500,7 @@ All endpoints are available as both gRPC (port 9090) and REST HTTP (port 8080) v
 | Endpoint | Description |
 |---|---|
 | `GET /health` | Simple liveness probe (Gin, no auth) |
-| `GET /metrics` | Prometheus metrics scrape endpoint |
+| `GET /metrics` | Prometheus metrics scrape endpoint (service key; `MEMORY_OS_METRICS_PUBLIC=true` opens it) |
 
 ---
 
@@ -589,8 +589,8 @@ Athena refuses to start unless API-key or JWT auth is enabled (or `MEMORY_OS_ALL
 
 | Variable | Default | Description |
 |---|---|---|
-| `MILVUS_HOST` | `localhost` | Milvus server hostname |
-| `MILVUS_PORT` | `19530` | Milvus gRPC port |
+| `MILVUS_HOST` (or `MEMORY_OS_MILVUS_HOST`) | | Milvus server hostname; required, or chains are stored without vectors |
+| `MILVUS_PORT` (or `MEMORY_OS_MILVUS_PORT`) | `19530` | Milvus gRPC port |
 | `MILVUS_DATABASE` | `""` | Milvus database name (optional) |
 | `EMBEDDING_DIMENSIONS` | `1536` | Vector dimensionality — must match embedding model |
 
@@ -780,7 +780,7 @@ Valid `relation` values: `USES`, `WORKS_ON`, `BUILT_FOR_CLIENT`, `STRUGGLES_WITH
 
 ## 9. Prometheus Metrics
 
-Exposed at `GET /metrics`.
+Exposed at `GET /metrics`. The metrics cover every tenant, so they need a service key in `X-API-Key` unless `MEMORY_OS_METRICS_PUBLIC=true`.
 
 | Metric | Type | Description |
 |---|---|---|
@@ -874,7 +874,7 @@ go run cmd/memory-server/main.go
 The server starts on:
 - HTTP/REST: `http://localhost:8080`
 - gRPC: `localhost:9090`
-- Metrics: `http://localhost:8080/metrics`
+- Metrics: `http://localhost:8080/metrics` (service key in `X-API-Key`)
 
 ### Run Tests
 

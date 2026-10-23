@@ -44,6 +44,9 @@ type AuthConfig struct {
 	// caller can read and write any tenant's memory. For local development only.
 	AllowUnauthenticated bool   `yaml:"allow_unauthenticated"`
 	ClientCACertFile     string `yaml:"client_ca_cert_file"`
+	// MetricsPublic serves /metrics without authentication. By default it needs a
+	// service key, since the metrics are aggregated across tenants.
+	MetricsPublic bool `yaml:"metrics_public"`
 }
 
 // placeholderJWTSecret was the default JWT secret of earlier releases. Tokens signed
@@ -150,6 +153,7 @@ func LoadConfig() (*Config, error) {
 			JWTSecret:            getEnv("MEMORY_OS_JWT_SECRET", ""),
 			AllowUnauthenticated: getEnvBool("MEMORY_OS_ALLOW_UNAUTHENTICATED", false),
 			ClientCACertFile:     getEnv("MEMORY_OS_CLIENT_CA_CERT_FILE", ""),
+			MetricsPublic:        getEnvBool("MEMORY_OS_METRICS_PUBLIC", false),
 		},
 		Memory: MemoryConfig{
 			STM: STMConfig{

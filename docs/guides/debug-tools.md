@@ -69,7 +69,7 @@ Chains are not appearing? Work down the pipeline:
 
 ```bash
 go run cmd/test-gemini/main.go                       # 1. provider works?
-curl -s localhost:8080/metrics | grep memos_          # 2. tasks flowing? fallbacks spiking?
+curl -s -H "X-API-Key: $ATHENA_SERVICE_KEY" localhost:8080/metrics | grep memos_          # 2. tasks flowing? fallbacks spiking?
 go run cmd/verifydb/main.go                           # 3. chains in MongoDB?
 go run cmd/verify_analytics/main.go                   # 4. knowledge reaching the graph?
 ```
