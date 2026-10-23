@@ -53,6 +53,8 @@ type MemoryServer struct {
 	llmStatus atomic.Value
 	// checkLLM runs the LLM check; nil means the STM store's.
 	checkLLM func(context.Context) error
+	// checkMilvus checks the vector store; nil means the STM store's.
+	checkMilvus func(context.Context) error
 	// ltmStatus holds "" when the LTM graph is available, else why it is not.
 	ltmStatus atomic.Value
 	// getIDsFromSessionFunc allows mocking the DB call in tests
@@ -104,6 +106,23 @@ func (s *MemoryServer) HealthCheck(ctx context.Context, req *gen.HealthCheckRequ
 		}
 	} else {
 		deps["mongodb"] = "not_configured"
+	}
+
+	// Without Milvus, chains are stored without vectors and semantic search returns
+	// nothing while every other dependency looks healthy, so it is checked here.
+	checkMilvus := s.checkMilvus
+	if checkMilvus == nil && s.stmStore != nil {
+		checkMilvus = s.stmStore.MilvusHealth
+	}
+	if checkMilvus != nil {
+		pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		if err := checkMilvus(pingCtx); err != nil {
+			deps["milvus"] = fmt.Sprintf("unhealthy: %v", err)
+			overallStatus = "degraded"
+		} else {
+			deps["milvus"] = "healthy"
+		}
 	}
 
 	switch st, _ := s.llmStatus.Load().(string); {

@@ -207,6 +207,7 @@ type STMStore struct {
 	db          *mongo.Database
 	redis       cache.Interface
 	milvus      *MilvusClient
+	milvusErr   error // why milvus is nil: not configured, or the connection failed
 	llmGuards   *LLMGuardrails
 	llmConfig   LLMConfig
 	HTTPClient  *http.Client
@@ -223,18 +224,24 @@ type STMStore struct {
 
 // NewSTMStore creates a new STM store instance
 func NewSTMStore(database *mongo.Database, redisClient cache.Interface, blobStore storage.BlobStore) *STMStore {
-	MilvusHost := os.Getenv("MILVUS_HOST")
-	MilvusPort := os.Getenv("MILVUS_PORT")
+	// Without Milvus, chains are stored without vectors and semantic search returns
+	// nothing, so a missing or failed connection is an error and HealthCheck reports it.
+	milvusHost, milvusPort := milvusAddress()
 
 	var milvusClient *MilvusClient
-	if MilvusHost != "" && MilvusPort != "" {
+	milvusErr := ErrMilvusNotConfigured
+	if milvusHost != "" {
 		var err error
-		milvusClient, err = NewMilvusClient(MilvusHost, MilvusPort)
+		milvusClient, err = NewMilvusClient(milvusHost, milvusPort)
 		if err != nil {
-			log.Printf("WARN: Failed to initialize Milvus client: %v", err)
+			milvusErr = fmt.Errorf("connection failed: %w", err)
+			log.Printf("ERROR: Failed to initialize Milvus client: %v — chains will be stored without vectors", err)
 		} else {
+			milvusErr = nil
 			log.Println("INFO: Milvus client initialized successfully")
 		}
+	} else {
+		log.Printf("ERROR: Milvus %v — chains will be stored without vectors and semantic search returns nothing", ErrMilvusNotConfigured)
 	}
 
 	// Load LLM configuration from environment variables
@@ -258,6 +265,7 @@ func NewSTMStore(database *mongo.Database, redisClient cache.Interface, blobStor
 		db:        database,
 		redis:     redisClient,
 		milvus:    milvusClient,
+		milvusErr: milvusErr,
 		llmConfig: llmConfig,
 		llmGuards: &LLMGuardrails{
 			redis: redisClient,

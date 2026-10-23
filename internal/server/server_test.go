@@ -217,3 +217,20 @@ func TestHealthCheckReportsLLMStatus(t *testing.T) {
 	resp, _ = s.HealthCheck(ctx, &gen.HealthCheckRequest{})
 	assert.Equal(t, "healthy", resp.Dependencies["llm"])
 }
+
+func TestHealthCheckReportsMilvus(t *testing.T) {
+	ctx := context.Background()
+	s := &MemoryServer{}
+	resp, _ := s.HealthCheck(ctx, &gen.HealthCheckRequest{})
+	_, reported := resp.Dependencies["milvus"]
+	assert.False(t, reported, "no memory store, nothing to report")
+
+	s.checkMilvus = func(context.Context) error { return memory.ErrMilvusNotConfigured }
+	resp, _ = s.HealthCheck(ctx, &gen.HealthCheckRequest{})
+	assert.Equal(t, "degraded", resp.Status)
+	assert.Contains(t, resp.Dependencies["milvus"], "not configured")
+
+	s.checkMilvus = func(context.Context) error { return nil }
+	resp, _ = s.HealthCheck(ctx, &gen.HealthCheckRequest{})
+	assert.Equal(t, "healthy", resp.Dependencies["milvus"])
+}
