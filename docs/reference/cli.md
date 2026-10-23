@@ -70,7 +70,7 @@ Generated files under `api/grpc/gen/` are git-ignored; always regenerate rather 
 | `test_e2e_pipeline.sh` | Scripted end-to-end pipeline exercise |
 | `scripts/generate.sh` | The protoc runner behind `make generate` |
 | `scripts/lint.sh` | The lint suite behind `make lint-*` |
-| `scripts/benchmark/` | Performance test harnesses |
+| `industry-benchmark/` | Research benchmarks: real datasets injected through the REST API, results scored per hypothesis |
 
 ## Releases
 
