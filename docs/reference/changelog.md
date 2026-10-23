@@ -4,6 +4,20 @@ Releases are cut automatically when the `VERSION` file changes on the default br
 
 <div class="changelog-release" markdown>
 
+## v0.3.2 <span class="changelog-date">October 2026</span>
+
+<div class="changelog-meta" markdown>
+<a class="changelog-release-link" href="https://github.com/Prescott-Data/athena/releases/tag/v0.3.2" target="_blank" rel="noopener">View release</a>
+</div>
+
+**Removed**
+
+- `scripts/benchmark`, a September 2025 harness from before the STM rewrite. It could not build (it imported `internal/` packages from a separate module, called APIs that no longer exist and declared `main` twice), its other half benchmarked mocks with random sleeps rather than Athena, and its only recorded run had zero operations. It still drew Dependabot alerts. `industry-benchmark/` is the benchmark: real datasets through the REST API.
+
+</div>
+
+<div class="changelog-release" markdown>
+
 ## v0.3.1 <span class="changelog-date">October 2026</span>
 
 <div class="changelog-meta" markdown>
