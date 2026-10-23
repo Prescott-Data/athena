@@ -314,7 +314,7 @@ Returns the MTM chains summarised from the session's events, newest first. `limi
 
 `GET /api/v1/health` <span class="nx-badge nx-badge-primary">Implemented</span>
 
-Dependency-aware health. Distinct from the auth-free Gin `/health` liveness route; this one runs through the normal API stack.
+Dependency-aware health. Needs credentials like every other call (any valid key or token), because a failing dependency's error can name internal hosts. Distinct from the auth-free Gin `/health` liveness route.
 
 **Response** (`HealthCheckResponse`)
 
@@ -342,5 +342,5 @@ Starts community detection + bridge scoring in the background; returns immediate
 
 | Route | Auth | Purpose |
 |---|---|---|
-| `GET /health` | never required | Liveness: `{"status", "service": "memory-os", "timestamp"}`; `degraded` if Redis/MongoDB checks fail |
+| `GET /health` | never required | Liveness: `{"status": "healthy", "service": "memory-os", "timestamp"}` whenever the server is serving; it checks no dependency (use `GET /api/v1/health`) |
 | `GET /metrics` | service key (tenant keys get `403`); none with `MEMORY_OS_METRICS_PUBLIC=true` or when authentication is off | Prometheus text format ([Metrics reference](metrics.md)) |

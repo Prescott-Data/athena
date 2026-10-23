@@ -19,7 +19,7 @@ resp, err := client.CreateSession(ctx, &gen.CreateSessionRequest{
 })
 ```
 
-Every call except `HealthCheck` must carry credentials, sent as metadata:
+Every call, `HealthCheck` included, must carry credentials, sent as metadata:
 
 ```go
 ctx = metadata.AppendToOutgoingContext(ctx,

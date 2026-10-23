@@ -32,7 +32,9 @@ type sessionBound interface {
 // it touches. It is the single place tenant isolation is enforced.
 func (s *MemoryServer) AuthUnaryInterceptor(am *middleware.AuthMiddleware) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		if info.FullMethod == healthCheckMethod || !am.Enabled() {
+		// HealthCheck is authenticated too: its dependency errors can name internal
+		// hosts. The open liveness probe is the HTTP /health route.
+		if !am.Enabled() {
 			return handler(ctx, req)
 		}
 
@@ -69,6 +71,9 @@ func (s *MemoryServer) authorize(ctx context.Context, caller *middleware.AuthCon
 	}
 	if caller.TenantID == "" {
 		return status.Error(codes.PermissionDenied, "credentials do not identify a tenant")
+	}
+	if method == healthCheckMethod {
+		return nil // any authenticated caller may read health
 	}
 
 	if r, ok := req.(sessionBound); ok {
