@@ -51,8 +51,11 @@ func TestInterceptorRequiresCredentials(t *testing.T) {
 	_, err := call(t, am, nil, "/memory.v1.MemoryService/GetContext", &gen.GetContextRequest{SessionId: "s-acme"})
 	assert.Equal(t, codes.Unauthenticated, code(err))
 
+	// Dependency errors can name internal hosts, so HealthCheck is not open.
 	_, err = call(t, am, nil, healthCheckMethod, &gen.HealthCheckRequest{})
-	assert.NoError(t, err, "health checks need no credentials")
+	assert.Equal(t, codes.Unauthenticated, code(err))
+	_, err = call(t, am, map[string]string{"x-api-key": "acme-key"}, healthCheckMethod, &gen.HealthCheckRequest{})
+	assert.NoError(t, err, "any valid key may read health")
 }
 
 func TestTenantKeyIsConfinedToItsTenant(t *testing.T) {

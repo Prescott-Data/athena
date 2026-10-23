@@ -49,7 +49,7 @@ curl http://localhost:8080/health    # {"status":"healthy","service":"memory-os"
 curl -H "X-API-Key: $ATHENA_SERVICE_KEY" http://localhost:8080/metrics   # Prometheus text format; needs a service key
 ```
 
-`/health` reports `degraded` when Redis or MongoDB checks fail; wire it to liveness probes. The richer dependency-by-dependency check is `GET /api/v1/health`.
+`/health` answers `healthy` whenever the server is serving and checks no dependency; wire it to liveness probes. The dependency-by-dependency check is `GET /api/v1/health`, which needs a key like any other call.
 
 ## OpenAPI spec
 

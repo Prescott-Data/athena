@@ -10,8 +10,8 @@ The four required secrets are validated at boot: `LLM_PROVIDER`/`LLM_API_KEY` (o
 **`connection refused` to ArangoDB during `init-ltm`.**
 ArangoDB boots slowly. Wait ten seconds, re-run; the command is idempotent.
 
-**Server starts but `/health` says `degraded`.**
-Redis or MongoDB is unreachable. The `/api/v1/health` endpoint reports per-dependency status with error strings.
+**Server starts but `/api/v1/health` says `degraded`.**
+A dependency is unreachable or misconfigured. The response reports each dependency (`redis`, `mongodb`, `milvus`, `llm`, `ltm`) with its error. `/health` cannot tell you this: it only shows that the server is serving.
 
 ## Nothing is being remembered
 

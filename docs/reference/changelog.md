@@ -4,6 +4,24 @@ Releases are cut automatically when the `VERSION` file changes on the default br
 
 <div class="changelog-release" markdown>
 
+## v0.3.1 <span class="changelog-date">October 2026</span>
+
+<div class="changelog-meta" markdown>
+<a class="changelog-release-link" href="https://github.com/Prescott-Data/athena/releases/tag/v0.3.1" target="_blank" rel="noopener">View release</a>
+</div>
+
+**Security**
+
+- `HealthCheck` needs credentials over gRPC, as it already did over REST. Its dependency errors can name internal hosts. Any valid key or token may read it; the open liveness probe is `GET /health`.
+
+**Fixed**
+
+- The documentation said `HealthCheck` needs no credentials and that `/health` reports `degraded` when Redis or MongoDB fail. `HealthCheck` needs a key, and `/health` answers `healthy` whenever the server is serving, without checking dependencies.
+
+</div>
+
+<div class="changelog-release" markdown>
+
 ## v0.3.0 <span class="changelog-date">October 2026</span>
 
 <div class="changelog-meta" markdown>
