@@ -4,6 +4,20 @@ Releases are cut automatically when the `VERSION` file changes on the default br
 
 <div class="changelog-release" markdown>
 
+## v0.2.1 <span class="changelog-date">October 2026</span>
+
+<div class="changelog-meta" markdown>
+<a class="changelog-release-link" href="https://github.com/Prescott-Data/athena/releases/tag/v0.2.1" target="_blank" rel="noopener">View release</a>
+</div>
+
+**Fixed**
+
+- Completions with Gemini on Vertex AI (`GEMINI_USE_ADC=true`) failed with `400 Please use a valid role: user, model.`, because the request carried no role. Every completion now sends the `user` role, so chain formation, topic analysis and the startup LLM check work on Vertex. The Generative Language API (API-key mode) is unaffected.
+
+</div>
+
+<div class="changelog-release" markdown>
+
 ## v0.2.0 <span class="changelog-date">October 2026</span>
 
 <div class="changelog-meta" markdown>

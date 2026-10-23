@@ -121,8 +121,11 @@ func (p *GeminiProvider) GenerateCompletion(ctx context.Context, req CompletionR
 	}
 
 	requestBody := map[string]interface{}{
+		// Vertex AI rejects contents without a role; the Generative Language API
+		// defaults it to "user".
 		"contents": []map[string]interface{}{
 			{
+				"role": "user",
 				"parts": []map[string]string{
 					{"text": req.Prompt},
 				},
