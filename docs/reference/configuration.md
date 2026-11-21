@@ -11,6 +11,7 @@ Every environment variable the code reads, by category. Defaults are the code's 
 |---|---|---|
 | `MEMORY_OS_PORT` | `8080` | REST (grpc-gateway) listen port |
 | `MEMORY_OS_GRPC_PORT` | `9090` | gRPC listen port |
+| `MEMORY_OS_GRPC_MAX_MESSAGE_BYTES` | `16777216` | Largest gRPC message accepted, on the gRPC port and between the REST gateway and the gRPC server; bounds a `StoreEvent` [payload](../guides/blob-storage.md#payload-size) |
 | `MEMORY_OS_READ_TIMEOUT` | | HTTP read timeout |
 | `MEMORY_OS_WRITE_TIMEOUT` | | HTTP write timeout |
 | `MEMORY_OS_ENABLE_TLS` | `false` | Serve TLS |

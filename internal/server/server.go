@@ -47,6 +47,8 @@ type MemoryServer struct {
 	promoter                             *memory.Promoter
 	ltmReader                            *memory.LTMReader
 	persistCognitiveEvent                func(context.Context, *models.CognitiveEvent) (primitive.ObjectID, error)
+	// loadCognitiveEvent loads a durable event by ID; nil means the STM store's.
+	loadCognitiveEvent func(context.Context, primitive.ObjectID) (*models.CognitiveEvent, error)
 	// sessions serves the session lifecycle endpoints; nil means the STM store.
 	sessions sessionStore
 	// llmStatus is the result of the latest LLM check ("healthy" or "unhealthy: ...").

@@ -477,6 +477,7 @@ All endpoints are available as both gRPC (port 9090) and REST HTTP (port 8080) v
 |---|---|---|---|
 | Store interaction | `StoreInteraction` | `POST /sessions/{session_id}/interactions` | Dual-writes a user↔agent message pair to Redis + MongoDB. Enqueues chain-check task on `role=user`. |
 | Store event | `StoreEvent` | `POST /sessions/{session_id}/events` | Stores any typed event (`message`, `thought`, `action`, `observation`). Binary blobs are offloaded to blob storage (Claim Check). |
+| Get event payload | `GetEventPayload` | `GET /sessions/{session_id}/events/{event_id}/payload` | Reads a byte range (`offset`, `length`; at most 1 MiB per call) of the payload stored with an event, so consumers never need bucket credentials. |
 | Get context | `GetContext` | `GET /sessions/{session_id}/context` | Returns STM events + MTM chains. Pass `query` param for vector-augmented recall. |
 | Search memory | `SearchMemory` | `POST /sessions/{session_id}/context/search` | Semantic vector search over MTM (Milvus) + LTM graph traversal (ArangoDB). |
 
@@ -538,6 +539,7 @@ Athena refuses to start unless API-key or JWT auth is enabled (or `MEMORY_OS_ALL
 |---|---|---|
 | `MEMORY_OS_PORT` | `8080` | HTTP / REST port |
 | `MEMORY_OS_GRPC_PORT` | `9090` | gRPC port |
+| `MEMORY_OS_GRPC_MAX_MESSAGE_BYTES` | `16777216` | Largest gRPC message accepted (bounds a `StoreEvent` payload) |
 | `MEMORY_OS_READ_TIMEOUT` | `30` | HTTP read timeout (seconds) |
 | `MEMORY_OS_WRITE_TIMEOUT` | `30` | HTTP write timeout (seconds) |
 | `MEMORY_OS_NUM_WORKERS` | `2` | Background worker goroutines |

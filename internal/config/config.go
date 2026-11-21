@@ -16,10 +16,18 @@ type Config struct {
 	Database DatabaseConfig `yaml:"database"`
 }
 
+// DefaultGRPCMaxMessageBytes is the default cap on one gRPC message: 16 MiB, which
+// leaves room for a StoreEvent whose REST body (payload in base64) is 8 MiB.
+// gRPC's own default of 4 MiB would refuse a payload above roughly 4 MiB.
+const DefaultGRPCMaxMessageBytes = 16 << 20
+
 // ServerConfig holds server-related configuration
 type ServerConfig struct {
 	Port         int           `yaml:"port"`
 	GRPCPort     int           `yaml:"grpc_port"`
+	// GRPCMaxMessageBytes caps one gRPC message, on the gRPC port and between the
+	// REST gateway and the gRPC server.
+	GRPCMaxMessageBytes int `yaml:"grpc_max_message_bytes"`
 	ReadTimeout  time.Duration `yaml:"read_timeout"`
 	WriteTimeout time.Duration `yaml:"write_timeout"`
 	TLSCertFile  string        `yaml:"tls_cert_file"`
@@ -140,6 +148,7 @@ func LoadConfig() (*Config, error) {
 		Server: ServerConfig{
 			Port:         getEnvInt("MEMORY_OS_PORT", 8080),
 			GRPCPort:     getEnvInt("MEMORY_OS_GRPC_PORT", 9090),
+			GRPCMaxMessageBytes: getEnvInt("MEMORY_OS_GRPC_MAX_MESSAGE_BYTES", DefaultGRPCMaxMessageBytes),
 			ReadTimeout:  time.Duration(getEnvInt("MEMORY_OS_READ_TIMEOUT", 30)) * time.Second,
 			WriteTimeout: time.Duration(getEnvInt("MEMORY_OS_WRITE_TIMEOUT", 30)) * time.Second,
 			TLSCertFile:  getEnv("MEMORY_OS_TLS_CERT_FILE", ""),

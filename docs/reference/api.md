@@ -12,6 +12,7 @@ The complete `MemoryService` surface. Every operation is defined once in `api/gr
 | [EraseMemory](#erasememory) | `POST /api/v1/memory/erase` | <span class="nx-badge nx-badge-primary">Implemented</span> |
 | [StoreInteraction](#storeinteraction) | `POST /api/v1/sessions/{session_id}/interactions` | <span class="nx-badge nx-badge-primary">Implemented</span> |
 | [StoreEvent](#storeevent) | `POST /api/v1/sessions/{session_id}/events` | <span class="nx-badge nx-badge-primary">Implemented</span> |
+| [GetEventPayload](#geteventpayload) | `GET /api/v1/sessions/{session_id}/events/{event_id}/payload` | <span class="nx-badge nx-badge-primary">Implemented</span> |
 | [GetContext](#getcontext) | `GET /api/v1/sessions/{session_id}/context` | <span class="nx-badge nx-badge-primary">Implemented</span> |
 | [SearchMemory](#searchmemory) | `POST /api/v1/sessions/{session_id}/context/search` | <span class="nx-badge nx-badge-primary">Implemented</span> |
 | [AnalyzeTopics](#analyzetopics) | `GET /api/v1/sessions/{session_id}/analysis/topics` | <span class="nx-badge nx-badge-primary">Implemented</span> |
@@ -178,7 +179,37 @@ Records a single event of any role/type, with optional binary payload.
 **Response** (`StoreEventResponse`): `success` (bool), `event_id` (string MongoDB
 ObjectID identifying the durable `cognitive_events` record).
 
-**Errors:** `NotFound` (session), `InvalidArgument` (bad `type`), `FailedPrecondition` (payload without blob store → HTTP 412), `Internal` (cache, blob, or durable event persistence failure).
+**Errors:** `NotFound` (session), `InvalidArgument` (bad `type`), `FailedPrecondition` (payload without blob store → HTTP 412), `ResourceExhausted` (request larger than `MEMORY_OS_GRPC_MAX_MESSAGE_BYTES` → HTTP 429), `Internal` (cache, blob, or durable event persistence failure).
+
+---
+
+## GetEventPayload
+
+`GET /api/v1/sessions/{session_id}/events/{event_id}/payload` <span class="nx-badge nx-badge-primary">Implemented</span>
+
+Returns a byte range of the payload stored with an event. Usage: [Blob Storage](../guides/blob-storage.md#reading-a-payload-back).
+
+**Parameters** (`GetEventPayloadRequest`)
+
+| Parameter | Type | Default | Notes |
+|---|---|---|---|
+| `session_id` | string | path | |
+| `event_id` | string | path | The `event_id` `StoreEvent` returned |
+| `offset` | int64 | 0 | Byte offset to start at |
+| `length` | int64 | 1048576 | Bytes to return; values above 1048576 (1 MiB) are capped to it |
+
+**Response** (`GetEventPayloadResponse`)
+
+| Field | Type | Notes |
+|---|---|---|
+| `data` | bytes | Base64 in JSON; empty when `offset` is at or past `total_bytes` |
+| `total_bytes` | int64 | Size of the whole payload |
+| `offset` | int64 | Offset the data starts at |
+| `mime_type` | string | The `mime_type` the payload was stored with |
+
+In JSON the fields are `data`, `totalBytes`, `offset` and `mimeType`, and the int64 values arrive as strings.
+
+**Errors:** `NotFound` (session; event that does not exist, belongs to another tenant, user or agent than the session, or has no payload), `InvalidArgument` (negative `offset` or `length`), `FailedPrecondition` (no blob store → HTTP 412), `Internal` (datastore or blob store failure).
 
 ---
 

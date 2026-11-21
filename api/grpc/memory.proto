@@ -51,6 +51,13 @@ service MemoryService {
       body: "*"
     };
   }
+
+  // Reads a byte range of the payload stored with an event.
+  rpc GetEventPayload(GetEventPayloadRequest) returns (GetEventPayloadResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/sessions/{session_id}/events/{event_id}/payload"
+    };
+  }
   
   rpc GetContext(GetContextRequest) returns (GetContextResponse) {
     option (google.api.http) = {
@@ -184,6 +191,20 @@ message StoreEventRequest {
 message StoreEventResponse {
   bool success = 1;
   string event_id = 2;
+}
+
+message GetEventPayloadRequest {
+  string session_id = 1;
+  string event_id = 2;   // StoreEventResponse.event_id
+  int64 offset = 3;      // Byte offset to start at; default 0
+  int64 length = 4;      // Bytes to return; default and maximum 1048576 (1 MiB)
+}
+
+message GetEventPayloadResponse {
+  bytes data = 1;        // Empty when offset is at or past total_bytes
+  int64 total_bytes = 2; // Size of the whole payload
+  int64 offset = 3;      // Offset the data starts at
+  string mime_type = 4;
 }
 
 message GetContextRequest {

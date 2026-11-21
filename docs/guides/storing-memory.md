@@ -83,6 +83,15 @@ curl -X POST http://localhost:8080/api/v1/sessions/$SESSION/events \
   }'
 ```
 
+Read it back with `GetEventPayload`, using the `event_id` the write returned. It returns a byte range (`offset`, `length`; at most 1 MiB per call) along with the payload's total size and MIME type, so a large artifact is read a page at a time:
+
+```bash
+curl -H "X-API-Key: $ATHENA_KEY" \
+  "http://localhost:8080/api/v1/sessions/$SESSION/events/$EVENT_ID/payload?offset=0&length=65536"
+```
+
+Details and limits are in [Blob Storage](blob-storage.md#reading-a-payload-back).
+
 !!! warning
     If a payload is sent and no blob store is configured, the request fails with `FailedPrecondition` (HTTP 412). Configure `BLOB_*` variables first; see [Blob Storage](blob-storage.md).
 

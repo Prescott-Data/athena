@@ -31,6 +31,8 @@ type MemoryServiceClient interface {
 	EraseMemory(ctx context.Context, in *EraseMemoryRequest, opts ...grpc.CallOption) (*EraseMemoryResponse, error)
 	StoreInteraction(ctx context.Context, in *StoreInteractionRequest, opts ...grpc.CallOption) (*StoreInteractionResponse, error)
 	StoreEvent(ctx context.Context, in *StoreEventRequest, opts ...grpc.CallOption) (*StoreEventResponse, error)
+	// Reads a byte range of the payload stored with an event.
+	GetEventPayload(ctx context.Context, in *GetEventPayloadRequest, opts ...grpc.CallOption) (*GetEventPayloadResponse, error)
 	GetContext(ctx context.Context, in *GetContextRequest, opts ...grpc.CallOption) (*GetContextResponse, error)
 	SearchMemory(ctx context.Context, in *SearchMemoryRequest, opts ...grpc.CallOption) (*SearchMemoryResponse, error)
 	// Analysis & Intelligence
@@ -99,6 +101,15 @@ func (c *memoryServiceClient) StoreInteraction(ctx context.Context, in *StoreInt
 func (c *memoryServiceClient) StoreEvent(ctx context.Context, in *StoreEventRequest, opts ...grpc.CallOption) (*StoreEventResponse, error) {
 	out := new(StoreEventResponse)
 	err := c.cc.Invoke(ctx, "/memory.v1.MemoryService/StoreEvent", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *memoryServiceClient) GetEventPayload(ctx context.Context, in *GetEventPayloadRequest, opts ...grpc.CallOption) (*GetEventPayloadResponse, error) {
+	out := new(GetEventPayloadResponse)
+	err := c.cc.Invoke(ctx, "/memory.v1.MemoryService/GetEventPayload", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -181,6 +192,8 @@ type MemoryServiceServer interface {
 	EraseMemory(context.Context, *EraseMemoryRequest) (*EraseMemoryResponse, error)
 	StoreInteraction(context.Context, *StoreInteractionRequest) (*StoreInteractionResponse, error)
 	StoreEvent(context.Context, *StoreEventRequest) (*StoreEventResponse, error)
+	// Reads a byte range of the payload stored with an event.
+	GetEventPayload(context.Context, *GetEventPayloadRequest) (*GetEventPayloadResponse, error)
 	GetContext(context.Context, *GetContextRequest) (*GetContextResponse, error)
 	SearchMemory(context.Context, *SearchMemoryRequest) (*SearchMemoryResponse, error)
 	// Analysis & Intelligence
@@ -215,6 +228,9 @@ func (UnimplementedMemoryServiceServer) StoreInteraction(context.Context, *Store
 }
 func (UnimplementedMemoryServiceServer) StoreEvent(context.Context, *StoreEventRequest) (*StoreEventResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method StoreEvent not implemented")
+}
+func (UnimplementedMemoryServiceServer) GetEventPayload(context.Context, *GetEventPayloadRequest) (*GetEventPayloadResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetEventPayload not implemented")
 }
 func (UnimplementedMemoryServiceServer) GetContext(context.Context, *GetContextRequest) (*GetContextResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetContext not implemented")
@@ -354,6 +370,24 @@ func _MemoryService_StoreEvent_Handler(srv interface{}, ctx context.Context, dec
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(MemoryServiceServer).StoreEvent(ctx, req.(*StoreEventRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MemoryService_GetEventPayload_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetEventPayloadRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MemoryServiceServer).GetEventPayload(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/memory.v1.MemoryService/GetEventPayload",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MemoryServiceServer).GetEventPayload(ctx, req.(*GetEventPayloadRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -514,6 +548,10 @@ var MemoryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "StoreEvent",
 			Handler:    _MemoryService_StoreEvent_Handler,
+		},
+		{
+			MethodName: "GetEventPayload",
+			Handler:    _MemoryService_GetEventPayload_Handler,
 		},
 		{
 			MethodName: "GetContext",

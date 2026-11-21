@@ -35,7 +35,8 @@ gRPC status codes translate to HTTP deterministically. The body carries a JSON e
 | `InvalidArgument` | 400 | Missing `user_id`, empty search query, bad event type |
 | `Unauthenticated` | 401 | Missing/invalid credentials with auth enabled |
 | `NotFound` | 404 | Unknown `session_id` |
-| `FailedPrecondition` | 412 | Blob payload sent with no blob store configured |
+| `FailedPrecondition` | 412 | Blob payload sent or read with no blob store configured |
+| `ResourceExhausted` | 429 | Request larger than `MEMORY_OS_GRPC_MAX_MESSAGE_BYTES` (16 MiB by default) |
 | `Internal` | 500 | Datastore failure; check server logs |
 
 Treat 5xx as retryable with backoff; treat 4xx as bugs in the calling code (except 401, which is configuration).
