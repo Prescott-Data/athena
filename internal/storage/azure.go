@@ -85,6 +85,46 @@ func (s *AzureBlobStore) Download(ctx context.Context, uri string) (io.ReadClose
 	return resp.Body, nil
 }
 
+// Size returns the size in bytes of the blob at the given Azure HTTPS URI.
+func (s *AzureBlobStore) Size(ctx context.Context, uri string) (int64, error) {
+	container, blobName, err := parseAzureURI(uri)
+	if err != nil {
+		return 0, err
+	}
+
+	props, err := s.client.ServiceClient().NewContainerClient(container).NewBlobClient(blobName).GetProperties(ctx, nil)
+	if err != nil {
+		if bloberror.HasCode(err, bloberror.BlobNotFound) {
+			return 0, ErrBlobNotFound
+		}
+		return 0, fmt.Errorf("azure stat failed for %s: %w", uri, err)
+	}
+	if props.ContentLength == nil {
+		return 0, fmt.Errorf("azure stat for %s returned no content length", uri)
+	}
+
+	return *props.ContentLength, nil
+}
+
+// DownloadRange returns a ReadCloser for a byte range of the blob at the given Azure HTTPS URI.
+func (s *AzureBlobStore) DownloadRange(ctx context.Context, uri string, offset, length int64) (io.ReadCloser, error) {
+	container, blobName, err := parseAzureURI(uri)
+	if err != nil {
+		return nil, err
+	}
+
+	opts := &azblob.DownloadStreamOptions{Range: azblob.HTTPRange{Offset: offset, Count: length}}
+	resp, err := s.client.DownloadStream(ctx, container, blobName, opts)
+	if err != nil {
+		if bloberror.HasCode(err, bloberror.BlobNotFound) {
+			return nil, ErrBlobNotFound
+		}
+		return nil, fmt.Errorf("azure range download failed for %s: %w", uri, err)
+	}
+
+	return resp.Body, nil
+}
+
 // Delete removes a blob at the given Azure HTTPS URI.
 func (s *AzureBlobStore) Delete(ctx context.Context, uri string) error {
 	container, blobName, err := parseAzureURI(uri)

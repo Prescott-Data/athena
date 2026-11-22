@@ -54,9 +54,10 @@ func main() {
 	// Start gRPC server
 	// Every gRPC call, direct or through the REST gateway, is authenticated and
 	// authorised against the session's tenant here.
-	grpcServer := grpc.NewServer(
+	grpcServer := grpc.NewServer(append(
+		server.MessageSizeServerOptions(cfg.Server.GRPCMaxMessageBytes),
 		grpc.UnaryInterceptor(memoryServer.AuthUnaryInterceptor(authMiddleware)),
-	)
+	)...)
 	if !authMiddleware.Enabled() {
 		log.Printf("WARNING: authentication is disabled (MEMORY_OS_ALLOW_UNAUTHENTICATED=true): any caller can read and write every tenant's memory")
 	}
@@ -117,6 +118,7 @@ func main() {
 
 	// Register gRPC gateway endpoints
 	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+	opts = append(opts, server.MessageSizeDialOptions(cfg.Server.GRPCMaxMessageBytes)...)
 	err = registerGatewayEndpoints(ctx, mux, fmt.Sprintf("localhost:%d", cfg.Server.GRPCPort), opts)
 	if err != nil {
 		log.Fatalf("Failed to register gateway endpoints: %v", err)

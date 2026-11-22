@@ -67,6 +67,40 @@ func (s *GCSBlobStore) Download(ctx context.Context, uri string) (io.ReadCloser,
 	return r, nil
 }
 
+func (s *GCSBlobStore) Size(ctx context.Context, uri string) (int64, error) {
+	bucket, key, err := ParseGCSURI(uri)
+	if err != nil {
+		return 0, err
+	}
+
+	attrs, err := s.client.Bucket(bucket).Object(key).Attrs(ctx)
+	if err != nil {
+		if errors.Is(err, gcstorage.ErrObjectNotExist) {
+			return 0, ErrBlobNotFound
+		}
+		return 0, fmt.Errorf("failed to stat object %s in bucket %s: %w", key, bucket, err)
+	}
+
+	return attrs.Size, nil
+}
+
+func (s *GCSBlobStore) DownloadRange(ctx context.Context, uri string, offset, length int64) (io.ReadCloser, error) {
+	bucket, key, err := ParseGCSURI(uri)
+	if err != nil {
+		return nil, err
+	}
+
+	r, err := s.client.Bucket(bucket).Object(key).NewRangeReader(ctx, offset, length)
+	if err != nil {
+		if errors.Is(err, gcstorage.ErrObjectNotExist) {
+			return nil, ErrBlobNotFound
+		}
+		return nil, fmt.Errorf("failed to download range of object %s from bucket %s: %w", key, bucket, err)
+	}
+
+	return r, nil
+}
+
 func (s *GCSBlobStore) Delete(ctx context.Context, uri string) error {
 	bucket, key, err := ParseGCSURI(uri)
 	if err != nil {

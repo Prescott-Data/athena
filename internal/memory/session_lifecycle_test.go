@@ -28,6 +28,10 @@ func (b *recordingBlobStore) Upload(context.Context, string, io.Reader, string) 
 func (b *recordingBlobStore) Download(context.Context, string) (io.ReadCloser, error) {
 	return nil, nil
 }
+func (b *recordingBlobStore) Size(context.Context, string) (int64, error) { return 0, nil }
+func (b *recordingBlobStore) DownloadRange(context.Context, string, int64, int64) (io.ReadCloser, error) {
+	return nil, nil
+}
 func (b *recordingBlobStore) Delete(_ context.Context, uri string) error {
 	b.deleted = append(b.deleted, uri)
 	return nil

@@ -421,6 +421,57 @@
         ]
       }
     },
+    "/api/v1/sessions/{sessionId}/events/{eventId}/payload": {
+      "get": {
+        "summary": "Reads a byte range of the payload stored with an event.",
+        "operationId": "MemoryService_GetEventPayload",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetEventPayloadResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "eventId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "int64"
+          },
+          {
+            "name": "length",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "int64"
+          }
+        ],
+        "tags": [
+          "MemoryService"
+        ]
+      }
+    },
     "/api/v1/sessions/{sessionId}/interactions": {
       "post": {
         "operationId": "MemoryService_StoreInteraction",
@@ -735,6 +786,26 @@
         "ltpm": {
           "$ref": "#/definitions/v1LTPMContext",
           "description": "LTPM context — Long-Term Persistent Memory retrieved from ArangoDB knowledge graph."
+        }
+      }
+    },
+    "v1GetEventPayloadResponse": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "string",
+          "format": "byte"
+        },
+        "totalBytes": {
+          "type": "string",
+          "format": "int64"
+        },
+        "offset": {
+          "type": "string",
+          "format": "int64"
+        },
+        "mimeType": {
+          "type": "string"
         }
       }
     },

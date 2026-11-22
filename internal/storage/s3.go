@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"strings"
 
@@ -59,6 +60,52 @@ func (s *S3BlobStore) Download(ctx context.Context, uri string) (io.ReadCloser, 
 	}
 
 	return object, nil
+}
+
+func (s *S3BlobStore) Size(ctx context.Context, uri string) (int64, error) {
+	bucket, key, err := ParseS3URI(uri)
+	if err != nil {
+		return 0, err
+	}
+
+	info, err := s.client.StatObject(ctx, bucket, key, minio.StatObjectOptions{})
+	if err != nil {
+		if isS3NotFound(err) {
+			return 0, ErrBlobNotFound
+		}
+		return 0, fmt.Errorf("failed to stat object %s in bucket %s: %w", key, bucket, err)
+	}
+
+	return info.Size, nil
+}
+
+func (s *S3BlobStore) DownloadRange(ctx context.Context, uri string, offset, length int64) (io.ReadCloser, error) {
+	bucket, key, err := ParseS3URI(uri)
+	if err != nil {
+		return nil, err
+	}
+
+	opts := minio.GetObjectOptions{}
+	if err := opts.SetRange(offset, offset+length-1); err != nil {
+		return nil, fmt.Errorf("invalid range for object %s: %w", key, err)
+	}
+	// Core.GetObject issues the one ranged GET and reports its error here; the
+	// high-level GetObject defers the request to the first Read.
+	body, _, _, err := minio.Core{Client: s.client}.GetObject(ctx, bucket, key, opts)
+	if err != nil {
+		if isS3NotFound(err) {
+			return nil, ErrBlobNotFound
+		}
+		return nil, fmt.Errorf("failed to download range of object %s from bucket %s: %w", key, bucket, err)
+	}
+
+	return body, nil
+}
+
+// isS3NotFound reports whether an S3 error means the object does not exist.
+func isS3NotFound(err error) bool {
+	resp := minio.ToErrorResponse(err)
+	return resp.Code == "NoSuchKey" || resp.StatusCode == http.StatusNotFound
 }
 
 func (s *S3BlobStore) Delete(ctx context.Context, uri string) error {

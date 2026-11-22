@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -465,6 +466,22 @@ func (s *STMStore) StoreCognitiveEvent(ctx context.Context, event *models.Cognit
 		return primitive.NilObjectID, fmt.Errorf("failed to insert cognitive event: %w", err)
 	}
 	return event.ID, nil
+}
+
+// ErrEventNotFound is returned when no cognitive event exists for an ID.
+var ErrEventNotFound = errors.New("event not found")
+
+// CognitiveEvent loads one durable event by the ID StoreCognitiveEvent returned.
+func (s *STMStore) CognitiveEvent(ctx context.Context, id primitive.ObjectID) (*models.CognitiveEvent, error) {
+	var event models.CognitiveEvent
+	err := s.db.Collection(CognitiveEventsCollection).FindOne(ctx, bson.M{"_id": id}).Decode(&event)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, ErrEventNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to load cognitive event %s: %w", id.Hex(), err)
+	}
+	return &event, nil
 }
 
 // analyzeTopicContinuity uses the configured LLM provider to analyze topic continuity

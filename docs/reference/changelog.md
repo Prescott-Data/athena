@@ -4,6 +4,25 @@ Releases are cut automatically when the `VERSION` file changes on the default br
 
 <div class="changelog-release" markdown>
 
+## v0.3.3 <span class="changelog-date">November 2026</span>
+
+<div class="changelog-meta" markdown>
+<a class="changelog-release-link" href="https://github.com/Prescott-Data/athena/releases/tag/v0.3.3" target="_blank" rel="noopener">View release</a>
+</div>
+
+**Added**
+
+- `GetEventPayload` (`GET /api/v1/sessions/{session_id}/events/{event_id}/payload`): reads a stored event payload back through Athena, a byte range at a time (at most 1 MiB per call), so a caller never needs bucket credentials. An event from another tenant, user or agent than the session, or without a payload, is not found. Blob stores gain `Size` and `DownloadRange`, each using the provider's own range read.
+- `MEMORY_OS_GRPC_MAX_MESSAGE_BYTES` (default 16 MiB), applied to the gRPC server and to the REST gateway's connection to it.
+
+**Fixed**
+
+- An event whose request was over 4 MiB was refused: the gRPC default applied to REST as well, since the gateway reaches the service over gRPC. A payload of several MiB can now be stored.
+
+</div>
+
+<div class="changelog-release" markdown>
+
 ## v0.3.2 <span class="changelog-date">October 2026</span>
 
 <div class="changelog-meta" markdown>
